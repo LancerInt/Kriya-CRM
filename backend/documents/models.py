@@ -1,0 +1,28 @@
+from django.db import models
+from common.models import TimeStampedModel
+
+
+class Document(TimeStampedModel):
+    class Category(models.TextChoices):
+        COMMERCIAL = 'commercial', 'Commercial'
+        QUALITY = 'quality', 'Quality'
+        REGULATORY = 'regulatory', 'Regulatory'
+        FINANCIAL = 'financial', 'Financial'
+        SAMPLE = 'sample', 'Sample'
+        OTHER = 'other', 'Other'
+
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, null=True, blank=True, related_name='documents')
+    order = models.ForeignKey('orders.Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    shipment = models.ForeignKey('shipments.Shipment', on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    name = models.CharField(max_length=255)
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    file = models.FileField(upload_to='documents/%Y/%m/')
+    filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=100, blank=True)
+    file_size = models.IntegerField(default=0)
+    version = models.IntegerField(default=1)
+    uploaded_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        db_table = 'documents'
+        ordering = ['-created_at']
