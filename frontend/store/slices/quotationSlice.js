@@ -37,6 +37,15 @@ export const approveQuotation = createAsyncThunk("quotations/approve", async (id
   }
 });
 
+export const generatePI = createAsyncThunk("quotations/generatePI", async (id, { rejectWithValue }) => {
+  try {
+    const res = await api.post(`/quotations/quotations/${id}/generate_pi/`);
+    return { quotationId: id, invoice: res.data };
+  } catch (err) {
+    return rejectWithValue(err.response?.data);
+  }
+});
+
 export const convertToOrder = createAsyncThunk("quotations/convert", async (id, { rejectWithValue }) => {
   try {
     const res = await api.post(`/quotations/quotations/${id}/convert_to_order/`);

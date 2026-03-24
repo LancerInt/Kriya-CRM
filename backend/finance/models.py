@@ -17,14 +17,19 @@ class Invoice(TimeStampedModel):
 
     invoice_number = models.CharField(max_length=50, unique=True, db_index=True)
     order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='invoices')
+    quotation = models.ForeignKey('quotations.Quotation', on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices')
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='invoices')
     invoice_type = models.CharField(max_length=20, choices=Type.choices, default=Type.COMMERCIAL)
     currency = models.CharField(max_length=3, default='USD')
+    delivery_terms = models.CharField(max_length=20, blank=True, default='')
+    payment_terms = models.CharField(max_length=255, blank=True, default='')
+    validity = models.CharField(max_length=100, blank=True, default='')
     subtotal = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     tax = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     due_date = models.DateField(null=True, blank=True)
+    bank_details = models.TextField(blank=True, default='')
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
 
@@ -36,8 +41,10 @@ class Invoice(TimeStampedModel):
 class InvoiceItem(models.Model):
     id = models.AutoField(primary_key=True)
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='items')
-    description = models.CharField(max_length=500)
+    product_name = models.CharField(max_length=255, blank=True, default='')
+    description = models.CharField(max_length=500, blank=True, default='')
     quantity = models.DecimalField(max_digits=12, decimal_places=2, default=1)
+    unit = models.CharField(max_length=20, default='KG')
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_price = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 

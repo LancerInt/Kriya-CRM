@@ -10,7 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'full_name',
-                  'role', 'phone', 'whatsapp', 'department', 'is_active', 'created_at']
+                  'role', 'phone', 'whatsapp', 'department', 'region', 'is_active', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 
@@ -20,7 +20,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'password', 'first_name', 'last_name',
-                  'role', 'phone', 'whatsapp', 'department']
+                  'role', 'phone', 'whatsapp', 'department', 'region']
 
     def create(self, validated_data):
         password = validated_data.pop('password')

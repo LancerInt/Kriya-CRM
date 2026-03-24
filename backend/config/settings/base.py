@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     'meetings',
     'workflows',
     'notifications',
+    'agents',
+    'teamchat',
 ]
 
 MIDDLEWARE = [

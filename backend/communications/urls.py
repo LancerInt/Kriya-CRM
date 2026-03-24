@@ -3,8 +3,13 @@ from rest_framework.routers import DefaultRouter
 from . import views
 
 router = DefaultRouter()
+router.register('email-accounts', views.EmailAccountViewSet, basename='email-account')
+router.register('whatsapp-configs', views.WhatsAppConfigViewSet, basename='whatsapp-config')
 router.register('', views.CommunicationViewSet, basename='communication')
 
 urlpatterns = [
+    path('send-email/', views.send_email_view, name='send-email'),
+    path('send-whatsapp/', views.send_whatsapp_view, name='send-whatsapp'),
+    path('whatsapp-webhook/', views.whatsapp_webhook_view, name='whatsapp-webhook'),
     path('', include(router.urls)),
 ]

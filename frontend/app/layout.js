@@ -3,8 +3,8 @@ import { Toaster } from "react-hot-toast";
 import ReduxProvider from "@/lib/ReduxProvider";
 
 export const metadata = {
-  title: "GTIP - Global Trade Intelligence Platform",
-  description: "Kriya Global Trade Intelligence Platform",
+  title: "Kriya CRM",
+  description: "Kriya CRM - Management Platform",
 };
 
 export default function RootLayout({ children }) {

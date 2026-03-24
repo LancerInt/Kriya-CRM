@@ -16,7 +16,7 @@ class ClientPortSerializer(serializers.ModelSerializer):
 
 
 class ClientListSerializer(serializers.ModelSerializer):
-    executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
+    primary_executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
     contact_count = serializers.IntegerField(read_only=True, default=0)
     order_count = serializers.IntegerField(read_only=True, default=0)
 
@@ -24,13 +24,14 @@ class ClientListSerializer(serializers.ModelSerializer):
         model = Client
         fields = ['id', 'company_name', 'country', 'city', 'business_type',
                   'preferred_currency', 'delivery_terms', 'status', 'primary_executive',
-                  'executive_name', 'contact_count', 'order_count', 'created_at', 'updated_at']
+                  'primary_executive_name', 'contact_count', 'order_count', 'created_at', 'updated_at']
 
 
 class ClientDetailSerializer(serializers.ModelSerializer):
     contacts = ContactSerializer(many=True, read_only=True)
     ports = ClientPortSerializer(many=True, read_only=True)
     executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
+    shadow_executive_name = serializers.CharField(source='shadow_executive.full_name', read_only=True, default='')
 
     class Meta:
         model = Client
@@ -38,19 +39,22 @@ class ClientDetailSerializer(serializers.ModelSerializer):
 
 
 class ClientCreateSerializer(serializers.ModelSerializer):
-    contacts = ContactSerializer(many=True, required=False)
-    ports = serializers.ListField(child=serializers.CharField(), required=False)
+    contacts = ContactSerializer(many=True, required=False, write_only=True)
+    ports = serializers.ListField(child=serializers.CharField(), required=False, write_only=True)
 
     class Meta:
         model = Client
-        fields = ['company_name', 'country', 'address', 'city', 'state', 'postal_code',
+        fields = ['id', 'company_name', 'country', 'address', 'city', 'state', 'postal_code',
                   'business_type', 'website', 'delivery_terms', 'preferred_currency',
                   'credit_days', 'credit_limit', 'payment_mode', 'status',
-                  'primary_executive', 'notes', 'contacts', 'ports']
+                  'primary_executive', 'shadow_executive', 'notes', 'contacts', 'ports',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         contacts_data = validated_data.pop('contacts', [])
         ports_data = validated_data.pop('ports', [])
+
         client = Client.objects.create(**validated_data)
 
         for contact_data in contacts_data:

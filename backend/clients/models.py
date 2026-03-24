@@ -26,6 +26,10 @@ class Client(SoftDeleteModel):
         'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='primary_clients'
     )
+    shadow_executive = models.ForeignKey(
+        'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='shadow_clients'
+    )
     notes = models.TextField(blank=True)
 
     class Meta:

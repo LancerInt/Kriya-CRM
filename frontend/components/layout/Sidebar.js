@@ -20,6 +20,9 @@ import {
   HiOutlineBell,
   HiOutlineCube,
   HiOutlineXMark,
+  HiOutlineCog6Tooth,
+  HiOutlineSparkles,
+  HiOutlineUserGroup,
 } from "react-icons/hi2";
 
 const navItems = [
@@ -38,7 +41,10 @@ const navItems = [
   { name: "Documents", href: "/documents", icon: HiOutlineFolder },
   { name: "Meetings", href: "/meetings", icon: HiOutlinePhone },
   { name: "Analytics", href: "/analytics", icon: HiOutlineChartBar },
+  { name: "Team Chat", href: "/team-chat", icon: HiOutlineUserGroup },
+  { name: "Kriya AI", href: "/ai", icon: HiOutlineSparkles },
   { name: "Notifications", href: "/notifications", icon: HiOutlineBell },
+  { name: "Settings", href: "/settings", icon: HiOutlineCog6Tooth },
 ];
 
 export default function Sidebar({ open, onClose }) {
@@ -58,7 +64,7 @@ export default function Sidebar({ open, onClose }) {
       >
         <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
           <Link href="/dashboard" className="text-xl font-bold text-indigo-600">
-            GTIP
+            Kriya CRM
           </Link>
           <button onClick={onClose} className="lg:hidden p-1 rounded hover:bg-gray-100">
             <HiOutlineXMark className="w-6 h-6" />

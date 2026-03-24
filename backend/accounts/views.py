@@ -8,9 +8,9 @@ from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer, 
 User = get_user_model()
 
 
-class IsAdminUser(permissions.BasePermission):
+class IsAdminOrManager(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user and request.user.role == 'admin'
+        return request.user and request.user.role in ('admin', 'manager')
 
 
 @api_view(['POST'])
@@ -45,10 +45,22 @@ def change_password_view(request):
     serializer = ChangePasswordSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     if not request.user.check_password(serializer.validated_data['old_password']):
-        return Response({'error': 'Wrong password'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Current password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
     request.user.set_password(serializer.validated_data['new_password'])
     request.user.save()
     return Response({'message': 'Password updated'})
+
+
+@api_view(['PATCH'])
+def update_profile_view(request):
+    """Let logged-in user update their own profile (name, email, phone)."""
+    user = request.user
+    allowed = ['first_name', 'last_name', 'email', 'phone', 'whatsapp']
+    for field in allowed:
+        if field in request.data:
+            setattr(user, field, request.data[field])
+    user.save()
+    return Response(UserSerializer(user).data)
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -63,5 +75,5 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['create', 'destroy']:
-            return [IsAdminUser()]
+            return [IsAdminOrManager()]
         return [permissions.IsAuthenticated()]

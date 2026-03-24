@@ -1,14 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDispatch } from "react-redux";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/store/slices/clientSlice";
+import { createClient, fetchClients } from "@/store/slices/clientSlice";
+import api from "@/lib/axios";
+import { ALL_COUNTRIES } from "@/lib/countries";
 import PageHeader from "@/components/ui/PageHeader";
 import toast from "react-hot-toast";
 
 export default function NewClientPage() {
   const dispatch = useDispatch();
   const router = useRouter();
+  const [executives, setExecutives] = useState([]);
   const [form, setForm] = useState({
     company_name: "",
     country: "",
@@ -24,10 +27,19 @@ export default function NewClientPage() {
     credit_limit: 0,
     payment_mode: "",
     status: "prospect",
+    primary_executive: "",
+    shadow_executive: "",
     notes: "",
     contacts: [{ name: "", email: "", phone: "", designation: "", is_primary: true }],
   });
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.get("/auth/users/").then((r) => {
+      const users = r.data.results || r.data;
+      setExecutives(users);
+    }).catch(() => {});
+  }, []);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -47,8 +59,12 @@ export default function NewClientPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await dispatch(createClient(form)).unwrap();
+      const submitData = { ...form };
+      if (!submitData.primary_executive) delete submitData.primary_executive;
+      if (!submitData.shadow_executive) delete submitData.shadow_executive;
+      await dispatch(createClient(submitData)).unwrap();
       toast.success("Client created successfully");
+      dispatch(fetchClients());
       router.push("/clients");
     } catch (err) {
       toast.error("Failed to create client");
@@ -69,8 +85,13 @@ export default function NewClientPage() {
               <input name="company_name" value={form.company_name} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-              <input name="country" value={form.country} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Country *</label>
+              <select name="country" value={form.country} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                <option value="">Select country</option>
+                {ALL_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
@@ -79,6 +100,24 @@ export default function NewClientPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
               <input name="business_type" value={form.business_type} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Main Executive *</label>
+              <select name="primary_executive" value={form.primary_executive} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                <option value="">Select main executive</option>
+                {executives.map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Shadow Executive</label>
+              <select name="shadow_executive" value={form.shadow_executive} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                <option value="">Select shadow executive</option>
+                {executives.filter((u) => u.id !== form.primary_executive).map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>

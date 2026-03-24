@@ -20,3 +20,20 @@ class NotificationViewSet(viewsets.ModelViewSet):
         n.is_read = True
         n.save()
         return Response(NotificationSerializer(n).data)
+
+    @action(detail=False, methods=['post'])
+    def broadcast(self, request):
+        """Send a notification to all users (for call alerts, announcements)."""
+        from accounts.models import User
+        title = request.data.get('title', '')
+        message = request.data.get('message', '')
+        notification_type = request.data.get('notification_type', 'system')
+        link = request.data.get('link', '')
+
+        users = User.objects.filter(is_active=True).exclude(id=request.user.id)
+        notifications = [
+            Notification(user=u, title=title, message=message, notification_type=notification_type, link=link)
+            for u in users
+        ]
+        Notification.objects.bulk_create(notifications)
+        return Response({'status': f'Sent to {len(notifications)} users'})

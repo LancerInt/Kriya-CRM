@@ -20,6 +20,8 @@ urlpatterns = [
     path('api/analytics/', include('analytics.urls')),
     path('api/meetings/', include('meetings.urls')),
     path('api/notifications/', include('notifications.urls')),
+    path('api/agents/', include('agents.urls')),
+    path('api/chat/', include('teamchat.urls')),
 ]
 
 if settings.DEBUG:

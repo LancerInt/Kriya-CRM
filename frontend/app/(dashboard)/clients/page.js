@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "next/navigation";
 import { fetchClients } from "@/store/slices/clientSlice";
@@ -13,9 +13,13 @@ export default function ClientsPage() {
   const router = useRouter();
   const { list, loading, count } = useSelector((state) => state.clients);
 
-  useEffect(() => {
+  const loadClients = useCallback(() => {
     dispatch(fetchClients());
-  }, []);
+  }, [dispatch]);
+
+  useEffect(() => {
+    loadClients();
+  }, [loadClients]);
 
   const columns = [
     { key: "company_name", label: "Company", render: (row) => (

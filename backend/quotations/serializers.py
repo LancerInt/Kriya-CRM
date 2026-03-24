@@ -16,6 +16,10 @@ class QuotationItemSerializer(serializers.ModelSerializer):
         model = QuotationItem
         fields = ['id', 'product', 'product_name', 'description', 'quantity', 'unit', 'unit_price', 'total_price']
         read_only_fields = ['total_price']
+        extra_kwargs = {
+            'product_name': {'required': False, 'default': ''},
+            'description': {'required': False, 'default': ''},
+        }
 
 class QuotationSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True, read_only=True)
@@ -32,20 +36,50 @@ class QuotationSerializer(serializers.ModelSerializer):
 
 class QuotationCreateSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True)
+    valid_until = serializers.DateField(required=False, write_only=True)
+    payment_terms = serializers.CharField(required=False, write_only=True)
+
     class Meta:
         model = Quotation
         fields = ['client', 'inquiry', 'currency', 'delivery_terms', 'packaging_details',
-                  'validity_days', 'notes', 'items']
+                  'validity_days', 'notes', 'items', 'valid_until', 'payment_terms']
+        extra_kwargs = {
+            'client': {'required': False},
+        }
+
     def create(self, validated_data):
         items_data = validated_data.pop('items')
+        valid_until = validated_data.pop('valid_until', None)
+        payment_terms = validated_data.pop('payment_terms', '')
         user = self.context['request'].user
+
+        # Auto-populate client from inquiry if not provided
+        if not validated_data.get('client') and validated_data.get('inquiry'):
+            validated_data['client'] = validated_data['inquiry'].client
+
+        # Convert valid_until date to validity_days
+        if valid_until:
+            from django.utils import timezone
+            delta = valid_until - timezone.now().date()
+            validated_data['validity_days'] = max(delta.days, 1)
+
+        # Store payment_terms in notes if provided
+        if payment_terms:
+            notes = validated_data.get('notes', '') or ''
+            validated_data['notes'] = f"Payment Terms: {payment_terms}\n{notes}".strip()
+
         count = Quotation.objects.count() + 1
         validated_data['quotation_number'] = f'QT-{count:05d}'
         validated_data['created_by'] = user
-        total = sum(i['quantity'] * i['unit_price'] for i in items_data)
+        total = sum(i.get('quantity', 0) * i.get('unit_price', 0) for i in items_data)
         validated_data['subtotal'] = total
         validated_data['total'] = total
         quotation = Quotation.objects.create(**validated_data)
         for item_data in items_data:
+            # Auto-populate product_name from product if not provided
+            if not item_data.get('product_name') and item_data.get('product'):
+                item_data['product_name'] = item_data['product'].name
+            elif not item_data.get('product_name'):
+                item_data['product_name'] = 'Custom Item'
             QuotationItem.objects.create(quotation=quotation, **item_data)
         return quotation

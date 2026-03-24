@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useDispatch } from "react-redux";
 import { updateClient } from "@/store/slices/clientSlice";
 import api from "@/lib/axios";
+import { ALL_COUNTRIES } from "@/lib/countries";
 import PageHeader from "@/components/ui/PageHeader";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
@@ -75,7 +76,12 @@ export default function EditClientPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-              <input name="country" value={form.country} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+              <select name="country" value={form.country} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+                <option value="">Select country</option>
+                {ALL_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
