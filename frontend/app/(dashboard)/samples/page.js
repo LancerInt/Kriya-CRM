@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 import api from "@/lib/axios";
 import { HiOutlineBeaker } from "react-icons/hi2";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function SamplesPage() {
   const [samples, setSamples] = useState([]);
@@ -36,9 +37,7 @@ export default function SamplesPage() {
     try {
       const res = await api.get("/samples/");
       setSamples(res.data.results || res.data);
-    } catch {
-      toast.error("Failed to load samples");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to load samples")); } finally {
       setLoading(false);
     }
   };
@@ -56,9 +55,7 @@ export default function SamplesPage() {
       setShowModal(false);
       setForm({ client: "", product_name: "", quantity: "", courier_details: "", tracking_number: "", notes: "" });
       fetchSamples();
-    } catch {
-      toast.error("Failed to create sample");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create sample")); }
   };
 
   const handleFeedback = async (e) => {
@@ -73,9 +70,7 @@ export default function SamplesPage() {
       setSelectedSample(null);
       setFeedbackForm({ rating: "5", comments: "", issues: "", bulk_order_interest: false });
       fetchSamples();
-    } catch {
-      toast.error("Failed to submit feedback");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to submit feedback")); }
   };
 
   const openFeedback = (sample) => {

@@ -7,6 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 function fmtDate(d) {
   if (!d) return "\u2014";
@@ -31,7 +32,7 @@ export default function InvoiceDetailPage() {
       await api.patch(`/finance/invoices/${id}/`, { status: newStatus });
       setInvoice({ ...invoice, status: newStatus });
       toast.success(`Invoice marked as ${newStatus}`);
-    } catch { toast.error("Failed to update status"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update status")); }
   };
 
   const handleDownloadPDF = async () => {
@@ -45,7 +46,7 @@ export default function InvoiceDetailPage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch { toast.error("Failed to download PDF"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to download PDF")); }
   };
 
   if (loading) return <LoadingSpinner size="lg" />;

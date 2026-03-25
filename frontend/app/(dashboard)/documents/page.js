@@ -8,6 +8,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { HiOutlineArrowDownTray } from "react-icons/hi2";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const initialForm = { name: "", category: "commercial", client: "", order: "", shipment: "", file: null, version: "1.0", notes: "" };
 
@@ -35,9 +36,7 @@ export default function DocumentsPage() {
     try {
       const res = await api.get("/documents/");
       setDocuments(res.data.results || res.data);
-    } catch {
-      toast.error("Failed to load documents");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to load documents")); } finally {
       setLoading(false);
     }
   };
@@ -63,9 +62,7 @@ export default function DocumentsPage() {
       setShowModal(false);
       setForm(initialForm);
       loadDocuments();
-    } catch {
-      toast.error("Failed to upload document");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to upload document")); } finally {
       setSubmitting(false);
     }
   };

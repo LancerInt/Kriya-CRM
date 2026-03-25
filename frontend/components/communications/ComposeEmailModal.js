@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, onSent }) {
   const [accounts, setAccounts] = useState([]);
@@ -50,9 +51,7 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
       setAttachments([]);
       onClose();
       if (onSent) onSent();
-    } catch {
-      toast.error("Failed to send email");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send email")); } finally {
       setSubmitting(false);
     }
   };
@@ -95,12 +94,30 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">CC</label>
             <input
-              type="email"
+              type="text"
               value={form.cc}
               onChange={(e) => setForm({ ...form, cc: e.target.value })}
-              placeholder="cc@example.com"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              placeholder="email1@example.com, email2@example.com"
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none ${
+                form.cc && !form.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))
+                  ? "border-red-300 bg-red-50" : "border-gray-300"
+              }`}
             />
+            {form.cc && !form.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) && (
+              <p className="text-xs text-red-500 mt-1">Invalid email(s). Separate multiple with commas.</p>
+            )}
+            {form.cc && form.cc.includes(",") && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {form.cc.split(",").filter((e) => e.trim()).map((email, i) => {
+                  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+                  return (
+                    <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${valid ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                      {email.trim()}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
         <div>

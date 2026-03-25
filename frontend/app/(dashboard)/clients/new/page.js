@@ -7,6 +7,7 @@ import api from "@/lib/axios";
 import { ALL_COUNTRIES } from "@/lib/countries";
 import PageHeader from "@/components/ui/PageHeader";
 import toast from "react-hot-toast";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function NewClientPage() {
   const dispatch = useDispatch();
@@ -66,9 +67,7 @@ export default function NewClientPage() {
       toast.success("Client created successfully");
       dispatch(fetchClients());
       router.push("/clients");
-    } catch (err) {
-      toast.error("Failed to create client");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create client")); } finally {
       setSubmitting(false);
     }
   };

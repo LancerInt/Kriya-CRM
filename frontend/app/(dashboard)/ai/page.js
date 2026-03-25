@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const THINKING_MESSAGES = [
   "Analyzing your request...",
@@ -96,7 +97,7 @@ export default function AIPage() {
       const r = await api.get(`/agents/conversations/${id}/`);
       setActiveConv(r.data);
       setMessages(r.data.messages || []);
-    } catch { toast.error("Failed to load conversation"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to load conversation")); }
   };
 
   const handleNewChat = async () => {
@@ -105,7 +106,7 @@ export default function AIPage() {
       setActiveConv(r.data);
       setMessages([]);
       loadConversations();
-    } catch { toast.error("Failed to create chat"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create chat")); }
   };
 
   const handleSend = async (e) => {
@@ -122,7 +123,7 @@ export default function AIPage() {
         setActiveConv(r.data);
         loadConversations();
         await sendMessage(r.data.id, userMsg);
-      } catch { toast.error("Failed to start chat"); }
+      } catch (err) { toast.error(getErrorMessage(err, "Failed to start chat")); }
     } else {
       await sendMessage(activeConv.id, userMsg);
     }
@@ -153,7 +154,7 @@ export default function AIPage() {
       await api.delete(`/agents/conversations/${id}/`);
       if (activeConv?.id === id) { setActiveConv(null); setMessages([]); }
       loadConversations();
-    } catch { toast.error("Failed to delete"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
   const suggestedQuestions = [

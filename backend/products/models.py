@@ -4,12 +4,14 @@ from common.models import SoftDeleteModel
 
 class Product(SoftDeleteModel):
     name = models.CharField(max_length=255, db_index=True)
+    hsn_code = models.CharField(max_length=20, blank=True, help_text='HSN/HS Code')
     category = models.CharField(max_length=100, blank=True)
     active_ingredient = models.CharField(max_length=255, blank=True)
     concentration = models.CharField(max_length=50, blank=True)
     description = models.TextField(blank=True)
     base_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, default='USD')
+    unit = models.CharField(max_length=20, default='MT')
     is_active = models.BooleanField(default=True)
 
     class Meta:

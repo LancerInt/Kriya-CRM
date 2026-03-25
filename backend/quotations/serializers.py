@@ -29,8 +29,10 @@ class QuotationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quotation
         fields = ['id', 'quotation_number', 'client', 'client_name', 'inquiry', 'version',
-                  'parent', 'status', 'currency', 'delivery_terms', 'packaging_details',
-                  'validity_days', 'subtotal', 'total', 'notes', 'created_by', 'created_by_name',
+                  'parent', 'status', 'currency', 'delivery_terms', 'payment_terms',
+                  'payment_terms_detail', 'freight_terms', 'packaging_details',
+                  'validity_days', 'subtotal', 'total', 'notes', 'sent_via', 'sent_at',
+                  'created_by', 'created_by_name',
                   'approved_by', 'approved_by_name', 'approved_at', 'items', 'created_at', 'updated_at']
         read_only_fields = ['id', 'quotation_number', 'created_by', 'approved_by', 'approved_at']
 
@@ -41,8 +43,9 @@ class QuotationCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Quotation
-        fields = ['client', 'inquiry', 'currency', 'delivery_terms', 'packaging_details',
-                  'validity_days', 'notes', 'items', 'valid_until', 'payment_terms']
+        fields = ['client', 'inquiry', 'currency', 'delivery_terms', 'payment_terms',
+                  'payment_terms_detail', 'freight_terms', 'packaging_details',
+                  'validity_days', 'notes', 'items', 'valid_until']
         extra_kwargs = {
             'client': {'required': False},
         }

@@ -14,6 +14,7 @@ import SendWhatsAppModal from "@/components/communications/SendWhatsAppModal";
 import AISummaryButton from "@/components/ai/AISummaryButton";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -37,9 +38,53 @@ function fmtDateTime(d) {
   try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "\u2014"; }
 }
 
+// ── Last Conversation Summary ──
+function LastConversation({ clientId }) {
+  const [emails, setEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/communications/", { params: { client: clientId, comm_type: "email" } })
+      .then((r) => setEmails((r.data.results || r.data).slice(0, 3)))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  if (loading) return null;
+  if (emails.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <h3 className="font-semibold mb-3">Last Conversation</h3>
+      <div className="space-y-3">
+        {emails.map((em) => (
+          <div key={em.id} className="flex gap-3">
+            <div className={`w-1.5 shrink-0 rounded-full ${em.direction === "inbound" ? "bg-blue-400" : "bg-green-400"}`} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className={`text-xs font-medium ${em.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>
+                  {em.direction === "inbound" ? "Received" : "Sent"}
+                </span>
+                <span className="text-xs text-gray-400">{em.external_email}</span>
+                <span className="text-xs text-gray-400 ml-auto">{fmtDate(em.created_at)}</span>
+              </div>
+              <p className="text-sm font-medium text-gray-800 truncate">{em.subject || "(No subject)"}</p>
+              <p className="text-xs text-gray-500 line-clamp-2">{(em.body || "").replace(/<[^>]*>/g, "").slice(0, 150)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Overview Tab ──
 function OverviewTab({ client, timeline, stats, onClientUpdate }) {
+  const [allUsers, setAllUsers] = useState([]);
   const [showContactModal, setShowContactModal] = useState(false);
+
+  useEffect(() => {
+    api.get("/auth/users/").then((r) => setAllUsers(r.data.results || r.data)).catch(() => {});
+  }, []);
   const [editingContact, setEditingContact] = useState(null);
   const [contactForm, setContactForm] = useState({ name: "", email: "", phone: "", whatsapp: "", designation: "", is_primary: false });
   const [submittingContact, setSubmittingContact] = useState(false);
@@ -69,7 +114,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
       }
       setShowContactModal(false);
       onClientUpdate();
-    } catch { toast.error("Failed to save contact"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save contact")); }
     finally { setSubmittingContact(false); }
   };
 
@@ -79,7 +124,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
       await api.delete(`/clients/contacts/${contactId}/`);
       toast.success("Contact deleted");
       onClientUpdate();
-    } catch { toast.error("Failed to delete contact"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete contact")); }
   };
 
   return (
@@ -112,18 +157,36 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
             <div><span className="text-gray-500">Country:</span> <span className="ml-1">{client.country || "\u2014"}</span></div>
             <div><span className="text-gray-500">City:</span> <span className="ml-1">{client.city || "\u2014"}</span></div>
             <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Delivery Terms:</span> <span className="ml-1">{client.delivery_terms}</span></div>
             <div><span className="text-gray-500">Currency:</span> <span className="ml-1">{client.preferred_currency}</span></div>
-            <div><span className="text-gray-500">Credit Days:</span> <span className="ml-1">{client.credit_days}</span></div>
             <div><span className="text-gray-500">Main Executive:</span> <span className="ml-1">{client.primary_executive_name || client.executive_name || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Shadow Executive:</span> <span className="ml-1">{client.shadow_executive_name || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Credit Limit:</span> <span className="ml-1">${Number(client.credit_limit).toLocaleString()}</span></div>
+            <div>
+              <span className="text-gray-500">Shadow Executive:</span>
+              <select
+                value={client.shadow_executive || ""}
+                onChange={async (e) => {
+                  try {
+                    await api.patch(`/clients/${client.id}/`, { shadow_executive: e.target.value || null });
+                    toast.success("Shadow executive updated");
+                    onClientUpdate();
+                  } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+                }}
+                className="ml-1 text-sm border-b border-gray-300 bg-transparent outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">Not assigned</option>
+                {allUsers.filter((u) => u.id !== client.primary_executive).map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
+                ))}
+              </select>
+            </div>
             <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="ml-1">{client.address || "\u2014"}</span></div>
             {client.website && (
               <div className="sm:col-span-2"><span className="text-gray-500">Website:</span> <a href={client.website} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600 hover:underline">{client.website}</a></div>
             )}
           </div>
         </div>
+
+        {/* Last Conversation */}
+        <LastConversation clientId={client.id} />
 
         {/* Contacts — full CRUD */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -268,7 +331,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setShowModal(false);
       setForm({ comm_type: "email", direction: "outbound", subject: "", body: "" });
       reload();
-    } catch { toast.error("Failed to log communication"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to log communication")); }
     finally { setSubmitting(false); }
   };
 
@@ -459,7 +522,7 @@ function TasksTab({ clientId, activeTab, client }) {
       setShowModal(false);
       setForm({ title: "", description: "", priority: "medium", due_date: "", owner: "" });
       reload();
-    } catch { toast.error("Failed to create task"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create task")); }
     finally { setSubmitting(false); }
   };
 
@@ -468,7 +531,7 @@ function TasksTab({ clientId, activeTab, client }) {
       await api.post(`/tasks/${taskId}/complete/`);
       toast.success("Task completed");
       reload();
-    } catch { toast.error("Failed to complete task"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to complete task")); }
   };
 
   const columns = [
@@ -501,19 +564,21 @@ function TasksTab({ clientId, activeTab, client }) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assign To *</label>
             {isExecutive ? (
-              <>
-                {/* Executive can only assign to shadow executive */}
-                {client?.shadow_executive ? (
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-700">
-                    {users.find((u) => u.id === client.shadow_executive)?.first_name || ""} {users.find((u) => u.id === client.shadow_executive)?.last_name || ""} (Shadow Executive)
-                    <input type="hidden" value={form.owner} />
-                  </div>
-                ) : (
-                  <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-                    No shadow executive assigned to this client. Contact admin.
-                  </div>
-                )}
-              </>
+              <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="">Select assignee</option>
+                {/* Shadow executive */}
+                {client?.shadow_executive && users.filter((u) => u.id === client.shadow_executive).map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Shadow Executive)</option>
+                ))}
+                {/* Managers */}
+                {users.filter((u) => u.role === "manager").map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Manager)</option>
+                ))}
+                {/* Self */}
+                {users.filter((u) => u.id === currentUser?.id).map((u) => (
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Self)</option>
+                ))}
+              </select>
             ) : (
               <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 <option value="">Select team member</option>
@@ -625,7 +690,7 @@ function SamplesTab({ clientId, activeTab }) {
       toast.success("Feedback submitted");
       setShowFeedback(null);
       reload();
-    } catch { toast.error("Failed to submit feedback"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to submit feedback")); }
   };
 
   const columns = [
@@ -728,7 +793,7 @@ function MeetingsTab({ clientId, activeTab }) {
       setShowModal(false);
       setForm({ scheduled_at: "", agenda: "", call_notes: "", duration_minutes: "", status: "scheduled", platform: "google_meet", meeting_link: "" });
       reload();
-    } catch { toast.error("Failed to create meeting"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create meeting")); }
     finally { setSubmitting(false); }
   };
 
@@ -738,7 +803,7 @@ function MeetingsTab({ clientId, activeTab }) {
       toast.success("Meeting updated");
       reload();
       setSelectedMeeting((prev) => ({ ...prev, ...updates }));
-    } catch { toast.error("Failed to update meeting"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update meeting")); }
   };
 
   const platformLabels = { google_meet: "Google Meet", zoom: "Zoom", teams: "MS Teams", whatsapp: "WhatsApp", phone: "Phone", in_person: "In Person", other: "Other" };
@@ -901,7 +966,7 @@ function DocumentsTab({ clientId, activeTab }) {
       setForm({ name: "", category: "commercial", version: "1" });
       setFile(null);
       reload();
-    } catch { toast.error("Failed to upload"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to upload")); }
     finally { setSubmitting(false); }
   };
 

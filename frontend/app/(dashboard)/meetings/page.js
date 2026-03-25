@@ -7,6 +7,7 @@ import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import api from "@/lib/axios";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 function fmtDateTime(d) {
   if (!d) return "\u2014";
@@ -30,7 +31,7 @@ export default function MeetingsPage() {
     try {
       const res = await api.get("/meetings/");
       setMeetings(res.data.results || res.data);
-    } catch { toast.error("Failed to load meetings"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to load meetings")); }
     finally { setLoading(false); }
   };
 
@@ -50,7 +51,7 @@ export default function MeetingsPage() {
       setShowModal(false);
       setForm({ client: "", scheduled_at: "", agenda: "", call_notes: "", duration_minutes: "", status: "scheduled", platform: "google_meet", meeting_link: "" });
       fetchMeetings();
-    } catch { toast.error("Failed to create meeting"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create meeting")); }
   };
 
   const handleUpdateMeeting = async (meetingId, updates) => {
@@ -59,7 +60,7 @@ export default function MeetingsPage() {
       toast.success("Meeting updated");
       fetchMeetings();
       setSelectedMeeting((prev) => ({ ...prev, ...updates }));
-    } catch { toast.error("Failed to update"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
   };
 
   const isUpcoming = (row) => row.status === "scheduled" && new Date(row.scheduled_at) > new Date();
@@ -101,7 +102,7 @@ export default function MeetingsPage() {
                 await api.patch(`/meetings/${row.id}/`, { status: newStatus });
                 toast.success(`Meeting marked as ${newStatus}`);
                 fetchMeetings();
-              } catch { toast.error("Failed to update status"); }
+              } catch (err) { toast.error(getErrorMessage(err, "Failed to update status")); }
             }}
             className="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
           >

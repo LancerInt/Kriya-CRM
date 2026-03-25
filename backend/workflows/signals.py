@@ -13,8 +13,49 @@ from django.dispatch import receiver
 logger = logging.getLogger(__name__)
 
 
+def _email_client_status(shipment, title, message):
+    """Send status update email to client's primary contact."""
+    contact = shipment.client.contacts.filter(is_deleted=False).order_by('-is_primary').first()
+    if not contact or not contact.email:
+        return
+
+    from communications.models import EmailAccount, Communication
+    email_account = EmailAccount.objects.filter(is_active=True).first()
+    if not email_account:
+        return
+
+    from communications.services import EmailService
+    body_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;">
+        <h2 style="color:#1e3a5f;">Shipment Update: {title}</h2>
+        <p>Dear {contact.name},</p>
+        <p>{message}</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            <tr><td style="padding:8px;color:#666;width:140px;">Shipment No.</td><td style="padding:8px;font-weight:bold;">{shipment.shipment_number}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Container</td><td style="padding:8px;">{shipment.container_number or 'TBD'}</td></tr>
+            <tr><td style="padding:8px;color:#666;">B/L Number</td><td style="padding:8px;">{shipment.bl_number or 'TBD'}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">ETA</td><td style="padding:8px;">{shipment.estimated_arrival or 'TBD'}</td></tr>
+        </table>
+        <p>Best regards,<br/>Kriya Global Trade</p>
+    </div>
+    """
+    EmailService.send_email(
+        email_account=email_account, to=contact.email,
+        subject=f'Shipment Update: {shipment.shipment_number} - {title}',
+        body_html=body_html,
+    )
+    Communication.objects.create(
+        client=shipment.client, contact=contact,
+        comm_type='email', direction='outbound',
+        subject=f'Shipment Update: {shipment.shipment_number} - {title}',
+        body=body_html, status='sent', email_account=email_account,
+        external_email=contact.email,
+    )
+    logger.info(f'Status email sent to {contact.email} for {shipment.shipment_number}')
+
+
 # ---------------------------------------------------------------------------
-# Shipment Dispatched → Update Order status + Notify
+# Shipment Status Change → Update Order + Notify Team + Email Client
 # ---------------------------------------------------------------------------
 
 @receiver(pre_save, sender='shipments.Shipment')
@@ -31,63 +72,67 @@ def capture_shipment_previous_status(sender, instance, **kwargs):
 
 @receiver(post_save, sender='shipments.Shipment')
 def on_shipment_status_change(sender, instance, created, **kwargs):
-    """When a shipment is dispatched, update the linked order and notify."""
+    """Notify team and auto-email client on every shipment status change."""
     previous = getattr(instance, '_previous_status', None)
     current = instance.status
 
-    # Shipment dispatched
-    if current == 'dispatched' and previous != 'dispatched':
-        from orders.models import Order
-        from notifications.models import Notification
+    if current == previous or created:
+        return
 
-        # Update the linked order status to shipped
-        order = instance.order
-        if order and order.status not in ('shipped', 'delivered', 'cancelled'):
+    from notifications.models import Notification
+
+    # Status display messages for client emails
+    STATUS_MESSAGES = {
+        'factory_ready': ('Production Ready', 'Your order is ready at the factory and will be packed for export shortly.'),
+        'container_booked': ('Container Booked', 'A container/vessel has been booked for your shipment.'),
+        'packed': ('Shipment Packed', 'Your order has been packed and is ready for inspection.'),
+        'inspection': ('Under Inspection', 'Your shipment is currently under quality inspection.'),
+        'inspection_passed': ('Inspection Passed', 'Your shipment has passed quality inspection and will be dispatched soon.'),
+        'dispatched': ('Shipment Dispatched', f'Your shipment has been dispatched. Container: {instance.container_number or "TBD"}, B/L: {instance.bl_number or "TBD"}.'),
+        'in_transit': ('In Transit', f'Your shipment is now in transit. ETA: {instance.estimated_arrival or "TBD"}.'),
+        'arrived': ('Arrived at Port', 'Your shipment has arrived at the destination port.'),
+        'customs': ('Customs Clearance', 'Your shipment is currently under customs clearance.'),
+        'delivered': ('Delivered', 'Your shipment has been successfully delivered.'),
+    }
+
+    title, message = STATUS_MESSAGES.get(current, (current, f'Shipment status updated to {current}.'))
+    client_name = instance.client.company_name if instance.client else 'N/A'
+
+    # Update order status for key stages
+    order = instance.order
+    if order:
+        if current == 'dispatched' and order.status not in ('shipped', 'delivered', 'cancelled'):
             order.status = 'shipped'
             order.save(update_fields=['status', 'updated_at'])
-            logger.info(f"Order {order.order_number} status updated to 'shipped' (shipment {instance.shipment_number} dispatched)")
-
-        # Notify the order creator
-        if order and order.created_by:
-            Notification.objects.create(
-                user=order.created_by,
-                notification_type='alert',
-                title=f'Shipment {instance.shipment_number} dispatched',
-                message=f'Shipment {instance.shipment_number} for order {order.order_number} ({order.client.company_name}) has been dispatched.',
-                link=f'/shipments/{instance.id}',
-            )
-
-        # Notify the client's primary executive if different from order creator
-        if instance.client and instance.client.primary_executive:
-            exec_user = instance.client.primary_executive
-            if not order or exec_user != order.created_by:
-                Notification.objects.create(
-                    user=exec_user,
-                    notification_type='alert',
-                    title=f'Shipment {instance.shipment_number} dispatched',
-                    message=f'Shipment for {instance.client.company_name} has been dispatched. Container: {instance.container_number or "N/A"}.',
-                    link=f'/shipments/{instance.id}',
-                )
-
-    # Shipment delivered
-    if current == 'delivered' and previous != 'delivered':
-        from orders.models import Order
-        from notifications.models import Notification
-
-        order = instance.order
-        if order and order.status not in ('delivered', 'cancelled'):
+        elif current == 'delivered' and order.status != 'delivered':
             order.status = 'delivered'
             order.save(update_fields=['status', 'updated_at'])
-            logger.info(f"Order {order.order_number} status updated to 'delivered' (shipment {instance.shipment_number} delivered)")
 
-        if order and order.created_by:
-            Notification.objects.create(
-                user=order.created_by,
-                notification_type='alert',
-                title=f'Shipment {instance.shipment_number} delivered',
-                message=f'Shipment {instance.shipment_number} for order {order.order_number} has been delivered.',
-                link=f'/shipments/{instance.id}',
-            )
+    # Notify internal team
+    notified = set()
+    if order and order.created_by:
+        Notification.objects.create(
+            user=order.created_by, notification_type='alert',
+            title=f'{instance.shipment_number}: {title}',
+            message=f'Shipment {instance.shipment_number} for {client_name} - {message}',
+            link=f'/shipments/{instance.id}',
+        )
+        notified.add(order.created_by.id)
+
+    if instance.client and instance.client.primary_executive and instance.client.primary_executive.id not in notified:
+        Notification.objects.create(
+            user=instance.client.primary_executive, notification_type='alert',
+            title=f'{instance.shipment_number}: {title}',
+            message=f'Shipment for {client_name} - {message}',
+            link=f'/shipments/{instance.id}',
+        )
+
+    # Auto-email client at key stages
+    if current in ('dispatched', 'inspection_passed', 'in_transit', 'delivered'):
+        try:
+            _email_client_status(instance, title, message)
+        except Exception as e:
+            logger.error(f'Failed to email client status: {e}')
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const stages = [
   { key: "inquiry", label: "Inquiry", color: "bg-purple-500" },
@@ -48,9 +49,7 @@ export default function PipelinePage() {
       await dispatch(createInquiry(form)).unwrap();
       toast.success("Inquiry created");
       setShowModal(false);
-    } catch {
-      toast.error("Failed to create inquiry");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create inquiry")); }
   };
 
   if (loading) return <LoadingSpinner size="lg" />;

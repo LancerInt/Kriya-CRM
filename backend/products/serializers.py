@@ -4,8 +4,27 @@ from .models import Product, CountryCompliance
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        fields = ['id', 'name', 'category', 'active_ingredient', 'concentration',
-                  'description', 'base_price', 'currency', 'is_active', 'created_at']
+        fields = ['id', 'name', 'hsn_code', 'category', 'active_ingredient', 'concentration',
+                  'description', 'base_price', 'currency', 'unit', 'is_active', 'created_at']
+
+    def validate(self, data):
+        # Check for exact duplicate — all key fields must match
+        check_fields = {}
+        key_fields = ['name', 'category', 'active_ingredient', 'concentration', 'base_price', 'currency', 'unit', 'hsn_code']
+        for f in key_fields:
+            if f in data:
+                check_fields[f] = data[f]
+            elif self.instance:
+                check_fields[f] = getattr(self.instance, f)
+
+        qs = Product.objects.filter(is_deleted=False, **check_fields)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                {'error': f'Duplicate product: "{qs.first().name}" with the same name, category, concentration, price and unit already exists. Change at least one detail to add a new product.'}
+            )
+        return data
 
 class CountryComplianceSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)

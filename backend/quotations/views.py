@@ -165,7 +165,9 @@ class QuotationViewSet(viewsets.ModelViewSet):
         order = Order.objects.create(
             order_number=f'ORD-{order_count:05d}',
             client=q.client, quotation=q, currency=q.currency,
-            delivery_terms=q.delivery_terms, total=q.total, created_by=request.user
+            delivery_terms=q.delivery_terms, total=q.total, created_by=request.user,
+            payment_terms=q.payment_terms or q.payment_terms_detail or '',
+            freight_terms=q.freight_terms or '',
         )
         for qi in q.items.all():
             OrderItem.objects.create(
@@ -208,3 +210,86 @@ class QuotationViewSet(viewsets.ModelViewSet):
                 link=f'/orders/{order.id}',
             )
         return Response({'order_id': str(order.id), 'order_number': order.order_number}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='send-to-client')
+    def send_to_client(self, request, pk=None):
+        """Send quotation/PI to client via email or WhatsApp."""
+        q = self.get_object()
+        send_via = request.data.get('send_via', 'email')  # email or whatsapp
+        include_pi = request.data.get('include_pi', False)
+
+        if q.status not in ['approved', 'sent', 'pending_approval', 'draft']:
+            return Response({'error': 'Quotation cannot be sent in this status'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get client's primary contact
+        contact = q.client.contacts.filter(is_deleted=False).order_by('-is_primary', 'name').first()
+        if not contact:
+            return Response({'error': 'Client has no contacts. Add a contact first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if send_via == 'email':
+            contact_email = contact.email
+            if not contact_email:
+                return Response({'error': f'Contact {contact.name} has no email address.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            from communications.models import EmailAccount
+            email_account = EmailAccount.objects.filter(user=request.user, is_active=True).first()
+            if not email_account:
+                email_account = EmailAccount.objects.filter(is_active=True).first()
+            if not email_account:
+                return Response({'error': 'No email account configured. Go to Settings > Email Accounts.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Build email
+            items_html = ''
+            for i, item in enumerate(q.items.all(), 1):
+                items_html += f'<tr><td style="padding:8px;border:1px solid #eee;">{i}</td><td style="padding:8px;border:1px solid #eee;">{item.product_name}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{item.quantity:,.0f} {item.unit}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.unit_price:,.2f}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.total_price:,.2f}</td></tr>'
+
+            body_html = f"""
+            <div style="font-family:Arial,sans-serif;max-width:700px;">
+                <h2 style="color:#1e3a5f;">Quotation - {q.quotation_number}</h2>
+                <p>Dear {contact.name},</p>
+                <p>Please find below our quotation for your reference:</p>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                    <tr><td style="padding:6px;color:#666;width:140px;">Quotation No.</td><td style="padding:6px;font-weight:bold;">{q.quotation_number}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Delivery Terms</td><td style="padding:6px;">{q.get_delivery_terms_display()}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Payment Terms</td><td style="padding:6px;">{q.get_payment_terms_display() if q.payment_terms else q.payment_terms_detail or 'As agreed'}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Freight</td><td style="padding:6px;">{q.get_freight_terms_display() if q.freight_terms else 'To be discussed'}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Validity</td><td style="padding:6px;">{q.validity_days} days</td></tr>
+                </table>
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                    <tr style="background:#1e3a5f;color:white;"><th style="padding:8px;text-align:left;">#</th><th style="padding:8px;text-align:left;">Product</th><th style="padding:8px;text-align:right;">Quantity</th><th style="padding:8px;text-align:right;">Unit Price</th><th style="padding:8px;text-align:right;">Total</th></tr>
+                    {items_html}
+                    <tr style="font-weight:bold;background:#f5f5f5;"><td colspan="4" style="padding:8px;text-align:right;">Total:</td><td style="padding:8px;text-align:right;">{q.currency} {q.total:,.2f}</td></tr>
+                </table>
+                {f'<p>{q.notes}</p>' if q.notes else ''}
+                <p>Please confirm your acceptance or let us know if you need any modifications.</p>
+                <p>Best regards,<br/>Kriya Global Trade</p>
+            </div>
+            """
+
+            from communications.services import EmailService
+            try:
+                EmailService.send_email(
+                    email_account=email_account,
+                    to=contact_email,
+                    subject=f'Quotation {q.quotation_number} - Kriya Global Trade',
+                    body_html=body_html,
+                )
+            except Exception as e:
+                return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Log communication
+            from communications.models import Communication
+            Communication.objects.create(
+                client=q.client, contact=contact, user=request.user,
+                comm_type='email', direction='outbound',
+                subject=f'Quotation {q.quotation_number}', body=body_html,
+                status='sent', email_account=email_account, external_email=contact_email,
+            )
+
+        q.sent_via = send_via
+        q.sent_at = timezone.now()
+        if q.status in ['approved', 'draft', 'pending_approval']:
+            q.status = 'sent'
+        q.save()
+
+        return Response({'status': 'sent', 'sent_via': send_via})

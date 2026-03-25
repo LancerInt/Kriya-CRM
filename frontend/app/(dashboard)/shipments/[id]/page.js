@@ -8,6 +8,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function ShipmentDetailPage() {
   const { id } = useParams();
@@ -41,9 +42,7 @@ export default function ShipmentDetailPage() {
       setShipment(res.data);
       toast.success("Status updated");
       setShowStatusModal(false);
-    } catch {
-      toast.error("Failed to update status");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update status")); } finally {
       setUpdating(false);
     }
   };

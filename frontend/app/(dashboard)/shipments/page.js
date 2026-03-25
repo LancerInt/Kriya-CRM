@@ -9,6 +9,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function ShipmentsPage() {
   const router = useRouter();
@@ -85,9 +86,7 @@ export default function ShipmentsPage() {
         notes: "",
       });
       loadShipments();
-    } catch {
-      toast.error("Failed to create shipment");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create shipment")); } finally {
       setSubmitting(false);
     }
   };

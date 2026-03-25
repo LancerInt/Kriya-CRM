@@ -7,6 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function QualityPage() {
   const [activeTab, setActiveTab] = useState("inspections");
@@ -68,9 +69,7 @@ export default function QualityPage() {
       setShowInspectionModal(false);
       setInspectionForm({ shipment: "", inspection_date: "", inspector_name: "", inspection_type: "pre_dispatch", status: "pending", notes: "" });
       loadInspections();
-    } catch {
-      toast.error("Failed to create inspection");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create inspection")); } finally {
       setSubmitting(false);
     }
   };
@@ -94,9 +93,7 @@ export default function QualityPage() {
       setShowCoaModal(false);
       setCoaForm({ shipment: "", product: "", coa_type: "lab", file: null, version: "", notes: "" });
       loadCoas();
-    } catch {
-      toast.error("Failed to upload COA");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to upload COA")); } finally {
       setSubmitting(false);
     }
   };

@@ -19,12 +19,50 @@ class Quotation(TimeStampedModel):
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='revisions')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     currency = models.CharField(max_length=3, default='USD')
-    delivery_terms = models.CharField(max_length=20, default='FOB')
+
+    # Trade terms
+    DELIVERY_CHOICES = [
+        ('EXW', 'EXW - Ex Works (Factory)'),
+        ('FCA', 'FCA - Free Carrier'),
+        ('FOB', 'FOB - Free on Board'),
+        ('CFR', 'CFR - Cost & Freight'),
+        ('CIF', 'CIF - Cost Insurance & Freight'),
+        ('DAP', 'DAP - Delivered at Place'),
+        ('DDP', 'DDP - Delivered Duty Paid'),
+    ]
+    PAYMENT_CHOICES = [
+        ('advance', '100% Advance'),
+        ('50_advance', '50% Advance + 50% Before Shipment'),
+        ('30_70', '30% Advance + 70% Against BL'),
+        ('lc', 'Letter of Credit (LC)'),
+        ('da', 'D/A - Documents Against Acceptance'),
+        ('dp', 'D/P - Documents Against Payment'),
+        ('cad', 'CAD - Cash Against Documents'),
+        ('tt', 'TT - Telegraphic Transfer'),
+        ('credit_30', 'Net 30 Days Credit'),
+        ('credit_60', 'Net 60 Days Credit'),
+        ('custom', 'Custom Terms'),
+    ]
+    FREIGHT_CHOICES = [
+        ('sea_fcl', 'Sea - FCL (Full Container Load)'),
+        ('sea_lcl', 'Sea - LCL (Less Container Load)'),
+        ('air', 'Air Freight'),
+        ('courier', 'Courier'),
+        ('ex_works', 'Ex Works (Buyer arranges)'),
+    ]
+
+    delivery_terms = models.CharField(max_length=20, choices=DELIVERY_CHOICES, default='FOB')
+    payment_terms = models.CharField(max_length=30, choices=PAYMENT_CHOICES, default='advance', blank=True)
+    payment_terms_detail = models.CharField(max_length=255, blank=True, help_text='Custom payment terms if applicable')
+    freight_terms = models.CharField(max_length=20, choices=FREIGHT_CHOICES, default='sea_fcl', blank=True)
+
     packaging_details = models.TextField(blank=True)
     validity_days = models.IntegerField(default=30)
     subtotal = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
+    sent_via = models.CharField(max_length=20, blank=True, help_text='email or whatsapp')
+    sent_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_quotations')
     approved_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_quotations')
     approved_at = models.DateTimeField(null=True, blank=True)

@@ -17,7 +17,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         qs = Task.objects.select_related('owner', 'client', 'created_by').all()
         user = self.request.user
         if user.role == 'executive':
-            qs = qs.filter(owner=user)
+            qs = qs.filter(Q(owner=user) | Q(created_by=user))
         return qs
 
     @action(detail=False, methods=['get'])
@@ -38,4 +38,25 @@ class TaskViewSet(viewsets.ModelViewSet):
         task.status = 'completed'
         task.completed_at = timezone.now()
         task.save()
+
+        # Notify the task creator that it's completed
+        from notifications.models import Notification
+        if task.created_by and task.created_by != request.user:
+            Notification.objects.create(
+                user=task.created_by,
+                notification_type='task',
+                title='Task Completed',
+                message=f'"{task.title}" has been completed by {request.user.full_name}.',
+                link=f'/tasks',
+            )
+        # Also notify the main executive of the client
+        if task.client and task.client.primary_executive and task.client.primary_executive != request.user:
+            Notification.objects.create(
+                user=task.client.primary_executive,
+                notification_type='task',
+                title='Task Completed',
+                message=f'"{task.title}" for {task.client.company_name} has been completed by {request.user.full_name}.',
+                link=f'/clients/{task.client.id}',
+            )
+
         return Response(TaskSerializer(task).data)

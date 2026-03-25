@@ -12,6 +12,7 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 import api from "@/lib/axios";
 import AISummaryButton from "@/components/ai/AISummaryButton";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const FILTER_TABS = [
   { key: "all", label: "All" },
@@ -55,7 +56,7 @@ export default function CommunicationsPage() {
       setAssignModal(null);
       setAssignClient("");
       dispatch(fetchCommunications());
-    } catch { toast.error("Failed to assign client"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to assign client")); }
   };
 
   const handleCreate = async (e) => {
@@ -65,9 +66,7 @@ export default function CommunicationsPage() {
       toast.success("Communication logged");
       setShowModal(false);
       setForm({ client: "", comm_type: "email", direction: "inbound", subject: "", content: "" });
-    } catch {
-      toast.error("Failed to log communication");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to log communication")); }
   };
 
   const handleSent = () => {

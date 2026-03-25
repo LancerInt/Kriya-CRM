@@ -7,6 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 function fmtDate(d) {
   if (!d) return "\u2014";
@@ -37,7 +38,7 @@ export default function OrderDetailPage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch { toast.error("Failed to download PDF"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to download PDF")); }
   };
 
   if (loading) return <LoadingSpinner size="lg" />;

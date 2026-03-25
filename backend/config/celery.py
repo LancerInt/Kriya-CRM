@@ -24,4 +24,16 @@ app.conf.beat_schedule = {
         'task': 'communications.sync_emails',
         'schedule': crontab(minute='*/5'),
     },
+    'scan-emails-for-alerts-every-15-minutes': {
+        'task': 'workflows.scan_emails_for_alerts',
+        'schedule': crontab(minute='*/15'),
+    },
+    'auto-pipeline-from-emails-every-15-minutes': {
+        'task': 'workflows.auto_pipeline_from_emails',
+        'schedule': crontab(minute='*/15'),
+    },
+    'check-meeting-reminders-every-30-minutes': {
+        'task': 'workflows.check_meeting_reminders',
+        'schedule': crontab(minute='*/30'),
+    },
 }

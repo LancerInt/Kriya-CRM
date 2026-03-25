@@ -4,6 +4,7 @@ import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const BACKEND_URL = "http://localhost:8000";
 const fileUrl = (path) => {
@@ -96,7 +97,7 @@ export default function TeamChatPage() {
       setMessages((prev) => [...prev, res.data]);
       setInput("");
       setTimeout(scrollToBottom, 100);
-    } catch { toast.error("Failed to send"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
     finally { setSending(false); }
   };
 
@@ -118,7 +119,7 @@ export default function TeamChatPage() {
       const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       setMessages((prev) => [...prev, res.data]);
       setTimeout(scrollToBottom, 100);
-    } catch { toast.error("Failed to upload"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to upload")); }
     e.target.value = "";
   };
 
@@ -147,12 +148,12 @@ export default function TeamChatPage() {
           const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
           setMessages((prev) => [...prev, res.data]);
           setTimeout(scrollToBottom, 100);
-        } catch { toast.error("Failed to send voice"); }
+        } catch (err) { toast.error(getErrorMessage(err, "Failed to send voice")); }
       };
 
       mediaRecorder.start();
       setRecording(true);
-    } catch { toast.error("Microphone access denied"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Microphone access denied")); }
   };
 
   const stopRecording = () => {
@@ -249,7 +250,7 @@ export default function TeamChatPage() {
       setActiveRoom(res.data);
       setShowNewRoom(false);
       setNewRoomName("");
-    } catch { toast.error("Failed to create room"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create room")); }
   };
 
   const isOwnMessage = (msg) => msg.user === currentUser?.id;
@@ -273,7 +274,7 @@ export default function TeamChatPage() {
       if (activeRoom?.id === roomId) setActiveRoom((prev) => ({ ...prev, name: editRoomName.trim() }));
       setEditingRoom(null);
       toast.success("Room renamed");
-    } catch { toast.error("Failed to rename"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to rename")); }
   };
 
   const handleDeleteRoom = async (room, e) => {
@@ -285,7 +286,7 @@ export default function TeamChatPage() {
       setRooms((prev) => prev.filter((r) => r.id !== room.id));
       if (activeRoom?.id === room.id) setActiveRoom(rooms.find((r) => r.is_general) || null);
       toast.success("Room deleted");
-    } catch { toast.error("Failed to delete"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
   const [editingMsg, setEditingMsg] = useState(null);
   const [editText, setEditText] = useState("");
@@ -310,7 +311,7 @@ export default function TeamChatPage() {
       setMessages((prev) => prev.map((m) => m.id === editingMsg ? { ...m, content: editText.trim(), is_edited: true } : m));
       setEditingMsg(null);
       setEditText("");
-    } catch { toast.error("Failed to edit"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to edit")); }
   };
 
   const handleDeleteMsg = async (msgId) => {
@@ -320,7 +321,7 @@ export default function TeamChatPage() {
       await api.delete(`/chat/messages/${msgId}/`);
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
       toast.success("Message deleted");
-    } catch { toast.error("Failed to delete"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
   // Close context menu on click outside

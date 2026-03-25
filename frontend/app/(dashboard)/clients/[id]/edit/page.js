@@ -8,6 +8,7 @@ import { ALL_COUNTRIES } from "@/lib/countries";
 import PageHeader from "@/components/ui/PageHeader";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 export default function EditClientPage() {
   const { id } = useParams();
@@ -56,9 +57,7 @@ export default function EditClientPage() {
       await dispatch(updateClient({ id, data: form })).unwrap();
       toast.success("Client updated successfully");
       router.push(`/clients/${id}`);
-    } catch (err) {
-      toast.error("Failed to update client");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update client")); } finally {
       setSubmitting(false);
     }
   };

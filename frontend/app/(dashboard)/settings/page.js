@@ -7,6 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 function EmailAccountsTab() {
   const [accounts, setAccounts] = useState([]);
@@ -44,9 +45,7 @@ function EmailAccountsTab() {
       setShowModal(false);
       setForm({ email: "", display_name: "", imap_host: "", imap_port: "993", smtp_host: "", smtp_port: "587", username: "", password: "", use_ssl: true });
       loadAccounts();
-    } catch {
-      toast.error("Failed to add email account");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add email account")); } finally {
       setSubmitting(false);
     }
   };
@@ -57,9 +56,7 @@ function EmailAccountsTab() {
       await api.delete(`/communications/email-accounts/${id}/`);
       toast.success("Email account deleted");
       loadAccounts();
-    } catch {
-      toast.error("Failed to delete email account");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete email account")); }
   };
 
   const handleTestConnection = async (id) => {
@@ -77,9 +74,7 @@ function EmailAccountsTab() {
       await api.post(`/communications/email-accounts/${id}/sync-now/`);
       toast.success("Sync started");
       loadAccounts();
-    } catch {
-      toast.error("Sync failed");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Sync failed")); }
   };
 
   if (loading) {
@@ -223,9 +218,7 @@ function WhatsAppConfigTab() {
       setShowModal(false);
       setForm({ phone_number_id: "", business_account_id: "", access_token: "", verify_token: "kriya_crm_webhook_verify" });
       loadConfigs();
-    } catch {
-      toast.error("Failed to add WhatsApp config");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add WhatsApp config")); } finally {
       setSubmitting(false);
     }
   };
@@ -236,9 +229,7 @@ function WhatsAppConfigTab() {
       await api.delete(`/communications/whatsapp-configs/${id}/`);
       toast.success("WhatsApp config deleted");
       loadConfigs();
-    } catch {
-      toast.error("Failed to delete WhatsApp config");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete WhatsApp config")); }
   };
 
   if (loading) {
@@ -431,7 +422,7 @@ function MeetingPlatformsTab() {
       toast.success("Platform added! " + (platform === "google" ? "Now click 'Connect Google Account' to authorize." : ""));
       setShowModal(false);
       loadConfigs();
-    } catch { toast.error("Failed to add config"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add config")); }
     finally { setSubmitting(false); }
   };
 
@@ -452,7 +443,7 @@ function MeetingPlatformsTab() {
       await api.delete(`/meetings/platform-configs/${id}/`);
       toast.success("Config deleted");
       loadConfigs();
-    } catch { toast.error("Failed to delete"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>;
@@ -629,14 +620,14 @@ function AIConfigTab() {
       toast.success("AI provider configured!");
       setShowModal(false);
       loadConfigs();
-    } catch { toast.error("Failed to add config"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add config")); }
     finally { setSubmitting(false); }
   };
 
   const handleDelete = async (id) => {
     if (!confirm("Delete this AI config?")) return;
     try { await api.delete(`/agents/configs/${id}/`); toast.success("Deleted"); loadConfigs(); }
-    catch { toast.error("Failed to delete"); }
+    catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>;
@@ -754,7 +745,7 @@ function ProfileTab() {
     try {
       await api.patch("/auth/update-profile/", profile);
       toast.success("Profile updated");
-    } catch { toast.error("Failed to update profile"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update profile")); }
     finally { setSaving(false); }
   };
 
@@ -882,7 +873,7 @@ function UserManagementTab() {
       await api.patch(`/auth/users/${user.id}/`, { is_active: !user.is_active });
       toast.success(user.is_active ? "User deactivated" : "User activated");
       loadUsers();
-    } catch { toast.error("Failed to update user"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update user")); }
   };
 
   const handleDelete = async (id) => {
@@ -891,7 +882,7 @@ function UserManagementTab() {
       await api.delete(`/auth/users/${id}/`);
       toast.success("User deleted");
       loadUsers();
-    } catch { toast.error("Failed to delete user"); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete user")); }
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>;

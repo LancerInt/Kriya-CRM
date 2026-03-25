@@ -8,6 +8,7 @@ import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
+import { getErrorMessage } from "@/lib/errorHandler";
 
 const TABS = ["Invoices", "Payments", "FIRC", "GST"];
 
@@ -103,9 +104,7 @@ export default function FinancePage() {
       setShowInvoiceModal(false);
       setInvoiceForm(initialInvoiceForm);
       loadTabData();
-    } catch {
-      toast.error("Failed to create invoice");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create invoice")); } finally {
       setSubmitting(false);
     }
   };
@@ -119,9 +118,7 @@ export default function FinancePage() {
       setShowPaymentModal(false);
       setPaymentForm(initialPaymentForm);
       loadTabData();
-    } catch {
-      toast.error("Failed to record payment");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to record payment")); } finally {
       setSubmitting(false);
     }
   };
@@ -135,9 +132,7 @@ export default function FinancePage() {
       setShowFircModal(false);
       setFircForm(initialFircForm);
       loadTabData();
-    } catch {
-      toast.error("Failed to add FIRC record");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add FIRC record")); } finally {
       setSubmitting(false);
     }
   };
@@ -151,9 +146,7 @@ export default function FinancePage() {
       setShowGstModal(false);
       setGstForm(initialGstForm);
       loadTabData();
-    } catch {
-      toast.error("Failed to add GST record");
-    } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to add GST record")); } finally {
       setSubmitting(false);
     }
   };

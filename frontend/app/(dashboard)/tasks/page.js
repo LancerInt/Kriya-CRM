@@ -7,6 +7,7 @@ import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
+import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 
 export default function TasksPage() {
@@ -26,18 +27,14 @@ export default function TasksPage() {
       toast.success("Task created");
       setShowModal(false);
       setForm({ title: "", description: "", priority: "medium", due_date: "" });
-    } catch {
-      toast.error("Failed to create task");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create task")); }
   };
 
   const handleComplete = async (id) => {
     try {
       await dispatch(completeTask(id)).unwrap();
       toast.success("Task completed");
-    } catch {
-      toast.error("Failed to complete task");
-    }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to complete task")); }
   };
 
   const columns = [
