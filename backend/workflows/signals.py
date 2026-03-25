@@ -55,6 +55,75 @@ def _email_client_status(shipment, title, message):
 
 
 # ---------------------------------------------------------------------------
+# Client Shadow Executive Change → Notify old/new executive
+# ---------------------------------------------------------------------------
+
+@receiver(pre_save, sender='clients.Client')
+def capture_previous_shadow(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            instance._previous_shadow = sender.objects.filter(pk=instance.pk).values_list('shadow_executive_id', flat=True).first()
+        except Exception:
+            instance._previous_shadow = None
+    else:
+        instance._previous_shadow = None
+
+
+@receiver(post_save, sender='clients.Client')
+def on_shadow_executive_change(sender, instance, created, **kwargs):
+    if created:
+        return
+    previous = getattr(instance, '_previous_shadow', None)
+    current = instance.shadow_executive_id
+
+    if previous == current:
+        return
+
+    from notifications.models import Notification
+
+    # Notify the NEW shadow executive
+    if current and instance.shadow_executive:
+        Notification.objects.create(
+            user=instance.shadow_executive,
+            notification_type='system',
+            title=f'Shadow client assigned: {instance.company_name}',
+            message=f'You have been assigned as shadow executive for {instance.company_name}. You now have access to their data.',
+            link=f'/clients/{instance.id}',
+        )
+
+    # Notify the OLD shadow executive
+    if previous:
+        from accounts.models import User
+        try:
+            old_user = User.objects.get(id=previous)
+            if current:
+                new_name = instance.shadow_executive.full_name if instance.shadow_executive else 'another executive'
+                msg = f'You have been removed as shadow executive for {instance.company_name}. Access transferred to {new_name}.'
+            else:
+                msg = f'You have been removed as shadow executive for {instance.company_name}. You no longer have access to their data.'
+            Notification.objects.create(
+                user=old_user,
+                notification_type='alert',
+                title=f'Shadow access removed: {instance.company_name}',
+                message=msg,
+                link='/clients',
+            )
+        except User.DoesNotExist:
+            pass
+
+    # Notify the primary executive
+    if instance.primary_executive and instance.primary_executive_id != current and instance.primary_executive_id != previous:
+        if current and instance.shadow_executive:
+            Notification.objects.create(
+                user=instance.primary_executive,
+                notification_type='system',
+                title=f'Shadow executive updated for {instance.company_name}',
+                message=f'{instance.shadow_executive.full_name} is now the shadow executive for {instance.company_name}.',
+                link=f'/clients/{instance.id}',
+            )
+
+
+# ---------------------------------------------------------------------------
 # Shipment Status Change → Update Order + Notify Team + Email Client
 # ---------------------------------------------------------------------------
 

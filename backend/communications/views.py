@@ -90,11 +90,17 @@ class EmailAccountViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='sync-now')
     def sync_now(self, request, pk=None):
-        """Trigger email sync directly (no Celery needed)."""
+        """Trigger email sync + pipeline automation directly."""
         account = self.get_object()
         from .tasks import sync_emails
         try:
             result = sync_emails(email_account_id=str(account.id))
+            # Also run pipeline automation after sync
+            try:
+                from workflows.tasks import auto_pipeline_from_emails
+                auto_pipeline_from_emails()
+            except Exception:
+                pass
             return Response({'status': result}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

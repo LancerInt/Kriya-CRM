@@ -283,11 +283,12 @@ def auto_pipeline_from_emails():
     from datetime import timedelta
 
     now = timezone.now()
-    # Only scan emails from last 30 minutes (runs every 15 min, overlap for safety)
+    # Scan emails updated in last 24 hours that haven't been processed for pipeline
+    # Use updated_at since created_at reflects original email date
     recent_emails = Communication.objects.filter(
         comm_type='email',
         direction='inbound',
-        created_at__gte=now - timedelta(minutes=30),
+        updated_at__gte=now - timedelta(hours=24),
         client__isnull=False,
     ).select_related('client')
 

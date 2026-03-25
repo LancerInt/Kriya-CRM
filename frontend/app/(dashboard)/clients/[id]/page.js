@@ -164,9 +164,40 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
               <select
                 value={client.shadow_executive || ""}
                 onChange={async (e) => {
+                  const newId = e.target.value || null;
+                  const newUser = allUsers.find((u) => u.id === newId);
+                  const oldUser = allUsers.find((u) => u.id === client.shadow_executive);
+                  const newName = newUser ? `${newUser.first_name} ${newUser.last_name}` : "";
+                  const oldName = oldUser ? `${oldUser.first_name} ${oldUser.last_name}` : "";
+
+                  let confirmed = false;
+                  if (!client.shadow_executive && newId) {
+                    // First time assigning
+                    confirmed = confirm(`Assign ${newName} as shadow executive?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
+                  } else if (client.shadow_executive && newId && client.shadow_executive !== newId) {
+                    // Transferring from one to another
+                    confirmed = confirm(`Transfer shadow executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
+                  } else if (client.shadow_executive && !newId) {
+                    // Removing shadow executive
+                    confirmed = confirm(`Remove ${oldName} as shadow executive?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
+                  } else {
+                    confirmed = true;
+                  }
+
+                  if (!confirmed) {
+                    e.target.value = client.shadow_executive || "";
+                    return;
+                  }
+
                   try {
-                    await api.patch(`/clients/${client.id}/`, { shadow_executive: e.target.value || null });
-                    toast.success("Shadow executive updated");
+                    await api.patch(`/clients/${client.id}/`, { shadow_executive: newId });
+                    if (!client.shadow_executive && newId) {
+                      toast.success(`${newName} assigned as shadow executive`);
+                    } else if (client.shadow_executive && newId) {
+                      toast.success(`Shadow executive transferred from ${oldName} to ${newName}`);
+                    } else {
+                      toast.success(`Shadow executive removed`);
+                    }
                     onClientUpdate();
                   } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
                 }}

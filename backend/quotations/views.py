@@ -51,7 +51,6 @@ class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
         new_stage = request.data.get('stage')
         if not new_stage:
-            # Auto-advance to next stage
             try:
                 current_idx = stage_order.index(inquiry.stage)
                 if current_idx < len(stage_order) - 1:
@@ -61,8 +60,67 @@ class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             except ValueError:
                 return Response({'error': 'Invalid current stage'}, status=status.HTTP_400_BAD_REQUEST)
 
+        old_stage = inquiry.stage
         inquiry.stage = new_stage
         inquiry.save()
+
+        # Auto-create tasks and notifications based on stage
+        from notifications.models import Notification
+        from tasks.models import Task
+
+        assigned = inquiry.assigned_to or (inquiry.client.primary_executive if inquiry.client else None)
+        client_name = inquiry.client.company_name if inquiry.client else 'Unknown'
+
+        if new_stage == 'discussion' and assigned:
+            Task.objects.create(
+                title=f'Follow up with {client_name} on inquiry',
+                description=f'Client showed interest. Discuss product requirements, pricing, and terms.',
+                client=inquiry.client, owner=assigned, created_by=request.user,
+                priority='medium',
+            )
+
+        elif new_stage == 'sample' and assigned:
+            Task.objects.create(
+                title=f'Arrange sample for {client_name}',
+                description=f'Product: {inquiry.product_name or "TBD"}. Prepare and dispatch sample.',
+                client=inquiry.client, owner=assigned, created_by=request.user,
+                priority='high',
+            )
+
+        elif new_stage == 'quotation' and assigned:
+            Task.objects.create(
+                title=f'Prepare quotation for {client_name}',
+                description=f'Product: {inquiry.product_name or "TBD"}. Create quotation in Quotations page.',
+                client=inquiry.client, owner=assigned, created_by=request.user,
+                priority='high',
+            )
+
+        elif new_stage == 'negotiation' and assigned:
+            Task.objects.create(
+                title=f'Negotiate terms with {client_name}',
+                description=f'Client is negotiating. Review pricing and terms.',
+                client=inquiry.client, owner=assigned, created_by=request.user,
+                priority='high',
+            )
+
+        elif new_stage == 'order_confirmed' and assigned:
+            Task.objects.create(
+                title=f'Create order for {client_name}',
+                description=f'Order confirmed! Go to Quotations > Convert to Order.',
+                client=inquiry.client, owner=assigned, created_by=request.user,
+                priority='urgent',
+            )
+
+        # Notify assigned executive
+        if assigned and assigned != request.user:
+            Notification.objects.create(
+                user=assigned,
+                notification_type='task',
+                title=f'Pipeline: {client_name} → {new_stage.replace("_", " ").title()}',
+                message=f'Inquiry for {client_name} moved from "{old_stage}" to "{new_stage.replace("_", " ")}". Check your tasks.',
+                link='/pipeline',
+            )
+
         return Response(InquirySerializer(inquiry).data)
 
 class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
