@@ -36,4 +36,8 @@ app.conf.beat_schedule = {
         'task': 'workflows.check_meeting_reminders',
         'schedule': crontab(minute='*/30'),
     },
+    'purge-recycle-bin-daily': {
+        'task': 'workflows.purge_recycle_bin',
+        'schedule': crontab(hour=2, minute=0),  # 2:00 AM daily
+    },
 }

@@ -17,14 +17,17 @@ class ClientPortSerializer(serializers.ModelSerializer):
 
 class ClientListSerializer(serializers.ModelSerializer):
     primary_executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
+    shadow_executive_name = serializers.CharField(source='shadow_executive.full_name', read_only=True, default='')
     contact_count = serializers.IntegerField(read_only=True, default=0)
     order_count = serializers.IntegerField(read_only=True, default=0)
+    client_role = serializers.CharField(read_only=True, default='')
 
     class Meta:
         model = Client
         fields = ['id', 'company_name', 'country', 'city', 'business_type',
                   'preferred_currency', 'delivery_terms', 'status', 'primary_executive',
-                  'primary_executive_name', 'contact_count', 'order_count', 'created_at', 'updated_at']
+                  'primary_executive_name', 'shadow_executive', 'shadow_executive_name',
+                  'client_role', 'contact_count', 'order_count', 'created_at', 'updated_at']
 
 
 class ClientDetailSerializer(serializers.ModelSerializer):

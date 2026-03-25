@@ -168,10 +168,24 @@ export default function TeamChatPage() {
   const jitsiContainerRef = useRef(null);
   const jitsiApiRef = useRef(null);
 
+  const getCallRoomName = () => {
+    if (!activeRoom) return '';
+    return `KriyaCRM_${activeRoom.name.replace(/\s+/g, "_")}_${activeRoom.id.slice(0, 8)}`;
+  };
+
   const startGroupCall = () => {
     setInCall(true);
-    // Notify all team members
     notifyCallStarted();
+    // Post call link in chat
+    const callUrl = `https://jitsi.riot.im/${getCallRoomName()}`;
+    api.post(`/chat/rooms/${activeRoom.id}/send/`, {
+      content: `[JOIN_CALL:${callUrl}] ${currentUser?.first_name || "Someone"} started a group call. Click here to join!`,
+      message_type: "text",
+    }).catch(() => {});
+  };
+
+  const joinCall = () => {
+    setInCall(true);
   };
 
   const endGroupCall = () => {
@@ -180,6 +194,13 @@ export default function TeamChatPage() {
       jitsiApiRef.current = null;
     }
     setInCall(false);
+    // Post call ended message
+    if (activeRoom) {
+      api.post(`/chat/rooms/${activeRoom.id}/send/`, {
+        content: `[CALL_ENDED] ${currentUser?.first_name || "Someone"} ended the call.`,
+        message_type: "text",
+      }).catch(() => {});
+    }
   };
 
   useEffect(() => {
@@ -191,15 +212,16 @@ export default function TeamChatPage() {
       return;
     }
     const script = document.createElement("script");
-    script.src = "https://meet.jit.si/external_api.js";
+    script.src = "https://jitsi.riot.im/external_api.js";
     script.async = true;
     script.onload = initJitsi;
     document.head.appendChild(script);
 
     function initJitsi() {
       if (!jitsiContainerRef.current) return;
-      const roomName = `KriyaCRM_${activeRoom.name.replace(/\s+/g, "_")}_${activeRoom.id.slice(0, 8)}`;
-      const jitsiApi = new window.JitsiMeetExternalAPI("meet.jit.si", {
+      const roomName = getCallRoomName();
+      // Using jitsi.riot.im — free, no login required
+      const jitsiApi = new window.JitsiMeetExternalAPI("jitsi.riot.im", {
         roomName,
         parentNode: jitsiContainerRef.current,
         width: "100%",
@@ -208,6 +230,9 @@ export default function TeamChatPage() {
           startWithAudioMuted: true,
           startWithVideoMuted: true,
           prejoinPageEnabled: false,
+          disableModeratorIndicator: true,
+          enableLobbyChat: false,
+          hideLobbyButton: true,
         },
         interfaceConfigOverwrite: {
           TOOLBAR_BUTTONS: [
@@ -217,6 +242,7 @@ export default function TeamChatPage() {
           ],
           SHOW_JITSI_WATERMARK: false,
           SHOW_BRAND_WATERMARK: false,
+          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
         },
         userInfo: {
           displayName: currentUser?.first_name ? `${currentUser.first_name} ${currentUser.last_name}` : currentUser?.username,
@@ -226,12 +252,6 @@ export default function TeamChatPage() {
 
       jitsiApi.addEventListener("readyToClose", endGroupCall);
       jitsiApiRef.current = jitsiApi;
-
-      // Notify in chat
-      api.post(`/chat/rooms/${activeRoom.id}/send/`, {
-        content: `${currentUser?.first_name || "Someone"} started a group call. Join from the call panel!`,
-        message_type: "text",
-      }).catch(() => {});
     }
 
     return () => {
@@ -415,10 +435,16 @@ export default function TeamChatPage() {
                   End Call
                 </button>
               ) : (
-                <button onClick={startGroupCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  Group Call
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={startGroupCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    Start Call
+                  </button>
+                  <button onClick={joinCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14" /></svg>
+                    Join Call
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -494,10 +520,44 @@ export default function TeamChatPage() {
                             {msg.filename || "Download file"}
                           </a>
                         )}
-                        {/* Text */}
-                        {msg.content && msg.message_type === "text" && (
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
-                        )}
+                        {/* Text — with call/ended detection */}
+                        {msg.content && msg.message_type === "text" && (() => {
+                          if (msg.content.includes("[JOIN_CALL:")) {
+                            // Check if any CALL_ENDED message exists after this message
+                            const msgTime = new Date(msg.created_at).getTime();
+                            const callEnded = messages.some((m) => m.content?.includes("[CALL_ENDED]") && new Date(m.created_at).getTime() > msgTime);
+                            const msgAge = (Date.now() - msgTime) / 60000;
+                            const isExpired = callEnded || msgAge > 60;
+                            const displayText = msg.content.replace(/\[JOIN_CALL:[^\]]+\]\s*/, "");
+                            return (
+                              <div>
+                                <p className="whitespace-pre-wrap mb-1">{displayText}</p>
+                                {isExpired ? (
+                                  <span className="inline-flex items-center gap-1 text-xs text-gray-400 italic">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+                                    Call ended
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); joinCall(); }}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${own ? "bg-white/20 text-white hover:bg-white/30" : "bg-green-600 text-white hover:bg-green-700"}`}
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                    Join Call
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (msg.content.includes("[CALL_ENDED]")) {
+                            return (
+                              <p className="text-xs italic text-gray-400">
+                                {msg.content.replace("[CALL_ENDED] ", "")}
+                              </p>
+                            );
+                          }
+                          return <p className="whitespace-pre-wrap">{msg.content}</p>;
+                        })()}
                       </div>
                     )}
 

@@ -469,3 +469,12 @@ def check_meeting_reminders():
 
     logger.info(f"check_meeting_reminders: {reminder_count} meeting reminders sent")
     return f'{reminder_count} meeting reminders sent'
+
+
+@shared_task(name='workflows.purge_recycle_bin')
+def purge_recycle_bin():
+    """Permanently delete items that have been in recycle bin for over 30 days."""
+    from common.recycle_bin import auto_purge_expired
+    count = auto_purge_expired()
+    logger.info(f"purge_recycle_bin: {count} expired items permanently deleted")
+    return f'{count} expired items purged'

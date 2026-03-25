@@ -3,13 +3,17 @@ import { useState, useRef, useEffect } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/navigation";
 import { logout } from "@/store/slices/authSlice";
-import { HiOutlineBars3, HiOutlineBell, HiOutlineUser } from "react-icons/hi2";
+import api from "@/lib/axios";
+import { HiOutlineBars3, HiOutlineBell, HiOutlineUser, HiOutlineArrowPath } from "react-icons/hi2";
+import toast from "react-hot-toast";
 
 export default function Header({ onMenuClick }) {
   const { user } = useSelector((state) => state.auth);
   const dispatch = useDispatch();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -21,6 +25,35 @@ export default function Header({ onMenuClick }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Auto-sync every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      runSync(true);
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const runSync = async (silent = false) => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const accounts = await api.get("/communications/email-accounts/");
+      const accs = accounts.data.results || accounts.data;
+      let totalSynced = 0;
+      for (const acc of accs) {
+        const res = await api.post(`/communications/email-accounts/${acc.id}/sync-now/`);
+        const match = res.data?.status?.match(/(\d+)/);
+        if (match) totalSynced += parseInt(match[1]);
+      }
+      setLastSync(new Date());
+      if (!silent) toast.success(totalSynced > 0 ? `${totalSynced} new email(s) synced!` : "No new emails");
+    } catch {
+      if (!silent) toast.error("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleLogout = () => {
     dispatch(logout());
@@ -35,11 +68,23 @@ export default function Header({ onMenuClick }) {
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-3">
-        <button className="relative p-2 rounded-lg hover:bg-gray-100">
+      <div className="flex items-center gap-2">
+        {/* Sync button */}
+        <button
+          onClick={() => runSync(false)}
+          disabled={syncing}
+          className={`p-2 rounded-lg hover:bg-gray-100 ${syncing ? "animate-spin text-indigo-600" : "text-gray-500"}`}
+          title={lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : "Sync emails & data"}
+        >
+          <HiOutlineArrowPath className="w-5 h-5" />
+        </button>
+
+        {/* Notifications */}
+        <button onClick={() => router.push("/notifications")} className="relative p-2 rounded-lg hover:bg-gray-100">
           <HiOutlineBell className="w-5 h-5 text-gray-600" />
         </button>
 
+        {/* User dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}

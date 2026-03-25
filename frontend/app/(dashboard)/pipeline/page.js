@@ -43,6 +43,16 @@ export default function PipelinePage() {
     }
   };
 
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this inquiry?")) return;
+    try {
+      const { default: api } = await import("@/lib/axios");
+      await api.delete(`/quotations/inquiries/${id}/`);
+      toast.success("Inquiry deleted");
+      dispatch(fetchInquiries());
+    } catch { toast.error("Failed to delete"); }
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
@@ -77,18 +87,25 @@ export default function PipelinePage() {
               </div>
               <div className="space-y-3">
                 {items.map((item) => (
-                  <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-                    <p className="text-sm font-medium text-gray-900">{item.client_name || "Unknown Client"}</p>
-                    <p className="text-xs text-gray-500 mt-1">{item.product_name || "\u2014"}</p>
-                    <p className="text-xs text-gray-400 mt-1">Source: {item.source}</p>
-                    {item.stage !== "order_confirmed" && item.stage !== "lost" && (
-                      <button
-                        onClick={() => handleAdvance(item.id)}
-                        className="mt-3 text-xs text-indigo-600 hover:text-indigo-700 font-medium"
-                      >
-                        Advance &rarr;
+                  <div key={item.id} className="group bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{item.client_name || "Unknown Client"}</p>
+                        <p className="text-xs text-gray-500 mt-1">{item.product_name || "\u2014"}</p>
+                      </div>
+                      <button onClick={() => handleDelete(item.id)} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded" title="Delete">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>
-                    )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Source: {item.source}</p>
+                    {item.requirements && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.requirements}</p>}
+                    <div className="flex items-center gap-2 mt-3">
+                      {item.stage !== "order_confirmed" && item.stage !== "lost" && (
+                        <button onClick={() => handleAdvance(item.id)} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+                          Advance &rarr;
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {items.length === 0 && (

@@ -23,6 +23,7 @@ import {
   HiOutlineCog6Tooth,
   HiOutlineSparkles,
   HiOutlineUserGroup,
+  HiOutlineTrash,
 } from "react-icons/hi2";
 
 const navItems = [
@@ -44,6 +45,7 @@ const navItems = [
   { name: "Team Chat", href: "/team-chat", icon: HiOutlineUserGroup },
   { name: "Kriya AI", href: "/ai", icon: HiOutlineSparkles },
   { name: "Notifications", href: "/notifications", icon: HiOutlineBell },
+  { name: "Recycle Bin", href: "/recycle-bin", icon: HiOutlineTrash },
   { name: "Settings", href: "/settings", icon: HiOutlineCog6Tooth },
 ];
 

@@ -22,6 +22,7 @@ urlpatterns = [
     path('api/notifications/', include('notifications.urls')),
     path('api/agents/', include('agents.urls')),
     path('api/chat/', include('teamchat.urls')),
+    path('api/recycle-bin/', include('common.recycle_urls')),
 ]
 
 if settings.DEBUG:

@@ -207,9 +207,16 @@ class EmailService:
             from django.utils import timezone
             date = timezone.now()
 
+        # Parse CC addresses
+        cc_raw = msg.get('Cc', '') or msg.get('CC', '') or ''
+        from email.utils import getaddresses
+        cc_list = [addr for _, addr in getaddresses([cc_raw]) if addr]
+        cc_string = ', '.join(cc_list)
+
         return {
             'from_email': from_email,
             'to_email': to_email,
+            'cc': cc_string,
             'subject': msg.get('Subject', '(No Subject)'),
             'body': body,
             'date': date,

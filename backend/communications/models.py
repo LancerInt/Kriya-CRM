@@ -88,6 +88,7 @@ class Communication(TimeStampedModel):
     # External contact fields
     external_phone = models.CharField(max_length=30, blank=True)
     external_email = models.EmailField(blank=True, default='')
+    email_cc = models.TextField(blank=True, default='', help_text='Comma-separated CC emails')
 
     class Meta:
         db_table = 'communications'

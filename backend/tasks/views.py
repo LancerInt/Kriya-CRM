@@ -1,3 +1,4 @@
+from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -7,17 +8,19 @@ from .models import Task
 from .serializers import TaskSerializer
 
 
-class TaskViewSet(viewsets.ModelViewSet):
+class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     filterset_fields = ['status', 'priority', 'client', 'owner']
     search_fields = ['title', 'description']
     ordering_fields = ['due_date', 'priority', 'created_at']
 
     def get_queryset(self):
-        qs = Task.objects.select_related('owner', 'client', 'created_by').all()
+        qs = Task.objects.filter(is_deleted=False).select_related('owner', 'client', 'created_by')
         user = self.request.user
         if user.role == 'executive':
-            qs = qs.filter(Q(owner=user) | Q(created_by=user))
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(owner=user) | Q(created_by=user) | Q(client__in=client_ids))
         return qs
 
     @action(detail=False, methods=['get'])

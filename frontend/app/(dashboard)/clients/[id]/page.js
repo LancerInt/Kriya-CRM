@@ -395,6 +395,16 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                   <span className="font-medium">{selectedComm.external_email}</span>
                 </div>
               )}
+              {selectedComm.email_cc && (
+                <div className="sm:col-span-2">
+                  <span className="text-gray-500 block text-xs">CC</span>
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {selectedComm.email_cc.split(",").map((cc, i) => (
+                      <span key={i} className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">{cc.trim()}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {selectedComm.external_phone && (
                 <div>
                   <span className="text-gray-500 block text-xs">{selectedComm.direction === "inbound" ? "From" : "To"}</span>

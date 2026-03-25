@@ -1,8 +1,9 @@
+from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets
 from .models import Document
 from .serializers import DocumentSerializer
 
-class DocumentViewSet(viewsets.ModelViewSet):
+class DocumentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = DocumentSerializer
     filterset_fields = ['client', 'order', 'shipment', 'category']
     search_fields = ['name', 'filename']

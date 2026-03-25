@@ -23,7 +23,7 @@ class CommunicationSerializer(serializers.ModelSerializer):
                   'is_follow_up_required', 'ai_summary', 'attachments',
                   'email_message_id', 'email_in_reply_to', 'email_account',
                   'whatsapp_message_id', 'external_phone', 'external_email',
-                  'created_at']
+                  'email_cc', 'created_at']
         read_only_fields = ['id', 'user', 'email_message_id', 'email_in_reply_to',
                             'whatsapp_message_id', 'external_phone', 'external_email']
 

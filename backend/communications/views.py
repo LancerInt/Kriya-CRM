@@ -1,5 +1,6 @@
 import logging
 
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny
@@ -25,12 +26,18 @@ class CommunicationViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at']
 
     def get_queryset(self):
-        return Communication.objects.select_related('user', 'contact', 'client').prefetch_related('attachments').all()
+        qs = Communication.objects.filter(is_deleted=False).select_related('user', 'contact', 'client').prefetch_related('attachments')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(client__in=client_ids) | Q(client__isnull=True, user=user))
+        return qs.all()
 
     def perform_create(self, serializer):
         comm = serializer.save(user=self.request.user)
-        # Update client's updated_at
-        comm.client.save(update_fields=['updated_at'])
+        if comm.client:
+            comm.client.save(update_fields=['updated_at'])
 
 
 class EmailAccountViewSet(viewsets.ModelViewSet):
@@ -83,17 +90,14 @@ class EmailAccountViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='sync-now')
     def sync_now(self, request, pk=None):
-        """Trigger email sync for this account — runs directly (no Celery needed)."""
+        """Trigger email sync directly (no Celery needed)."""
         account = self.get_object()
         from .tasks import sync_emails
         try:
-            # Try Celery first, fall back to direct execution
-            sync_emails.delay(email_account_id=str(account.id))
-            return Response({'status': 'Sync task queued'}, status=status.HTTP_202_ACCEPTED)
-        except Exception:
-            # Celery/Redis not running — execute synchronously
             result = sync_emails(email_account_id=str(account.id))
             return Response({'status': result}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class WhatsAppConfigViewSet(viewsets.ModelViewSet):

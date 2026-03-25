@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "next/navigation";
 import { fetchClients } from "@/store/slices/clientSlice";
@@ -14,6 +14,9 @@ export default function ClientsPage() {
   const dispatch = useDispatch();
   const router = useRouter();
   const { list, loading, count } = useSelector((state) => state.clients);
+  const user = useSelector((state) => state.auth.user);
+  const isExecutive = user?.role === "executive";
+  const [tab, setTab] = useState("all");
 
   const loadClients = useCallback(() => {
     dispatch(fetchClients());
@@ -32,9 +35,24 @@ export default function ClientsPage() {
     } catch { toast.error("Failed to update status"); }
   };
 
+  // For executives: split into my clients and shadow clients
+  const myClients = useMemo(() => list.filter((c) => c.client_role === "primary"), [list]);
+  const shadowClients = useMemo(() => list.filter((c) => c.client_role === "shadow"), [list]);
+  const displayList = useMemo(() => {
+    if (!isExecutive) return list;
+    if (tab === "my") return myClients;
+    if (tab === "shadow") return shadowClients;
+    return list;
+  }, [isExecutive, tab, list, myClients, shadowClients]);
+
   const columns = [
     { key: "company_name", label: "Company", render: (row) => (
-      <span className="font-medium text-gray-900">{row.company_name}</span>
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-gray-900">{row.company_name}</span>
+        {isExecutive && row.client_role === "shadow" && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">Shadow</span>
+        )}
+      </div>
     )},
     { key: "country", label: "Country" },
     { key: "status", label: "Status", render: (row) => (
@@ -58,7 +76,7 @@ export default function ClientsPage() {
     <div>
       <PageHeader
         title="Clients"
-        subtitle={`${count} total clients`}
+        subtitle={`${displayList.length} client${displayList.length !== 1 ? "s" : ""}`}
         action={
           <Link
             href="/clients/new"
@@ -68,12 +86,28 @@ export default function ClientsPage() {
           </Link>
         }
       />
+
+      {/* Executive tabs: My Clients / Shadow Clients */}
+      {isExecutive && (
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setTab("all")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "all" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+            All ({list.length})
+          </button>
+          <button onClick={() => setTab("my")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "my" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
+            My Clients ({myClients.length})
+          </button>
+          <button onClick={() => setTab("shadow")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "shadow" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}>
+            Shadow Clients ({shadowClients.length})
+          </button>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
-        data={list}
+        data={displayList}
         loading={loading}
-        emptyTitle="No clients yet"
-        emptyDescription="Create your first client to get started"
+        emptyTitle="No clients"
+        emptyDescription={isExecutive ? "No clients assigned to you" : "Create your first client to get started"}
         onRowClick={(row) => router.push(`/clients/${row.id}`)}
       />
     </div>

@@ -20,11 +20,23 @@ def sync_emails(email_account_id=None):
     for account in accounts:
         emails = EmailService.fetch_emails(account)
         for em in emails:
-            # Dedup by message_id
+            # Dedup by message_id (primary)
             if em['message_id'] and Communication.objects.filter(
                 email_message_id=em['message_id']
             ).exists():
                 continue
+
+            # Dedup fallback: same subject + sender + date (within 1 minute)
+            if not em['message_id']:
+                from datetime import timedelta
+                exists = Communication.objects.filter(
+                    subject=em['subject'],
+                    external_email__in=[em['from_email'], em['to_email']],
+                    created_at__gte=em['date'] - timedelta(minutes=1),
+                    created_at__lte=em['date'] + timedelta(minutes=1),
+                ).exists()
+                if exists:
+                    continue
 
             # Determine direction from folder or sender
             if em.get('default_direction') == 'outbound' or em['from_email'].lower() == account.email.lower():
@@ -37,7 +49,7 @@ def sync_emails(email_account_id=None):
             # Match to client
             client, contact = ContactMatcher.match_by_email(external)
 
-            Communication.objects.create(
+            comm = Communication.objects.create(
                 client=client,
                 contact=contact,
                 user=account.user,
@@ -50,7 +62,13 @@ def sync_emails(email_account_id=None):
                 email_in_reply_to=em['in_reply_to'],
                 email_account=account,
                 external_email=external,
+                email_cc=em.get('cc', ''),
             )
+
+            # Override created_at with the actual email date
+            if em.get('date'):
+                Communication.objects.filter(id=comm.id).update(created_at=em['date'])
+
             total_synced += 1
 
         account.last_synced = timezone.now()

@@ -1,10 +1,11 @@
+from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Sample, SampleFeedback
 from .serializers import SampleSerializer, SampleFeedbackSerializer
 
-class SampleViewSet(viewsets.ModelViewSet):
+class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = SampleSerializer
     filterset_fields = ['client', 'status']
     search_fields = ['product_name', 'tracking_number']

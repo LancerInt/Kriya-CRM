@@ -1,18 +1,26 @@
+from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db.models import Q
 from .models import Inquiry, Quotation, QuotationItem
 from .serializers import InquirySerializer, QuotationSerializer, QuotationCreateSerializer
 from orders.models import Order, OrderItem
 from finance.models import Invoice
 
-class InquiryViewSet(viewsets.ModelViewSet):
+class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = InquirySerializer
     filterset_fields = ['client', 'stage', 'source', 'assigned_to']
     search_fields = ['product_name', 'requirements']
     def get_queryset(self):
-        return Inquiry.objects.select_related('client', 'assigned_to', 'product').all()
+        qs = Inquiry.objects.filter(is_deleted=False).select_related('client', 'assigned_to', 'product')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(client__in=client_ids) | Q(assigned_to=user))
+        return qs
     def perform_create(self, serializer):
         inquiry = serializer.save()
         if not inquiry.assigned_to:
@@ -39,17 +47,35 @@ class InquiryViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def advance(self, request, pk=None):
         inquiry = self.get_object()
+        stage_order = ['inquiry', 'discussion', 'sample', 'quotation', 'negotiation', 'order_confirmed']
+
         new_stage = request.data.get('stage')
-        if new_stage:
-            inquiry.stage = new_stage
-            inquiry.save()
+        if not new_stage:
+            # Auto-advance to next stage
+            try:
+                current_idx = stage_order.index(inquiry.stage)
+                if current_idx < len(stage_order) - 1:
+                    new_stage = stage_order[current_idx + 1]
+                else:
+                    return Response({'error': 'Already at final stage'}, status=status.HTTP_400_BAD_REQUEST)
+            except ValueError:
+                return Response({'error': 'Invalid current stage'}, status=status.HTTP_400_BAD_REQUEST)
+
+        inquiry.stage = new_stage
+        inquiry.save()
         return Response(InquirySerializer(inquiry).data)
 
-class QuotationViewSet(viewsets.ModelViewSet):
+class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     filterset_fields = ['client', 'status']
     search_fields = ['quotation_number']
     def get_queryset(self):
-        return Quotation.objects.select_related('client', 'created_by', 'approved_by').prefetch_related('items').all()
+        qs = Quotation.objects.filter(is_deleted=False).select_related('client', 'created_by', 'approved_by').prefetch_related('items')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(client__in=client_ids) | Q(created_by=user))
+        return qs
     def get_serializer_class(self):
         if self.action in ['create']:
             return QuotationCreateSerializer

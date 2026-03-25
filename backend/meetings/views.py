@@ -1,5 +1,6 @@
 import os
 import logging
+from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -16,7 +17,7 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 GOOGLE_REDIRECT_URI = 'http://localhost:8000/api/meetings/google-oauth-callback/'
 
 
-class CallLogViewSet(viewsets.ModelViewSet):
+class CallLogViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = CallLogSerializer
     filterset_fields = ['client', 'user', 'status']
 
