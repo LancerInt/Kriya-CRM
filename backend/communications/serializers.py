@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig
+from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft
 from common.encryption import encrypt_value
 
 
@@ -15,6 +15,8 @@ class CommunicationSerializer(serializers.ModelSerializer):
     contact_name = serializers.CharField(source='contact.name', read_only=True, default='')
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     attachments = AttachmentSerializer(many=True, read_only=True)
+    draft_id = serializers.SerializerMethodField()
+    draft_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Communication
@@ -23,7 +25,15 @@ class CommunicationSerializer(serializers.ModelSerializer):
                   'is_follow_up_required', 'ai_summary', 'attachments',
                   'email_message_id', 'email_in_reply_to', 'email_account',
                   'whatsapp_message_id', 'external_phone', 'external_email',
-                  'email_cc', 'created_at']
+                  'email_cc', 'draft_id', 'draft_status', 'created_at']
+
+    def get_draft_id(self, obj):
+        draft = obj.drafts.filter(is_deleted=False).order_by('-created_at').first()
+        return str(draft.id) if draft else None
+
+    def get_draft_status(self, obj):
+        draft = obj.drafts.filter(is_deleted=False).order_by('-created_at').first()
+        return draft.status if draft else None
         read_only_fields = ['id', 'user', 'email_message_id', 'email_in_reply_to',
                             'whatsapp_message_id', 'external_phone', 'external_email']
 
@@ -96,6 +106,21 @@ class SendEmailSerializer(serializers.Serializer):
     body = serializers.CharField()
     client = serializers.UUIDField(required=False, allow_null=True, default=None)
     email_account = serializers.UUIDField()
+
+
+class EmailDraftSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    original_subject = serializers.CharField(source='communication.subject', read_only=True, default='')
+    original_direction = serializers.CharField(source='communication.direction', read_only=True, default='')
+
+    class Meta:
+        model = EmailDraft
+        fields = ['id', 'client', 'client_name', 'communication', 'original_subject',
+                  'original_direction', 'subject', 'body', 'to_email', 'cc', 'status',
+                  'generated_by_ai', 'created_by', 'edited_by',
+                  'sent_at', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'client', 'communication', 'generated_by_ai',
+                            'created_by', 'sent_at', 'created_at', 'updated_at']
 
 
 class SendWhatsAppSerializer(serializers.Serializer):

@@ -1,0 +1,204 @@
+"""
+AI Email Reply Service — generates draft replies for incoming client emails.
+Uses the configured AI provider (Groq/Gemini/etc.) from agents app.
+Falls back to template-based reply if no AI is configured.
+"""
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+
+def generate_email_reply(communication):
+    """
+    Generate an AI-powered draft reply for an incoming email.
+    Returns dict: { subject, body }
+    """
+    client_name = communication.client.company_name if communication.client else 'Valued Customer'
+    contact_name = _get_contact_name(communication)
+    original_subject = communication.subject or '(No Subject)'
+    original_body = _clean_html(communication.body or '')
+    thread_context = _get_thread_context(communication)
+
+    # Build the prompt
+    prompt = f"""You are a professional export trade executive at Kriya Global Trade.
+Write a reply email to the following client email.
+
+Client: {client_name}
+Contact: {contact_name}
+Original Subject: {original_subject}
+Original Email:
+{original_body[:1000]}
+
+{f"Previous conversation context:{chr(10)}{thread_context}" if thread_context else ""}
+
+RULES:
+- Professional, concise, and friendly tone
+- Address the client's query or interest directly
+- If they inquire about products, mention we'll share details/quotation
+- If they mention pricing, say we'll prepare a competitive quotation
+- If they mention samples, offer to arrange sample dispatch
+- If they confirm an order, acknowledge and outline next steps
+- Sign off as "Kriya Global Trade"
+- Do NOT include email headers (From, To, Date)
+- Just write the reply body
+- Keep it under 150 words"""
+
+    # Try AI generation
+    reply_body = _generate_with_ai(prompt)
+
+    if not reply_body:
+        # Fallback to template
+        reply_body = _template_reply(client_name, contact_name, original_subject, original_body)
+
+    # Build reply subject
+    reply_subject = original_subject
+    if not reply_subject.lower().startswith('re:'):
+        reply_subject = f'Re: {reply_subject}'
+
+    return {
+        'subject': reply_subject,
+        'body': reply_body,
+    }
+
+
+def _generate_with_ai(prompt):
+    """Try to generate reply using configured AI provider."""
+    try:
+        from agents.models import AIConfig
+        from common.encryption import decrypt_value
+
+        config = AIConfig.objects.filter(is_active=True).first()
+        if not config:
+            return None
+
+        api_key = decrypt_value(config.api_key)
+
+        if config.provider == 'groq':
+            return _groq_generate(api_key, config.model_name, prompt)
+        elif config.provider == 'gemini':
+            return _gemini_generate(api_key, config.model_name, prompt)
+        else:
+            return None
+
+    except Exception as e:
+        logger.error(f'AI email generation failed: {e}')
+        return None
+
+
+def _groq_generate(api_key, model, prompt):
+    from groq import Groq
+    client = Groq(api_key=api_key)
+    response = client.chat.completions.create(
+        model=model or 'llama-3.3-70b-versatile',
+        messages=[
+            {'role': 'system', 'content': 'You are a professional export trade business email writer. Write concise, professional replies.'},
+            {'role': 'user', 'content': prompt},
+        ],
+        temperature=0.4,
+        max_tokens=500,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _gemini_generate(api_key, model, prompt):
+    from google import genai
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=model or 'gemini-2.0-flash',
+        contents=prompt,
+    )
+    return response.text.strip()
+
+
+def _template_reply(client_name, contact_name, subject, body):
+    """Fallback template-based reply when AI is not available."""
+    body_lower = body.lower()
+
+    if any(w in body_lower for w in ['price', 'quotation', 'quote', 'pricing', 'rate']):
+        return f"""Dear {contact_name},
+
+Thank you for your interest in our products.
+
+We will prepare a competitive quotation based on your requirements and share it with you shortly.
+
+Could you please confirm the required quantity and preferred delivery terms (FOB/CIF/CFR)?
+
+Best regards,
+Kriya Global Trade"""
+
+    elif any(w in body_lower for w in ['sample', 'trial', 'test']):
+        return f"""Dear {contact_name},
+
+Thank you for reaching out.
+
+We would be happy to arrange product samples for your evaluation. Please share:
+- Products of interest
+- Required quantity for testing
+- Shipping address
+
+We will dispatch the samples at the earliest.
+
+Best regards,
+Kriya Global Trade"""
+
+    elif any(w in body_lower for w in ['order', 'confirm', 'proceed', 'purchase']):
+        return f"""Dear {contact_name},
+
+Thank you for confirming your interest.
+
+We will prepare the Proforma Invoice with the agreed terms and share it for your review and confirmation.
+
+Please let us know if you need any modifications.
+
+Best regards,
+Kriya Global Trade"""
+
+    else:
+        return f"""Dear {contact_name},
+
+Thank you for your email.
+
+We have noted your inquiry and our team will review it promptly. We will get back to you with the necessary details shortly.
+
+Should you have any immediate questions, please don't hesitate to reach out.
+
+Best regards,
+Kriya Global Trade"""
+
+
+def _get_contact_name(communication):
+    """Get the contact's name from the communication."""
+    if communication.contact and communication.contact.name:
+        return communication.contact.name
+    if communication.external_email:
+        return communication.external_email.split('@')[0].title()
+    return 'Sir/Madam'
+
+
+def _get_thread_context(communication):
+    """Get previous email context for this client."""
+    if not communication.client:
+        return ''
+
+    from communications.models import Communication
+    previous = Communication.objects.filter(
+        client=communication.client,
+        comm_type='email',
+    ).exclude(id=communication.id).order_by('-created_at')[:3]
+
+    if not previous:
+        return ''
+
+    context = []
+    for msg in previous:
+        direction = 'Client' if msg.direction == 'inbound' else 'Us'
+        body = _clean_html(msg.body or '')[:200]
+        context.append(f"[{direction}] {msg.subject}: {body}")
+
+    return '\n'.join(context)
+
+
+def _clean_html(html):
+    """Strip HTML tags from email body."""
+    return re.sub(r'<[^>]+>', ' ', html).strip()

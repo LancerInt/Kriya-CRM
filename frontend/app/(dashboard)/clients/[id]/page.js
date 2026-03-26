@@ -345,6 +345,10 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [selectedComm, setSelectedComm] = useState(null);
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [draftForm, setDraftForm] = useState({ subject: "", body: "", cc: "" });
+  const [sendingDraft, setSendingDraft] = useState(false);
   const [form, setForm] = useState({ comm_type: "email", direction: "outbound", subject: "", body: "" });
   const [submitting, setSubmitting] = useState(false);
 
@@ -366,13 +370,61 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     finally { setSubmitting(false); }
   };
 
+  const openDraft = async (draftId) => {
+    try {
+      const res = await api.get(`/communications/drafts/${draftId}/`);
+      setDraft(res.data);
+      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: res.data.cc || "" });
+      setShowDraftModal(true);
+    } catch { toast.error("Failed to load draft"); }
+  };
+
+  const handleSendDraft = async () => {
+    setSendingDraft(true);
+    try {
+      await api.patch(`/communications/drafts/${draft.id}/`, draftForm);
+      await api.post(`/communications/drafts/${draft.id}/send/`);
+      toast.success("Email sent!");
+      setShowDraftModal(false);
+      reload();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
+    finally { setSendingDraft(false); }
+  };
+
+  const handleDiscardDraft = async () => {
+    if (!confirm("Discard this draft?")) return;
+    try {
+      await api.post(`/communications/drafts/${draft.id}/discard/`);
+      toast.success("Draft discarded");
+      setShowDraftModal(false);
+      reload();
+    } catch { toast.error("Failed to discard"); }
+  };
+
+  const handleRegenerateDraft = async () => {
+    try {
+      const res = await api.post(`/communications/drafts/${draft.id}/regenerate/`);
+      setDraft(res.data);
+      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: draftForm.cc });
+      toast.success("Draft regenerated!");
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to regenerate")); }
+  };
+
   const columns = [
     { key: "comm_type", label: "Type", render: (row) => <StatusBadge status={row.comm_type} /> },
-    { key: "direction", label: "Direction", render: (row) => (
-      <span className={`text-xs font-medium px-2 py-0.5 rounded ${row.direction === "inbound" ? "text-blue-700 bg-blue-50" : "text-green-700 bg-green-50"}`}>
-        {row.direction === "inbound" ? "Received" : "Sent"}
-      </span>
-    )},
+    { key: "direction", label: "Direction", render: (row) => {
+      if (row.direction === "inbound" && row.draft_status === "draft") {
+        return <span className="text-xs font-medium px-2 py-0.5 rounded text-purple-700 bg-purple-50">Draft</span>;
+      }
+      if (row.direction === "inbound" && row.draft_status === "sent") {
+        return <span className="text-xs font-medium px-2 py-0.5 rounded text-green-700 bg-green-50">Replied</span>;
+      }
+      return (
+        <span className={`text-xs font-medium px-2 py-0.5 rounded ${row.direction === "inbound" ? "text-blue-700 bg-blue-50" : "text-green-700 bg-green-50"}`}>
+          {row.direction === "inbound" ? "Received" : "Sent"}
+        </span>
+      );
+    }},
     { key: "subject", label: "Subject", render: (row) => <span className="font-medium">{row.subject || "\u2014"}</span> },
     { key: "external", label: "From/To", render: (row) => <span className="text-sm text-gray-500">{row.external_email || row.external_phone || "\u2014"}</span> },
     { key: "attachments", label: "", render: (row) => row.attachments && row.attachments.length > 0 && (
@@ -383,9 +435,21 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     )},
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
     { key: "actions", label: "", render: (row) => (
-      <button onClick={(e) => { e.stopPropagation(); setSelectedComm(row); }} className="px-3 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-        Snapshot
-      </button>
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {/* AI Draft badge for inbound emails */}
+        {row.direction === "inbound" && row.draft_id && row.draft_status === "draft" && (
+          <button onClick={() => openDraft(row.draft_id)} className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100">
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+            AI Draft
+          </button>
+        )}
+        {row.direction === "inbound" && row.draft_id && row.draft_status === "sent" && (
+          <span className="text-[10px] text-green-600 font-medium">Replied</span>
+        )}
+        <button onClick={() => setSelectedComm(row)} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+          Snapshot
+        </button>
+      </div>
     )},
   ];
 
@@ -524,6 +588,79 @@ function CommunicationsTab({ clientId, activeTab, client }) {
             <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
           </div>
         </form>
+      </Modal>
+
+      {/* AI Draft Modal */}
+      <Modal open={showDraftModal} onClose={() => setShowDraftModal(false)} title="AI Draft Reply" size="lg">
+        {draft && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              {draft.generated_by_ai && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-purple-700 bg-purple-50 rounded-full">
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  AI Generated
+                </span>
+              )}
+              <span className="text-xs text-gray-500">To: {draft.to_email}</span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+              <input value={draftForm.subject} onChange={(e) => setDraftForm({ ...draftForm, subject: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CC</label>
+              <input
+                type="text"
+                value={draftForm.cc}
+                onChange={(e) => setDraftForm({ ...draftForm, cc: e.target.value })}
+                placeholder="email1@example.com, email2@example.com"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none ${
+                  draftForm.cc && !draftForm.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))
+                    ? "border-red-300 bg-red-50" : "border-gray-300"
+                }`}
+              />
+              {draftForm.cc && draftForm.cc.includes(",") && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {draftForm.cc.split(",").filter((e) => e.trim()).map((email, i) => {
+                    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+                    return (
+                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${valid ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                        {email.trim()}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {draftForm.cc && !draftForm.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) && (
+                <p className="text-xs text-red-500 mt-1">Invalid email(s). Separate multiple with commas.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
+              <textarea value={draftForm.body} onChange={(e) => setDraftForm({ ...draftForm, body: e.target.value })} rows={10} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm" />
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+              <div className="flex gap-2">
+                <button onClick={handleRegenerateDraft} className="px-3 py-2 text-xs text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 font-medium">
+                  Regenerate AI
+                </button>
+                <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
+                  Discard
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowDraftModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                <button onClick={handleSendDraft} disabled={sendingDraft} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium text-sm hover:bg-indigo-700 disabled:opacity-50">
+                  {sendingDraft ? "Sending..." : "Send Email"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
     </>
   );

@@ -9,6 +9,8 @@ class Client(SoftDeleteModel):
         PROSPECT = 'prospect', 'Prospect'
 
     company_name = models.CharField(max_length=255, db_index=True)
+    tax_number = models.CharField(max_length=100, blank=True, help_text='GSTIN / CNPJ / VAT etc.')
+    phone_number = models.CharField(max_length=50, blank=True)
     country = models.CharField(max_length=100, blank=True, db_index=True)
     address = models.TextField(blank=True)
     city = models.CharField(max_length=100, blank=True)

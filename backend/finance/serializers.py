@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Invoice, InvoiceItem, Payment, FIRCRecord, GSTRecord
+from .models import Invoice, InvoiceItem, Payment, FIRCRecord, GSTRecord, ProformaInvoice, ProformaInvoiceItem
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -46,3 +46,20 @@ class GSTRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = GSTRecord
         fields = '__all__'
+
+
+class PIItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProformaInvoiceItem
+        fields = ['id', 'product_name', 'packages_description', 'description_of_goods',
+                  'quantity', 'unit', 'unit_price', 'total_price']
+
+
+class ProformaInvoiceSerializer(serializers.ModelSerializer):
+    items = PIItemSerializer(many=True, read_only=True)
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+
+    class Meta:
+        model = ProformaInvoice
+        fields = '__all__'
+        read_only_fields = ['id', 'created_by', 'pdf_file']

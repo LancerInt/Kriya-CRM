@@ -6,13 +6,14 @@ from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import Communication, EmailAccount, WhatsAppConfig
+from .models import Communication, EmailAccount, WhatsAppConfig, EmailDraft
 from .serializers import (
     CommunicationSerializer,
     EmailAccountSerializer,
     WhatsAppConfigSerializer,
     SendEmailSerializer,
     SendWhatsAppSerializer,
+    EmailDraftSerializer,
 )
 from .services import EmailService, WhatsAppService, ContactMatcher
 
@@ -102,6 +103,101 @@ class EmailAccountViewSet(viewsets.ModelViewSet):
             except Exception:
                 pass
             return Response({'status': result}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class EmailDraftViewSet(viewsets.ModelViewSet):
+    serializer_class = EmailDraftSerializer
+    filterset_fields = ['client', 'status']
+
+    def get_queryset(self):
+        qs = EmailDraft.objects.filter(is_deleted=False).select_related('client', 'communication')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(client__in=client_ids) | Q(created_by=user))
+        return qs
+
+    def perform_update(self, serializer):
+        serializer.save(edited_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """Send the draft email to the client."""
+        draft = self.get_object()
+
+        if draft.status != 'draft':
+            return Response({'error': 'Only drafts can be sent'}, status=status.HTTP_400_BAD_REQUEST)
+        if not draft.body.strip():
+            return Response({'error': 'Email body cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+        if not draft.subject.strip():
+            return Response({'error': 'Subject is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not draft.to_email:
+            return Response({'error': 'Recipient email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get email account
+        email_account = EmailAccount.objects.filter(user=request.user, is_active=True).first()
+        if not email_account:
+            email_account = EmailAccount.objects.filter(is_active=True).first()
+        if not email_account:
+            return Response({'error': 'No email account configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Send email with CC
+        try:
+            EmailService.send_email(
+                email_account=email_account,
+                to=draft.to_email,
+                subject=draft.subject,
+                body_html=draft.body.replace('\n', '<br>'),
+                cc=draft.cc if draft.cc else None,
+            )
+        except Exception as e:
+            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Update draft
+        from django.utils import timezone
+        draft.status = 'sent'
+        draft.sent_at = timezone.now()
+        draft.save(update_fields=['status', 'sent_at'])
+
+        # Create outgoing Communication record
+        Communication.objects.create(
+            client=draft.client,
+            user=request.user,
+            comm_type='email',
+            direction='outbound',
+            subject=draft.subject,
+            body=draft.body,
+            status='sent',
+            email_account=email_account,
+            external_email=draft.to_email,
+            email_in_reply_to=draft.communication.email_message_id or '',
+        )
+
+        return Response({'status': 'sent', 'sent_at': draft.sent_at.isoformat()})
+
+    @action(detail=True, methods=['post'])
+    def discard(self, request, pk=None):
+        """Discard a draft."""
+        draft = self.get_object()
+        draft.status = 'discarded'
+        draft.save(update_fields=['status'])
+        return Response({'status': 'discarded'})
+
+    @action(detail=True, methods=['post'])
+    def regenerate(self, request, pk=None):
+        """Regenerate AI draft for this email."""
+        draft = self.get_object()
+        from .ai_email_service import generate_email_reply
+        try:
+            reply = generate_email_reply(draft.communication)
+            draft.subject = reply['subject']
+            draft.body = reply['body']
+            draft.generated_by_ai = True
+            draft.save(update_fields=['subject', 'body', 'generated_by_ai'])
+            return Response(EmailDraftSerializer(draft).data)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -102,6 +102,34 @@ class Communication(TimeStampedModel):
         return f"{self.comm_type}: {self.subject or 'No subject'}"
 
 
+class EmailDraft(TimeStampedModel):
+    """AI-generated or manual email draft linked to an incoming communication."""
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        SENT = 'sent', 'Sent'
+        DISCARDED = 'discarded', 'Discarded'
+
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='email_drafts', null=True, blank=True)
+    communication = models.ForeignKey(Communication, on_delete=models.CASCADE, related_name='drafts',
+                                       help_text='The incoming email this draft replies to')
+    subject = models.CharField(max_length=500)
+    body = models.TextField()
+    to_email = models.EmailField()
+    cc = models.TextField(blank=True, default='', help_text='Comma-separated CC emails')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    generated_by_ai = models.BooleanField(default=False)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_drafts')
+    edited_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='edited_drafts')
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'email_drafts'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Draft: {self.subject[:50]} ({self.status})"
+
+
 class CommunicationAttachment(TimeStampedModel):
     communication = models.ForeignKey(Communication, on_delete=models.CASCADE, related_name='attachments')
     file = models.FileField(upload_to='comm_attachments/%Y/%m/')

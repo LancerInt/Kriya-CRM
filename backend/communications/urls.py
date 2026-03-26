@@ -4,6 +4,7 @@ from . import views
 
 router = DefaultRouter()
 router.register('email-accounts', views.EmailAccountViewSet, basename='email-account')
+router.register('drafts', views.EmailDraftViewSet, basename='email-draft')
 router.register('whatsapp-configs', views.WhatsAppConfigViewSet, basename='whatsapp-config')
 router.register('', views.CommunicationViewSet, basename='communication')
 
