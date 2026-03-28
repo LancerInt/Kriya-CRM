@@ -133,7 +133,7 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .pi_service import generate_pi_pdf
         pdf_buffer = generate_pi_pdf(pi)
         response = HttpResponse(pdf_buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="PI_{pi.invoice_number.replace("/", "-")}.pdf"'
+        response['Content-Disposition'] = f'inline; filename="PI_{pi.invoice_number.replace("/", "-")}_{pi.client_company_name.replace(" ", "_")}.pdf"'
         return response
 
     @action(detail=True, methods=['post'], url_path='send-email')
@@ -242,7 +242,7 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .ci_service import generate_ci_pdf
         pdf_buffer = generate_ci_pdf(ci)
         response = HttpResponse(pdf_buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="CI_{ci.invoice_number.replace("/", "-")}.pdf"'
+        response['Content-Disposition'] = f'inline; filename="CI_{ci.invoice_number.replace("/", "-")}_{ci.client_company_name.replace(" ", "_")}.pdf"'
         return response
 
     @action(detail=True, methods=['post'], url_path='send-email')

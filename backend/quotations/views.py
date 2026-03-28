@@ -140,6 +140,40 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             return QuotationCreateSerializer
         return QuotationSerializer
 
+    @action(detail=False, methods=['post'], url_path='create-blank')
+    def create_blank(self, request):
+        """Create a blank quotation for a client."""
+        client_id = request.data.get('client_id')
+        if not client_id:
+            return Response({'error': 'client_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        from clients.models import Client
+        try:
+            client = Client.objects.get(id=client_id)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .models import generate_quotation_number
+        q = Quotation.objects.create(
+            quotation_number=generate_quotation_number(),
+            client=client,
+            currency=client.preferred_currency or 'USD',
+            delivery_terms='FOB',
+            country_of_origin='India',
+            country_of_final_destination=client.country or '',
+            created_by=request.user,
+        )
+        # Add one blank item
+        QuotationItem.objects.create(
+            quotation=q,
+            product_name='',
+            description='',
+            quantity=0,
+            unit='KG',
+            unit_price=0,
+            total_price=0,
+        )
+        return Response(QuotationSerializer(q).data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], url_path='save-with-items')
     def save_with_items(self, request, pk=None):
         """Save quotation fields + replace all items in one request."""
@@ -263,8 +297,10 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q = self.get_object()
         from .quotation_service import generate_quotation_pdf
         pdf_buffer = generate_quotation_pdf(q)
+        client_name = q.client.company_name if q.client else 'Client'
+        filename = f'Quotation_{q.quotation_number.replace("/", "-")}_{client_name.replace(" ", "_")}.pdf'
         response = HttpResponse(pdf_buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="QT_{q.quotation_number.replace("/", "-")}.pdf"'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
     @action(detail=True, methods=['post'])

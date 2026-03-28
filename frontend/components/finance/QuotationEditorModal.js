@@ -13,7 +13,15 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   const icr = ic + " text-right";
   const icStyle = { fontFamily: bkFont, fontSize: "14px" };
 
-  const total = qtItems.reduce((s, it) => s + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
+  const calcAmount = (item) => {
+    const qty = parseFloat(item.quantity);
+    const price = parseFloat(item.unit_price);
+    if (!qty || !price) return null;
+    return qty * price;
+  };
+
+  const validAmounts = qtItems.map(calcAmount).filter(v => v !== null);
+  const total = validAmounts.length > 0 ? validAmounts.reduce((s, v) => s + v, 0) : null;
 
   const updateItem = (i, field, value) => {
     const items = [...qtItems];
@@ -127,26 +135,28 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
             <tr style={{ backgroundColor: "#558b2f" }}>
               <th className="border border-gray-400 p-1 text-left text-white text-sm">Product Name</th>
               <th className="border border-gray-400 p-1 text-left text-white text-sm">Product Details</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-sm">Price / Kg</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-sm">Amount</th>
+              <th className="border border-gray-400 p-1 text-right text-white text-sm w-20">Quantity</th>
+              <th className="border border-gray-400 p-1 text-right text-white text-sm w-24">Price</th>
+              <th className="border border-gray-400 p-1 text-right text-white text-sm w-28">Amount</th>
               <th className="border border-gray-400 p-1 w-5"></th>
             </tr>
           </thead>
           <tbody>
             {qtItems.map((item, i) => {
-              const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+              const amt = calcAmount(item);
               return (
                 <tr key={item.id || i}>
                   <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.description || ""} onChange={(e) => updateItem(i, "description", e.target.value)} className={ic} placeholder={`${item.quantity || 0} ${item.unit || "KG"}`} /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={item.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className={icr + " w-20"} /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" value={lineTotal || ""} readOnly className={icr + " font-medium bg-gray-50 w-20"} /></td>
+                  <td className="border border-gray-400 p-0"><input value={item.description || ""} onChange={(e) => updateItem(i, "description", e.target.value)} className={ic} placeholder="Details / Specs" /></td>
+                  <td className="border border-gray-400 p-0"><input type="number" value={parseFloat(item.quantity) ? item.quantity : ""} onChange={(e) => updateItem(i, "quantity", e.target.value)} placeholder="-.--" className={icr + " w-20"} /></td>
+                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={parseFloat(item.unit_price) ? item.unit_price : ""} onChange={(e) => updateItem(i, "unit_price", e.target.value)} placeholder="-.--" className={icr + " w-24"} /></td>
+                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{amt !== null ? amt.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "-.--"}</td>
                   <td className="border border-gray-400 p-0 text-center"><button onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600">&times;</button></td>
                 </tr>
               );
             })}
             <tr>
-              <td colSpan="5" className="border border-gray-400 p-1">
+              <td colSpan="6" className="border border-gray-400 p-1">
                 <button onClick={addItem} className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">+ Add Item</button>
               </td>
             </tr>
@@ -158,7 +168,7 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
           <tbody>
             <tr>
               <td className="text-right font-bold p-1" style={{ color: "#558b2f" }}>Total</td>
-              <td className="text-right font-bold p-1 w-28" style={{ color: "#558b2f" }}>$ {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+              <td className="text-right font-bold p-1 w-28" style={{ color: "#558b2f" }}>{total !== null ? `$ ${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "-.--"}</td>
             </tr>
           </tbody>
         </table>

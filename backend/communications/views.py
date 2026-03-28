@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import Communication, EmailAccount, WhatsAppConfig, EmailDraft
+from .models import Communication, EmailAccount, WhatsAppConfig, EmailDraft, QuoteRequest
 from .serializers import (
     CommunicationSerializer,
     EmailAccountSerializer,
@@ -14,6 +14,7 @@ from .serializers import (
     SendEmailSerializer,
     SendWhatsAppSerializer,
     EmailDraftSerializer,
+    QuoteRequestSerializer,
 )
 from .services import EmailService, WhatsAppService, ContactMatcher
 
@@ -209,6 +210,66 @@ class WhatsAppConfigViewSet(viewsets.ModelViewSet):
         return WhatsAppConfig.objects.all()
 
 
+class QuoteRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = QuoteRequestSerializer
+    filterset_fields = ['status', 'source_channel', 'client', 'assigned_to']
+    ordering_fields = ['created_at', 'ai_confidence']
+
+    def get_queryset(self):
+        qs = QuoteRequest.objects.filter(is_deleted=False).select_related(
+            'client', 'contact', 'assigned_to', 'source_communication', 'linked_quotation'
+        )
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(Q(client__in=client_ids) | Q(assigned_to=user))
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='generate-draft-quote')
+    def generate_draft_quote(self, request, pk=None):
+        """Generate a draft quotation from this quote request."""
+        qr = self.get_object()
+        if qr.linked_quotation:
+            from quotations.serializers import QuotationSerializer
+            return Response(QuotationSerializer(qr.linked_quotation).data)
+
+        from .auto_quote_service import _generate_draft_quotation
+        try:
+            quotation = _generate_draft_quotation(qr)
+            qr.linked_quotation = quotation
+            qr.status = 'converted'
+            qr.save(update_fields=['linked_quotation', 'status'])
+            from quotations.serializers import QuotationSerializer
+            return Response(QuotationSerializer(quotation).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        """Reject this quote request."""
+        qr = self.get_object()
+        qr.status = 'rejected'
+        qr.save(update_fields=['status'])
+        return Response(QuoteRequestSerializer(qr).data)
+
+    @action(detail=True, methods=['post'], url_path='detect-quote')
+    def detect_quote(self, request, pk=None):
+        """Manually trigger quote detection on a communication."""
+        comm_id = request.data.get('communication_id')
+        if not comm_id:
+            return Response({'error': 'communication_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            comm = Communication.objects.get(id=comm_id)
+        except Communication.DoesNotExist:
+            return Response({'error': 'Communication not found'}, status=status.HTTP_404_NOT_FOUND)
+        from .auto_quote_service import process_communication_for_quote
+        qr = process_communication_for_quote(comm)
+        if qr:
+            return Response(QuoteRequestSerializer(qr).data, status=status.HTTP_201_CREATED)
+        return Response({'message': 'No quote intent detected'}, status=status.HTTP_200_OK)
+
+
 @api_view(['POST'])
 def send_email_view(request):
     """Send an email and create a Communication record with optional attachments."""
@@ -384,7 +445,7 @@ def whatsapp_webhook_view(request):
             # Match to client
             client, contact = ContactMatcher.match_by_phone(from_phone)
 
-            Communication.objects.create(
+            comm = Communication.objects.create(
                 client=client,
                 contact=contact,
                 comm_type='whatsapp',
@@ -394,6 +455,14 @@ def whatsapp_webhook_view(request):
                 whatsapp_message_id=wa_msg_id,
                 external_phone=from_phone,
             )
+
+            # Auto-detect quote request
+            try:
+                from communications.auto_quote_service import process_communication_for_quote
+                process_communication_for_quote(comm)
+            except Exception as qe:
+                logger.error(f'Quote request detection failed for WA {comm.id}: {qe}')
+
     except Exception as e:
         logger.error(f'WhatsApp webhook processing error: {e}')
 

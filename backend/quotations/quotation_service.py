@@ -29,8 +29,11 @@ EXPORTER = {
 def generate_quotation_pdf(q):
     """Generate PDF matching the Kriya Biosys Quotation template."""
     buffer = io.BytesIO()
+    client_name = q.client.company_name if q.client else 'Client'
+    pdf_title = f'Quotation {q.quotation_number} - {client_name}'
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=12*mm, bottomMargin=10*mm,
-                            leftMargin=10*mm, rightMargin=10*mm)
+                            leftMargin=10*mm, rightMargin=10*mm,
+                            title=pdf_title, author='Kriya Biosys Private Limited')
     styles = getSampleStyleSheet()
     el = []
 
@@ -89,7 +92,7 @@ def generate_quotation_pdf(q):
     # Styles — Bookman Old Style, font size 10
     FS = 10
     s8 = ParagraphStyle('s8', parent=styles['Normal'], fontSize=10, leading=12, fontName=_br)
-    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=10, leading=12, fontName=_br)
+    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=8, leading=10, fontName=_br)
     s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=10, leading=12, fontName=_bf)
     lb = ParagraphStyle('lb', parent=styles['Normal'], fontSize=10, leading=13, fontName=_bf, textColor=NAVY)
     vl = ParagraphStyle('vl', parent=styles['Normal'], fontSize=10, leading=13, fontName=_br)
@@ -158,7 +161,6 @@ def generate_quotation_pdf(q):
     client = q.client
     client_name = client.company_name if client else ''
     client_contact = client.contacts.filter(is_deleted=False).order_by('-is_primary').first() if client else None
-    contact_name = f'Attend : {client_contact.name}' if client_contact else ''
     client_addr = client.address or '' if client else ''
     client_postal = f'{client.postal_code}' if client and client.postal_code else ''
     client_city = ', '.join(filter(None, [
@@ -169,13 +171,13 @@ def generate_quotation_pdf(q):
     client_phone = f'Phone: {client_contact.phone or client.phone_number}' if client_contact and (client_contact.phone or client.phone_number) else ''
 
     rows = [
-        [Paragraph('Exporter', ParagraphStyle('exp', fontSize=12, leading=12, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), Paragraph('Consignee', ParagraphStyle('con', fontSize=12, leading=12, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), '', rc],
-        [Paragraph(EXPORTER['name'], s8b), Paragraph(client_name, s8b), '', ''],
-        [Paragraph(EXPORTER['lines'][0], s7), Paragraph(contact_name, s7), '', ''],
-        [Paragraph(EXPORTER['lines'][1], s7), Paragraph(client_addr, s7), '', ''],
-        [Paragraph(EXPORTER['lines'][2], s7), Paragraph(f'{client_postal} {client_city}', s7), '', ''],
-        [Paragraph(f'Contact : {EXPORTER["contact"]}', s7), Paragraph(client_country, s7), '', ''],
-        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(client_phone, s7), '', ''],
+        [Paragraph('Exporter', ParagraphStyle('exp', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), Paragraph('Consignee', ParagraphStyle('con', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), '', rc],
+        [Paragraph(EXPORTER['name'], ParagraphStyle('cn', fontSize=8, leading=10, fontName=_bf)), Paragraph(client_name, s8b), '', ''],
+        [Paragraph(EXPORTER['lines'][0], s7), Paragraph(client_addr, s7), '', ''],
+        [Paragraph(EXPORTER['lines'][1], s7), Paragraph(f'{client_postal} {client_city}', s7), '', ''],
+        [Paragraph(EXPORTER['lines'][2], s7), Paragraph(client_country, s7), '', ''],
+        [Paragraph(f'Contact : {EXPORTER["contact"]}', s7), Paragraph(client_phone, s7), '', ''],
+        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph('', s7), '', ''],
     ]
     t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*6)
     t1.setStyle(TableStyle([
@@ -226,10 +228,10 @@ def generate_quotation_pdf(q):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
         ('LEFTPADDING', (0,0), (-1,-1), 4),
     ]))
-    sidebar = RotatedText('SHIPMENT  DETAILS', 8*mm, 4*_rh, G, 7, _mt)
+    sidebar = RotatedText('SHIPMENT  DETAILS', 8*mm, 4*_rh, G, 8, _mt)
     sw = Table([[sidebar, st]], colWidths=[8*mm, PW - 8*mm])
     sw.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ('TOPPADDING', (0,0), (-1,-1), 0),
@@ -239,7 +241,8 @@ def generate_quotation_pdf(q):
     el.append(Spacer(1, 1*mm))
 
     # ═══ PACKING DETAILS ═══
-    TCW = [40*mm, 80*mm, 35*mm, 35*mm]  # 190mm total
+    # Product(40) Details(55) Quantity(25) Price(35) Amount(35) = 190mm
+    TCW = [40*mm, 55*mm, 25*mm, 35*mm, 35*mm]
 
     # Register Arial Regular for PACKING DETAILS title
     arial_path = os.path.join(img_dir, 'Arial-Regular.ttf')
@@ -256,25 +259,30 @@ def generate_quotation_pdf(q):
     el.append(Spacer(1, 2*mm))
 
     # Header
-    hs = ParagraphStyle('hs', fontSize=10, fontName=_bf, textColor=W, leading=17)
-    hsr = ParagraphStyle('hsr', fontSize=10, fontName=_bf, textColor=W, leading=17, alignment=2)
+    hs = ParagraphStyle('hs', fontSize=10, fontName=_bf, textColor=W, leading=12)
+    hsr = ParagraphStyle('hsr', fontSize=10, fontName=_bf, textColor=W, leading=12, alignment=2)
+    hsc = ParagraphStyle('hsc', fontSize=10, fontName=_bf, textColor=W, leading=12, alignment=1)
     hdr = [
         Paragraph('Product Name', hs),
         Paragraph('Product Details', hs),
-        Paragraph('Price / Kg', hsr),
+        Paragraph('Quantity', hsc),
+        Paragraph('Price', hsr),
         Paragraph('Amount', hsr),
     ]
 
+    prefix = '$ ' if q.currency == 'USD' else ''
     data = [hdr]
     for item in q.items.all():
-        # Show description as entered; fall back to "qty unit" if empty
-        details_text = item.description if item.description else f'{item.quantity:,.0f} {item.unit}'
+        qty = float(item.quantity) if item.quantity else 0
+        price = float(item.unit_price) if item.unit_price else 0
+        amount = qty * price if qty and price else 0
 
         data.append([
             item.product_name,
-            details_text,
-            f'$ {item.unit_price:,.2f}' if q.currency == 'USD' else f'{item.unit_price:,.2f}',
-            f'$ {item.total_price:,.2f}' if q.currency == 'USD' else f'{item.total_price:,.2f}',
+            item.description or '',
+            f'{qty:,.0f} {item.unit}' if qty else '-.--',
+            f'{prefix}{price:,.2f}' if price else '-.--',
+            f'{prefix}{amount:,.2f}' if amount else '-.--',
         ])
 
     it = Table(data, colWidths=TCW)
@@ -284,7 +292,8 @@ def generate_quotation_pdf(q):
         ('FONT', (0,1), (-1,-1), _br),
         ('FONTSIZE', (0,1), (-1,-1), 10),
         ('ALIGN', (0,0), (1,-1), 'LEFT'),
-        ('ALIGN', (2,0), (-1,-1), 'RIGHT'),
+        ('ALIGN', (2,1), (2,-1), 'CENTER'),
+        ('ALIGN', (3,0), (-1,-1), 'RIGHT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,0), 5),
         ('BOTTOMPADDING', (0,0), (-1,0), 5),
@@ -298,12 +307,14 @@ def generate_quotation_pdf(q):
 
     # ═══ TOTAL ═══
     ts_g = ParagraphStyle('tsg', fontSize=FS, textColor=G, fontName=_bf, alignment=2)
-    total_val = sum(i.total_price for i in q.items.all())
-    prefix = '$ ' if q.currency == 'USD' else ''
+    amounts = [float(i.quantity or 0) * float(i.unit_price or 0) for i in q.items.all()]
+    valid_amounts = [a for a in amounts if a > 0]
+    total_val = sum(valid_amounts) if valid_amounts else 0
+    total_display = f'{prefix}{total_val:,.2f}' if total_val else '-.--'
     tot = Table([
-        ['', Paragraph('<b>Total</b>', ts_g),
-         Paragraph(f'<b>{prefix}{total_val:,.2f}</b>', ts_g)]
-    ], colWidths=[sum(TCW) - 70*mm, 35*mm, 35*mm])
+        ['', '', '', Paragraph('<b>Total</b>', ts_g),
+         Paragraph(f'<b>{total_display}</b>', ts_g)]
+    ], colWidths=TCW)
     tot.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
         ('TOPPADDING', (0,0), (-1,-1), 4),

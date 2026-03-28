@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft
+from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft, QuoteRequest
 from common.encryption import encrypt_value
 
 
@@ -127,3 +127,32 @@ class SendWhatsAppSerializer(serializers.Serializer):
     to = serializers.CharField(max_length=30)
     message = serializers.CharField()
     client = serializers.UUIDField(required=False, allow_null=True, default=None)
+
+
+class QuoteRequestSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True, default='')
+    source_subject = serializers.CharField(source='source_communication.subject', read_only=True, default='')
+    source_body = serializers.CharField(source='source_communication.body', read_only=True, default='')
+    linked_quotation_number = serializers.CharField(source='linked_quotation.quotation_number', read_only=True, default='')
+
+    class Meta:
+        model = QuoteRequest
+        fields = [
+            'id', 'source_communication', 'source_channel',
+            'client', 'client_name', 'contact',
+            'sender_name', 'sender_email', 'sender_phone',
+            'client_auto_created',
+            'status', 'assigned_to', 'assigned_to_name',
+            'ai_confidence',
+            'extracted_product', 'extracted_quantity', 'extracted_unit',
+            'extracted_packaging', 'extracted_destination_country',
+            'extracted_destination_port', 'extracted_delivery_terms',
+            'extracted_payment_terms', 'extracted_notes',
+            'linked_quotation', 'linked_quotation_number',
+            'source_subject', 'source_body',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'source_communication', 'source_channel',
+                            'client_auto_created', 'ai_confidence',
+                            'linked_quotation', 'created_at', 'updated_at']

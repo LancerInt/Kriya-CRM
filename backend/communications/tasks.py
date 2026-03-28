@@ -76,6 +76,14 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Draft generation failed for {comm.id}: {e}')
 
+            # Auto-detect quote request from inbound messages
+            if direction == 'inbound':
+                try:
+                    from communications.auto_quote_service import process_communication_for_quote
+                    process_communication_for_quote(comm)
+                except Exception as e:
+                    logger.error(f'Quote request detection failed for {comm.id}: {e}')
+
             total_synced += 1
 
         account.last_synced = timezone.now()

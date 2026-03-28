@@ -139,3 +139,63 @@ class CommunicationAttachment(TimeStampedModel):
 
     class Meta:
         db_table = 'communication_attachments'
+
+
+class QuoteRequest(TimeStampedModel):
+    """
+    Auto-generated quote request from incoming email/WhatsApp messages.
+    Created when AI detects a quote intent in a communication.
+    """
+    class Status(models.TextChoices):
+        NEW = 'new', 'New'
+        REVIEWED = 'reviewed', 'Reviewed'
+        CONVERTED = 'converted', 'Converted to Quote'
+        REJECTED = 'rejected', 'Rejected'
+
+    class SourceChannel(models.TextChoices):
+        EMAIL = 'email', 'Email'
+        WHATSAPP = 'whatsapp', 'WhatsApp'
+
+    # Source
+    source_communication = models.OneToOneField(
+        Communication, on_delete=models.CASCADE, related_name='quote_request',
+        help_text='The communication that triggered this quote request'
+    )
+    source_channel = models.CharField(max_length=20, choices=SourceChannel.choices)
+
+    # Client/Contact (may be auto-matched or auto-created)
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='quote_requests', null=True, blank=True)
+    contact = models.ForeignKey('clients.Contact', on_delete=models.SET_NULL, null=True, blank=True)
+    sender_name = models.CharField(max_length=255, blank=True)
+    sender_email = models.EmailField(blank=True)
+    sender_phone = models.CharField(max_length=50, blank=True)
+    client_auto_created = models.BooleanField(default=False, help_text='True if client was auto-created from this request')
+
+    # Status & Assignment
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
+    assigned_to = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_quote_requests')
+
+    # AI Extraction Fields
+    ai_confidence = models.FloatField(default=0, help_text='0-1 confidence score for quote intent detection')
+    extracted_product = models.CharField(max_length=500, blank=True)
+    extracted_quantity = models.CharField(max_length=100, blank=True)
+    extracted_unit = models.CharField(max_length=50, blank=True, default='MT')
+    extracted_packaging = models.CharField(max_length=255, blank=True)
+    extracted_destination_country = models.CharField(max_length=100, blank=True)
+    extracted_destination_port = models.CharField(max_length=100, blank=True)
+    extracted_delivery_terms = models.CharField(max_length=100, blank=True)
+    extracted_payment_terms = models.CharField(max_length=255, blank=True)
+    extracted_notes = models.TextField(blank=True)
+
+    # Linked quotation (after conversion)
+    linked_quotation = models.ForeignKey(
+        'quotations.Quotation', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='quote_requests'
+    )
+
+    class Meta:
+        db_table = 'quote_requests'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'QR: {self.extracted_product or "Unknown"} from {self.sender_name or self.sender_email or "Unknown"}'
