@@ -3,9 +3,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
-from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice
+from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, CommercialInvoice
 from .serializers import (InvoiceSerializer, PaymentSerializer, FIRCRecordSerializer,
-                          GSTRecordSerializer, ProformaInvoiceSerializer)
+                          GSTRecordSerializer, ProformaInvoiceSerializer,
+                          CommercialInvoiceSerializer)
 
 
 class InvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
@@ -67,6 +68,48 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             qs = qs.filter(client__in=client_ids)
         return qs
 
+    @action(detail=True, methods=['post'], url_path='save-with-items')
+    def save_with_items(self, request, pk=None):
+        """Save PI fields + replace all items in one request."""
+        from .models import ProformaInvoiceItem
+        pi = self.get_object()
+        data = dict(request.data)
+        items_data = data.pop('items', None)
+
+        allowed = {
+            'invoice_date', 'status', 'client_company_name', 'client_tax_number',
+            'client_address', 'client_pincode', 'client_city_state_country', 'client_phone',
+            'country_of_origin', 'country_of_final_destination', 'port_of_loading',
+            'port_of_discharge', 'vessel_flight_no', 'final_destination',
+            'terms_of_trade', 'terms_of_delivery', 'buyer_reference',
+            'currency', 'amount_in_words', 'bank_details',
+        }
+        for field in allowed:
+            if field in data:
+                setattr(pi, field, data[field])
+
+        if items_data is not None:
+            pi.items.all().delete()
+            total = 0
+            for item_data in items_data:
+                qty = float(item_data.get('quantity', 0) or 0)
+                price = float(item_data.get('unit_price', 0) or 0)
+                line_total = qty * price
+                total += line_total
+                ProformaInvoiceItem.objects.create(
+                    pi=pi,
+                    product_name=item_data.get('product_name', ''),
+                    packages_description=item_data.get('packages_description', ''),
+                    description_of_goods=item_data.get('description_of_goods', ''),
+                    quantity=qty,
+                    unit=item_data.get('unit', 'Ltrs'),
+                    unit_price=price,
+                    total_price=line_total,
+                )
+            pi.total = total
+        pi.save()
+        return Response(ProformaInvoiceSerializer(pi).data)
+
     @action(detail=False, methods=['post'], url_path='create-from-order')
     def create_from_order(self, request):
         """Create a PI from an order, auto-filling client data."""
@@ -100,6 +143,115 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .pi_service import send_pi_email
         try:
             sent_to = send_pi_email(pi, request.user)
+            return Response({'status': 'sent', 'sent_to': sent_to})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
+    serializer_class = CommercialInvoiceSerializer
+    filterset_fields = ['client', 'order', 'status']
+
+    def get_queryset(self):
+        qs = CommercialInvoice.objects.filter(is_deleted=False).select_related('client', 'order').prefetch_related('items')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(client__in=client_ids)
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='save-with-items')
+    def save_with_items(self, request, pk=None):
+        """Save CI fields + replace all items in one request."""
+        from .models import CommercialInvoiceItem
+        ci = self.get_object()
+        data = dict(request.data)
+        items_data = data.pop('items', None)
+
+        allowed = {
+            'invoice_date', 'status', 'exporter_ref',
+            'client_company_name', 'client_tax_number', 'client_address',
+            'client_pincode', 'client_city_state_country', 'client_phone',
+            'notify_company_name', 'notify_address', 'notify_phone',
+            'buyer_order_no', 'buyer_order_date',
+            'country_of_origin', 'country_of_final_destination',
+            'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
+            'final_destination', 'pre_carriage_by', 'place_of_receipt',
+            'terms_of_delivery', 'payment_terms',
+            'currency', 'exchange_rate', 'freight', 'insurance',
+            'total_fob_usd', 'total_fob_inr', 'freight_inr', 'insurance_inr',
+            'total_invoice_usd', 'total_invoice_inr',
+            'igst_rate', 'igst_amount', 'grand_total_inr',
+            'amount_in_words', 'bank_details',
+        }
+        for field in allowed:
+            if field in data:
+                val = data[field]
+                if val == '' and field in ('exchange_rate', 'freight', 'insurance', 'igst_rate',
+                                           'igst_amount', 'grand_total_inr', 'total_fob_usd',
+                                           'total_fob_inr', 'freight_inr', 'insurance_inr',
+                                           'total_invoice_usd', 'total_invoice_inr'):
+                    val = 0
+                setattr(ci, field, val)
+
+        if items_data is not None:
+            ci.items.all().delete()
+            total = 0
+            for item_data in items_data:
+                qty = float(item_data.get('quantity', 0) or 0)
+                price = float(item_data.get('unit_price', 0) or 0)
+                line_total = qty * price
+                total += line_total
+                CommercialInvoiceItem.objects.create(
+                    ci=ci,
+                    product_name=item_data.get('product_name', ''),
+                    hsn_code=item_data.get('hsn_code', ''),
+                    packages_description=item_data.get('packages_description', ''),
+                    description_of_goods=item_data.get('description_of_goods', ''),
+                    quantity=qty,
+                    unit=item_data.get('unit', 'KG'),
+                    unit_price=price,
+                    total_price=line_total,
+                )
+            ci.total_fob_usd = total
+            ci.total_invoice_usd = total + float(ci.freight or 0) + float(ci.insurance or 0)
+        ci.save()
+        return Response(CommercialInvoiceSerializer(ci).data)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order')
+    def create_from_order(self, request):
+        """Create a CI from an order, auto-filling client data."""
+        order_id = request.data.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        from orders.models import Order
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .ci_service import create_ci_from_order
+        ci = create_ci_from_order(order, request.user)
+        return Response(CommercialInvoiceSerializer(ci).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        """Generate and return CI PDF."""
+        ci = self.get_object()
+        from .ci_service import generate_ci_pdf
+        pdf_buffer = generate_ci_pdf(ci)
+        response = HttpResponse(pdf_buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="CI_{ci.invoice_number.replace("/", "-")}.pdf"'
+        return response
+
+    @action(detail=True, methods=['post'], url_path='send-email')
+    def send_email(self, request, pk=None):
+        """Generate PDF and send to client via email."""
+        ci = self.get_object()
+        from .ci_service import send_ci_email
+        try:
+            sent_to = send_ci_email(ci, request.user)
             return Response({'status': 'sent', 'sent_to': sent_to})
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

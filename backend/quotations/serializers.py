@@ -30,7 +30,11 @@ class QuotationSerializer(serializers.ModelSerializer):
         model = Quotation
         fields = ['id', 'quotation_number', 'client', 'client_name', 'inquiry', 'version',
                   'parent', 'status', 'currency', 'delivery_terms', 'payment_terms',
-                  'payment_terms_detail', 'freight_terms', 'packaging_details',
+                  'payment_terms_detail', 'freight_terms',
+                  'country_of_origin', 'country_of_final_destination',
+                  'port_of_loading', 'port_of_discharge',
+                  'vessel_flight_no', 'final_destination',
+                  'packaging_details',
                   'validity_days', 'subtotal', 'total', 'notes', 'sent_via', 'sent_at',
                   'created_by', 'created_by_name',
                   'approved_by', 'approved_by_name', 'approved_at', 'items', 'created_at', 'updated_at']
@@ -71,8 +75,8 @@ class QuotationCreateSerializer(serializers.ModelSerializer):
             notes = validated_data.get('notes', '') or ''
             validated_data['notes'] = f"Payment Terms: {payment_terms}\n{notes}".strip()
 
-        count = Quotation.objects.count() + 1
-        validated_data['quotation_number'] = f'QT-{count:05d}'
+        from .models import generate_quotation_number
+        validated_data['quotation_number'] = generate_quotation_number()
         validated_data['created_by'] = user
         total = sum(i.get('quantity', 0) * i.get('unit_price', 0) for i in items_data)
         validated_data['subtotal'] = total

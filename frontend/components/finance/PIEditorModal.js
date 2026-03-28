@@ -12,8 +12,9 @@ import { getErrorMessage } from "@/lib/errorHandler";
 export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, piItems, setPiItems, onSave, onSend, onPreview, sending }) {
   if (!open || !pi) return null;
 
-  const ic = "border-0 outline-none bg-transparent text-xs w-full focus:bg-yellow-50 px-1";
+  const ic = "border-0 outline-none bg-transparent text-xs w-full focus:bg-yellow-50 hover:bg-yellow-50/50 px-1";
   const icr = ic + " text-right";
+  const ro = "text-xs px-1 text-gray-700";  // read-only style
 
   const total = piItems.reduce((s, it) => s + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
 
@@ -47,8 +48,8 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
         <table className="w-full border-collapse border border-gray-400 text-[10px] mb-2">
           <tbody>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold w-[35%]">Exporter</td>
-              <td className="border border-gray-400 p-1 font-bold w-[40%]">Consignee</td>
+              <td className="border border-gray-400 p-1 font-bold w-[35%]"><input value={piForm._lbl_exporter || "Exporter"} onChange={(e) => setPiForm({ ...piForm, _lbl_exporter: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-1 font-bold w-[40%]"><input value={piForm._lbl_consignee || "Consignee"} onChange={(e) => setPiForm({ ...piForm, _lbl_consignee: e.target.value })} className={ic + " font-bold"} /></td>
               <td className="border border-gray-400 p-1 font-bold w-[25%]">PRO. Invoice Number</td>
             </tr>
             <tr>
@@ -94,32 +95,32 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
         <table className="w-full border-collapse border border-gray-400 text-[10px] mb-3">
           <tbody>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold w-[20%]">Country of Origin</td>
-              <td className="border border-gray-400 p-1 w-[30%]"><input value={piForm.country_of_origin || ""} onChange={(e) => setPiForm({ ...piForm, country_of_origin: e.target.value })} className={ic} /></td>
-              <td className="border border-gray-400 p-1 font-bold w-[20%]">Country of Final Destination</td>
-              <td className="border border-gray-400 p-1 w-[30%]"><input value={piForm.country_of_final_destination || ""} onChange={(e) => setPiForm({ ...piForm, country_of_final_destination: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl1 || "Country of Origin"} onChange={(e) => setPiForm({ ...piForm, _sl1: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.country_of_origin || ""} onChange={(e) => setPiForm({ ...piForm, country_of_origin: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl2 || "Country of Final Destination"} onChange={(e) => setPiForm({ ...piForm, _sl2: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.country_of_final_destination || ""} onChange={(e) => setPiForm({ ...piForm, country_of_final_destination: e.target.value })} className={ic} /></td>
             </tr>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold">Port of Loading</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.port_of_loading || ""} onChange={(e) => setPiForm({ ...piForm, port_of_loading: e.target.value })} className={ic} /></td>
-              <td className="border border-gray-400 p-1 font-bold">Port of Discharge</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.port_of_discharge || ""} onChange={(e) => setPiForm({ ...piForm, port_of_discharge: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl3 || "Port of Loading"} onChange={(e) => setPiForm({ ...piForm, _sl3: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.port_of_loading || ""} onChange={(e) => setPiForm({ ...piForm, port_of_loading: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl4 || "Port of Discharge"} onChange={(e) => setPiForm({ ...piForm, _sl4: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.port_of_discharge || ""} onChange={(e) => setPiForm({ ...piForm, port_of_discharge: e.target.value })} className={ic} /></td>
             </tr>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold">Vessel / Flight No</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.vessel_flight_no || ""} onChange={(e) => setPiForm({ ...piForm, vessel_flight_no: e.target.value })} className={ic} /></td>
-              <td className="border border-gray-400 p-1 font-bold">Final Destination</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.final_destination || ""} onChange={(e) => setPiForm({ ...piForm, final_destination: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl5 || "Vessel / Flight No"} onChange={(e) => setPiForm({ ...piForm, _sl5: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.vessel_flight_no || ""} onChange={(e) => setPiForm({ ...piForm, vessel_flight_no: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl6 || "Final Destination"} onChange={(e) => setPiForm({ ...piForm, _sl6: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.final_destination || ""} onChange={(e) => setPiForm({ ...piForm, final_destination: e.target.value })} className={ic} /></td>
             </tr>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold">Terms of Trade</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.terms_of_trade || ""} onChange={(e) => setPiForm({ ...piForm, terms_of_trade: e.target.value })} placeholder="D/A 30 Days" className={ic} /></td>
-              <td className="border border-gray-400 p-1 font-bold">Terms of Delivery</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.terms_of_delivery || ""} onChange={(e) => setPiForm({ ...piForm, terms_of_delivery: e.target.value })} placeholder="FOB - Chennai Port" className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl7 || "Terms of Trade"} onChange={(e) => setPiForm({ ...piForm, _sl7: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.terms_of_trade || ""} onChange={(e) => setPiForm({ ...piForm, terms_of_trade: e.target.value })} className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl8 || "Terms of Delivery"} onChange={(e) => setPiForm({ ...piForm, _sl8: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm.terms_of_delivery || ""} onChange={(e) => setPiForm({ ...piForm, terms_of_delivery: e.target.value })} className={ic} /></td>
             </tr>
             <tr>
-              <td className="border border-gray-400 p-1 font-bold">Buyer Reference</td>
-              <td className="border border-gray-400 p-1" colSpan="3"><input value={piForm.buyer_reference || ""} onChange={(e) => setPiForm({ ...piForm, buyer_reference: e.target.value })} placeholder="PO No: TBI-000000" className={ic} /></td>
+              <td className="border border-gray-400 p-0"><input value={piForm._sl9 || "Buyer Reference"} onChange={(e) => setPiForm({ ...piForm, _sl9: e.target.value })} className={ic + " font-bold"} /></td>
+              <td className="border border-gray-400 p-0" colSpan="3"><input value={piForm.buyer_reference || ""} onChange={(e) => setPiForm({ ...piForm, buyer_reference: e.target.value })} className={ic} /></td>
             </tr>
           </tbody>
         </table>
@@ -129,12 +130,12 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
         <table className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
           <thead>
             <tr className="bg-gray-100">
-              <th className="border border-gray-400 p-1 text-left font-bold">Product Details</th>
-              <th className="border border-gray-400 p-1 text-left font-bold">No. & Kind of Packages</th>
-              <th className="border border-gray-400 p-1 text-left font-bold">Description of Goods</th>
-              <th className="border border-gray-400 p-1 text-right font-bold">Quantity</th>
-              <th className="border border-gray-400 p-1 text-right font-bold">Price/Ltr</th>
-              <th className="border border-gray-400 p-1 text-right font-bold">Amount</th>
+              <th className="border border-gray-400 p-0 text-left"><input value={piForm._ph1 || "Product Details"} onChange={(e) => setPiForm({ ...piForm, _ph1: e.target.value })} className={ic + " font-bold bg-transparent"} /></th>
+              <th className="border border-gray-400 p-0 text-left"><input value={piForm._ph2 || "No. & Kind of Packages"} onChange={(e) => setPiForm({ ...piForm, _ph2: e.target.value })} className={ic + " font-bold bg-transparent"} /></th>
+              <th className="border border-gray-400 p-0 text-left"><input value={piForm._ph3 || "Description of Goods"} onChange={(e) => setPiForm({ ...piForm, _ph3: e.target.value })} className={ic + " font-bold bg-transparent"} /></th>
+              <th className="border border-gray-400 p-0 text-right"><input value={piForm._ph4 || "Quantity"} onChange={(e) => setPiForm({ ...piForm, _ph4: e.target.value })} className={icr + " font-bold bg-transparent"} /></th>
+              <th className="border border-gray-400 p-0 text-right"><input value={piForm._ph5 || "Price/Ltr"} onChange={(e) => setPiForm({ ...piForm, _ph5: e.target.value })} className={icr + " font-bold bg-transparent"} /></th>
+              <th className="border border-gray-400 p-0 text-right"><input value={piForm._ph6 || "Amount"} onChange={(e) => setPiForm({ ...piForm, _ph6: e.target.value })} className={icr + " font-bold bg-transparent"} /></th>
               <th className="border border-gray-400 p-1 w-5"></th>
             </tr>
           </thead>

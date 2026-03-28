@@ -1,5 +1,28 @@
+from datetime import date
 from django.db import models
 from common.models import TimeStampedModel
+
+
+def generate_quotation_number():
+    """
+    Generate quotation number in format: YYYY/KBnnn
+    YYYY = financial year (April 1 start).
+    If current month >= April, FY = current year. If < April, FY = current year - 1.
+    Sequence resets per financial year.
+    """
+    today = date.today()
+    fy_year = today.year if today.month >= 4 else today.year - 1
+
+    # Count quotations in this financial year
+    fy_start = date(fy_year, 4, 1)
+    fy_end = date(fy_year + 1, 3, 31)
+    from quotations.models import Quotation
+    count = Quotation.objects.filter(
+        created_at__date__gte=fy_start,
+        created_at__date__lte=fy_end,
+    ).count() + 1
+
+    return f'{fy_year}/KB{count:03d}'
 
 
 class Quotation(TimeStampedModel):
@@ -55,6 +78,14 @@ class Quotation(TimeStampedModel):
     payment_terms = models.CharField(max_length=30, choices=PAYMENT_CHOICES, default='advance', blank=True)
     payment_terms_detail = models.CharField(max_length=255, blank=True, help_text='Custom payment terms if applicable')
     freight_terms = models.CharField(max_length=20, choices=FREIGHT_CHOICES, default='sea_fcl', blank=True)
+
+    # ── Shipment Details ──
+    country_of_origin = models.CharField(max_length=100, default='India')
+    country_of_final_destination = models.CharField(max_length=100, blank=True)
+    port_of_loading = models.CharField(max_length=100, blank=True)
+    port_of_discharge = models.CharField(max_length=100, blank=True)
+    vessel_flight_no = models.CharField(max_length=100, blank=True)
+    final_destination = models.CharField(max_length=100, blank=True)
 
     packaging_details = models.TextField(blank=True)
     validity_days = models.IntegerField(default=30)

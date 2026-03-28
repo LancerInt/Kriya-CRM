@@ -28,6 +28,16 @@ export default function QuotationsPage() {
     }
   };
 
+  const handleDownloadPDF = async (row) => {
+    try {
+      const res = await api.get(`/quotations/quotations/${row.id}/generate-pdf/`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a"); a.href = url;
+      a.setAttribute("download", `${row.quotation_number}.pdf`);
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch { toast.error("Failed to download PDF"); }
+  };
+
   const columns = [
     { key: "quotation_number", label: "Number", render: (row) => <span className="font-medium">{row.quotation_number || `Q-${row.id?.slice(0, 8)}`}</span> },
     { key: "client_name", label: "Client" },
@@ -36,6 +46,7 @@ export default function QuotationsPage() {
     { key: "created_at", label: "Date", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "\u2014" },
     { key: "actions", label: "", render: (row) => (
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => handleDownloadPDF(row)} className="text-xs text-green-600 hover:text-green-700 font-medium">PDF</button>
         {row.status === "draft" && (
           <button onClick={() => handleAction(submitForApproval, row.id, "Submitted for approval")} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Submit</button>
         )}

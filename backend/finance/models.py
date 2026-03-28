@@ -177,3 +177,109 @@ class ProformaInvoiceItem(models.Model):
     def save(self, *args, **kwargs):
         self.total_price = self.quantity * self.unit_price
         super().save(*args, **kwargs)
+
+
+class CommercialInvoice(TimeStampedModel):
+    """
+    Dedicated Commercial Invoice matching the Kriya Biosys CI template.
+    Includes Notify Party, dual currency (USD+INR), IGST, Loading Details, Grand Total.
+    """
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        SENT = 'sent', 'Sent'
+
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='commercial_invoices')
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='commercial_invoices')
+    invoice_number = models.CharField(max_length=50, unique=True)
+    invoice_date = models.DateField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+
+    # ── Exporter Section (overridable labels) ──
+    exporter_ref = models.CharField(max_length=255, blank=True, help_text='Exporter Ref / IEC etc.')
+
+    # ── Consignee Section ──
+    client_company_name = models.CharField(max_length=255)
+    client_tax_number = models.CharField(max_length=100, blank=True)
+    client_address = models.TextField(blank=True)
+    client_pincode = models.CharField(max_length=30, blank=True)
+    client_city_state_country = models.CharField(max_length=255, blank=True)
+    client_phone = models.CharField(max_length=50, blank=True)
+
+    # ── Notify Party Section ──
+    notify_company_name = models.CharField(max_length=255, blank=True)
+    notify_address = models.TextField(blank=True)
+    notify_phone = models.CharField(max_length=50, blank=True)
+
+    # ── Buyer (if other than consignee) ──
+    buyer_order_no = models.CharField(max_length=100, blank=True)
+    buyer_order_date = models.DateField(null=True, blank=True)
+
+    # ── Shipment / Loading Details ──
+    country_of_origin = models.CharField(max_length=100, default='India')
+    country_of_final_destination = models.CharField(max_length=100, blank=True)
+    port_of_loading = models.CharField(max_length=100, blank=True)
+    port_of_discharge = models.CharField(max_length=100, blank=True)
+    vessel_flight_no = models.CharField(max_length=100, blank=True)
+    final_destination = models.CharField(max_length=100, blank=True)
+    pre_carriage_by = models.CharField(max_length=100, blank=True)
+    place_of_receipt = models.CharField(max_length=100, blank=True)
+    terms_of_delivery = models.CharField(max_length=100, blank=True, help_text='e.g. FOB - Chennai Port')
+    payment_terms = models.CharField(max_length=255, blank=True, help_text='e.g. D/A 30 Days')
+
+    # ── Totals (dual currency) ──
+    currency = models.CharField(max_length=3, default='USD')
+    total_fob_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    freight = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    insurance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_invoice_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    # INR equivalents
+    exchange_rate = models.DecimalField(max_digits=10, decimal_places=4, default=0, help_text='USD to INR rate')
+    total_fob_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    freight_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    insurance_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_invoice_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    # ── IGST ──
+    igst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text='IGST percentage e.g. 18')
+    igst_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    grand_total_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    amount_in_words = models.CharField(max_length=500, blank=True)
+
+    # ── Bank Details ──
+    bank_details = models.TextField(default='Bank name: ICICI Bank Ltd\nBranch name: Salem Main Branch\nBeneficiary: Kriya Biosys Private Limited\nIFSC Code: ICIC0006119\nSwift Code: ICICINBB')
+
+    # ── PDF ──
+    pdf_file = models.FileField(upload_to='commercial_invoices/%Y/%m/', null=True, blank=True)
+
+    # ── Meta ──
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        db_table = 'commercial_invoices'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'CI {self.invoice_number} - {self.client_company_name}'
+
+
+class CommercialInvoiceItem(models.Model):
+    """Line items for Commercial Invoice — matching Packing Details / Description of Goods."""
+    id = models.AutoField(primary_key=True)
+    ci = models.ForeignKey(CommercialInvoice, on_delete=models.CASCADE, related_name='items')
+    product_name = models.CharField(max_length=255)
+    hsn_code = models.CharField(max_length=50, blank=True, help_text='HSN/SAC Code')
+    packages_description = models.TextField(blank=True, help_text='No. & Kind of Packages')
+    description_of_goods = models.TextField(blank=True)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    unit = models.CharField(max_length=20, default='KG')
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_price = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = 'commercial_invoice_items'
+
+    def save(self, *args, **kwargs):
+        self.total_price = self.quantity * self.unit_price
+        super().save(*args, **kwargs)

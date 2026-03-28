@@ -2,6 +2,7 @@ from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.http import HttpResponse
 from django.utils import timezone
 from django.db.models import Q
 from .models import Inquiry, Quotation, QuotationItem
@@ -139,6 +140,48 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             return QuotationCreateSerializer
         return QuotationSerializer
 
+    @action(detail=True, methods=['post'], url_path='save-with-items')
+    def save_with_items(self, request, pk=None):
+        """Save quotation fields + replace all items in one request."""
+        q = self.get_object()
+        data = dict(request.data)
+        items_data = data.pop('items', None)
+
+        # Fields that can be updated on Quotation
+        allowed = {
+            'currency', 'delivery_terms', 'payment_terms', 'payment_terms_detail',
+            'freight_terms', 'country_of_origin', 'country_of_final_destination',
+            'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
+            'final_destination', 'packaging_details', 'validity_days', 'notes',
+        }
+        for field in allowed:
+            if field in data:
+                setattr(q, field, data[field])
+
+        # Replace items
+        if items_data is not None:
+            q.items.all().delete()
+            total = 0
+            for item_data in items_data:
+                qty = float(item_data.get('quantity', 0) or 0)
+                price = float(item_data.get('unit_price', 0) or 0)
+                line_total = qty * price
+                total += line_total
+                QuotationItem.objects.create(
+                    quotation=q,
+                    product_name=item_data.get('product_name', ''),
+                    description=item_data.get('description', ''),
+                    quantity=qty,
+                    unit=item_data.get('unit', 'KG'),
+                    unit_price=price,
+                    total_price=line_total,
+                )
+            q.subtotal = total
+            q.total = total
+
+        q.save()
+        return Response(QuotationSerializer(q).data)
+
     @action(detail=True, methods=['post'])
     def submit_for_approval(self, request, pk=None):
         q = self.get_object()
@@ -173,6 +216,56 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q.status = 'rejected'
         q.save()
         return Response(QuotationSerializer(q).data)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order')
+    def create_from_order(self, request):
+        """Create a Quotation from an order, auto-filling client/items."""
+        order_id = request.data.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        from .models import generate_quotation_number
+        total = sum(i.total_price for i in order.items.all())
+        client = order.client
+        q = Quotation.objects.create(
+            quotation_number=generate_quotation_number(),
+            client=client,
+            currency=order.currency,
+            delivery_terms=order.delivery_terms or 'FOB',
+            payment_terms=order.payment_terms if order.payment_terms in dict(Quotation.PAYMENT_CHOICES) else 'advance',
+            freight_terms=order.freight_terms if order.freight_terms in dict(Quotation.FREIGHT_CHOICES) else 'sea_fcl',
+            country_of_origin='India',
+            country_of_final_destination=client.country or '',
+            subtotal=total,
+            total=total,
+            created_by=request.user,
+        )
+        for item in order.items.all():
+            QuotationItem.objects.create(
+                quotation=q,
+                product=item.product,
+                product_name=item.product_name,
+                description=item.description or '',
+                quantity=item.quantity,
+                unit=item.unit,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+            )
+        return Response(QuotationSerializer(q).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        """Generate and return Quotation PDF."""
+        q = self.get_object()
+        from .quotation_service import generate_quotation_pdf
+        pdf_buffer = generate_quotation_pdf(q)
+        response = HttpResponse(pdf_buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="QT_{q.quotation_number.replace("/", "-")}.pdf"'
+        return response
 
     @action(detail=True, methods=['post'])
     def generate_pi(self, request, pk=None):
@@ -325,38 +418,51 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             # Build email
             items_html = ''
             for i, item in enumerate(q.items.all(), 1):
-                items_html += f'<tr><td style="padding:8px;border:1px solid #eee;">{i}</td><td style="padding:8px;border:1px solid #eee;">{item.product_name}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{item.quantity:,.0f} {item.unit}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.unit_price:,.2f}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.total_price:,.2f}</td></tr>'
+                details = item.description if item.description else f'{item.quantity:,.0f} {item.unit}'
+                items_html += f'<tr><td style="padding:8px;border:1px solid #eee;">{i}</td><td style="padding:8px;border:1px solid #eee;">{item.product_name}</td><td style="padding:8px;border:1px solid #eee;">{details}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.unit_price:,.2f}</td><td style="padding:8px;border:1px solid #eee;text-align:right;">{q.currency} {item.total_price:,.2f}</td></tr>'
+
+            payment_display = q.payment_terms_detail or (q.get_payment_terms_display() if q.payment_terms else 'As agreed')
+            delivery_display = q.get_delivery_terms_display() if q.delivery_terms else ''
 
             body_html = f"""
             <div style="font-family:Arial,sans-serif;max-width:700px;">
-                <h2 style="color:#1e3a5f;">Quotation - {q.quotation_number}</h2>
+                <h2 style="color:#4a7c2e;">Quotation - {q.quotation_number}</h2>
                 <p>Dear {contact.name},</p>
-                <p>Please find below our quotation for your reference:</p>
+                <p>Please find attached our quotation for your reference:</p>
                 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
                     <tr><td style="padding:6px;color:#666;width:140px;">Quotation No.</td><td style="padding:6px;font-weight:bold;">{q.quotation_number}</td></tr>
-                    <tr><td style="padding:6px;color:#666;">Delivery Terms</td><td style="padding:6px;">{q.get_delivery_terms_display()}</td></tr>
-                    <tr><td style="padding:6px;color:#666;">Payment Terms</td><td style="padding:6px;">{q.get_payment_terms_display() if q.payment_terms else q.payment_terms_detail or 'As agreed'}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Delivery Terms</td><td style="padding:6px;">{delivery_display}</td></tr>
+                    <tr><td style="padding:6px;color:#666;">Payment Terms</td><td style="padding:6px;">{payment_display}</td></tr>
                     <tr><td style="padding:6px;color:#666;">Freight</td><td style="padding:6px;">{q.get_freight_terms_display() if q.freight_terms else 'To be discussed'}</td></tr>
                     <tr><td style="padding:6px;color:#666;">Validity</td><td style="padding:6px;">{q.validity_days} days</td></tr>
                 </table>
                 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-                    <tr style="background:#1e3a5f;color:white;"><th style="padding:8px;text-align:left;">#</th><th style="padding:8px;text-align:left;">Product</th><th style="padding:8px;text-align:right;">Quantity</th><th style="padding:8px;text-align:right;">Unit Price</th><th style="padding:8px;text-align:right;">Total</th></tr>
+                    <tr style="background:#4a7c2e;color:white;"><th style="padding:8px;text-align:left;">#</th><th style="padding:8px;text-align:left;">Product</th><th style="padding:8px;text-align:left;">Details</th><th style="padding:8px;text-align:right;">Unit Price</th><th style="padding:8px;text-align:right;">Total</th></tr>
                     {items_html}
                     <tr style="font-weight:bold;background:#f5f5f5;"><td colspan="4" style="padding:8px;text-align:right;">Total:</td><td style="padding:8px;text-align:right;">{q.currency} {q.total:,.2f}</td></tr>
                 </table>
                 {f'<p>{q.notes}</p>' if q.notes else ''}
                 <p>Please confirm your acceptance or let us know if you need any modifications.</p>
-                <p>Best regards,<br/>Kriya Global Trade</p>
+                <p>Best regards,<br/><b>Kriya Biosys Private Limited</b><br/><i>"Go Organic! Save Planet!"</i></p>
             </div>
             """
+
+            # Generate PDF attachment
+            from .quotation_service import generate_quotation_pdf
+            from io import BytesIO
+            pdf_buffer = generate_quotation_pdf(q)
+            pdf_bytes = pdf_buffer.read()
+            pdf_file = BytesIO(pdf_bytes)
+            pdf_file.name = f'Quotation_{q.quotation_number.replace("/", "-")}.pdf'
 
             from communications.services import EmailService
             try:
                 EmailService.send_email(
                     email_account=email_account,
                     to=contact_email,
-                    subject=f'Quotation {q.quotation_number} - Kriya Global Trade',
+                    subject=f'Quotation {q.quotation_number} - Kriya Biosys',
                     body_html=body_html,
+                    attachments=[pdf_file],
                 )
             except Exception as e:
                 return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

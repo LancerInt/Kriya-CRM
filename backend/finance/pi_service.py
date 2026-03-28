@@ -86,234 +86,344 @@ def create_pi_from_order(order, user):
 
 
 def generate_pi_pdf(pi):
-    """Generate PDF matching the Kriya Biosys PI template with logo, seal, sign."""
+    """Generate PDF matching the exact Kriya Biosys PI template."""
     import os
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, Flowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from django.conf import settings
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=15*mm, bottomMargin=15*mm,
-                            leftMargin=12*mm, rightMargin=12*mm)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=12*mm, bottomMargin=10*mm,
+                            leftMargin=10*mm, rightMargin=10*mm)
     styles = getSampleStyleSheet()
-    elements = []
+    el = []
 
-    green = colors.HexColor('#4a7c2e')
-    dark = colors.HexColor('#333333')
+    G = colors.HexColor('#4a7c2e')  # Kriya green
+    LG = colors.HexColor('#8ab56b')  # lighter green for accent
+    GR = colors.HexColor('#cccccc')  # grid grey
+    W = colors.white
+    B = colors.black
 
-    # Image paths
     img_dir = os.path.join(settings.BASE_DIR, 'static', 'images')
     logo_path = os.path.join(img_dir, 'logo.png')
     seal_path = os.path.join(img_dir, 'seal.png')
     sign_path = os.path.join(img_dir, 'sign.png')
 
-    # Register Montserrat font if available, fallback to Helvetica-Bold
-    try:
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        font_path = os.path.join(img_dir, 'Montserrat-Bold.ttf')
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont('Montserrat-Bold', font_path))
-            title_font = 'Montserrat-Bold'
-        else:
-            title_font = 'Helvetica-Bold'
-    except Exception:
-        title_font = 'Helvetica-Bold'
-
-    title_style = ParagraphStyle('PITitle', parent=styles['Title'], fontSize=20,
-                                  textColor=colors.white, alignment=1, fontName=title_font,
-                                  leading=26, spaceBefore=4*mm, spaceAfter=4*mm)
-    header_style = ParagraphStyle('Header', parent=styles['Normal'], fontSize=8, leading=10)
-    small = ParagraphStyle('Small', parent=styles['Normal'], fontSize=7, leading=9)
-
-    # ── Header: Logo left, Green title box right (matching template exactly) ──
-    # Logo: maintain aspect ratio (458x281 original)
-    logo_w, logo_h = 40*mm, 24.5*mm  # proportional
-    logo_img = Image(logo_path, width=logo_w, height=logo_h) if os.path.exists(logo_path) else ''
-
-    # Green box with PROFORMA INVOICE
-    from reportlab.platypus import TableStyle as TS
-    title_cell = Paragraph('PROFORMA<br/>INVOICE', title_style)
-    title_table = Table([[title_cell]], colWidths=[55*mm], rowHeights=[30*mm])
-    title_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), green),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-    ]))
-
-    header_data = [[logo_img, '', title_table]]
-    ht0 = Table(header_data, colWidths=[50*mm, 80*mm, 55*mm])
-    ht0.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (2, 0), (2, 0), 'RIGHT'),
-    ]))
-    elements.append(ht0)
-    elements.append(Spacer(1, 3*mm))
-
-    # ── Exporter + Consignee + Invoice Number ──
-    header_data = [
-        [Paragraph('<b>Exporter</b>', header_style),
-         Paragraph('<b>Consignee</b>', header_style),
-         Paragraph('<b>PRO. Invoice Number</b>', header_style)],
-        [Paragraph(f'<b>{EXPORTER["name"]}</b>', header_style),
-         Paragraph(f'<b>{pi.client_company_name}</b>', header_style),
-         Paragraph(f'<b>{pi.invoice_number}</b>', header_style)],
-        [Paragraph(EXPORTER['address'].replace('\n', '<br/>'), small),
-         Paragraph(f'{pi.client_tax_number}<br/>{pi.client_address}<br/>{pi.client_pincode}', small),
-         ''],
-        [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', small),
-         Paragraph(f'{pi.client_city_state_country}', small),
-         Paragraph(f'<b>Date</b>', header_style)],
-        [Paragraph(f'EMAIL : {EXPORTER["email"]}', small),
-         Paragraph(f'Tel: {pi.client_phone}', small),
-         Paragraph(f'{pi.invoice_date.strftime("%d-%m-%Y")}', header_style)],
-        [Paragraph(f'IEC : {EXPORTER["iec"]}', small), '', ''],
-    ]
-    ht = Table(header_data, colWidths=[60*mm, 75*mm, 50*mm])
-    ht.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ]))
-    elements.append(ht)
-    elements.append(Spacer(1, 3*mm))
-
-    # ── Shipment Details with vertical green sidebar label ──
-    ship_inner = [
-        ['Country of Origin', pi.country_of_origin, 'Country of Final Destination', pi.country_of_final_destination],
-        ['Port of Loading', pi.port_of_loading or '', 'Port of Discharge', pi.port_of_discharge or ''],
-        ['Vessel / Flight No', pi.vessel_flight_no or '', 'Final Destination', pi.final_destination or ''],
-        ['Terms of Trade', pi.terms_of_trade or '', 'Terms of Delivery', pi.terms_of_delivery or ''],
-        ['Buyer Reference', pi.buyer_reference or '', '', ''],
-    ]
-    ship_table = Table(ship_inner, colWidths=[38*mm, 46*mm, 42*mm, 46*mm])
-    ship_table.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('FONT', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONT', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-
-    # Vertical rotated "SHIPMENT DETAILS" green sidebar using a Drawing
-    from reportlab.graphics.shapes import Drawing, String, Rect
-    from reportlab.graphics import renderPDF
-    from reportlab.platypus import Flowable
-
+    # Styles defined after font registration below
+    # ── Rotated sidebar helper ──
     class RotatedText(Flowable):
-        """A flowable that draws rotated text in a green background."""
-        def __init__(self, text, width, height, bg_color, font_size=8):
+        def __init__(self, text, w, h, bg, fs=7, font='Helvetica-Bold'):
             Flowable.__init__(self)
-            self.text = text
-            self.width = width
-            self.height = height
-            self.bg_color = bg_color
-            self.font_size = font_size
-
+            self.text = text; self.width = w; self.height = h; self.bg = bg; self.fs = fs; self.font = font
         def draw(self):
-            self.canv.saveState()
-            self.canv.setFillColor(self.bg_color)
-            self.canv.rect(0, 0, self.width, self.height, fill=1, stroke=0)
-            self.canv.setFillColor(colors.white)
-            self.canv.setFont('Helvetica-Bold', self.font_size)
-            self.canv.translate(self.width / 2, self.height / 2)
-            self.canv.rotate(90)
-            self.canv.drawCentredString(0, -self.font_size / 3, self.text)
-            self.canv.restoreState()
+            c = self.canv; c.saveState()
+            c.setFillColor(self.bg); c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+            c.setFillColor(W); c.setFont(self.font, self.fs)
+            c.translate(self.width/2, self.height/2); c.rotate(90)
+            c.drawCentredString(0, -self.fs/3, self.text); c.restoreState()
 
-    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 32*mm, green, 8)
+    PW = 190*mm  # page width
 
-    wrapper = Table([[sidebar, ship_table]], colWidths=[10*mm, 175*mm])
-    wrapper.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('LEFTPADDING', (0, 0), (0, 0), 0),
-        ('RIGHTPADDING', (0, 0), (0, 0), 0),
-        ('TOPPADDING', (0, 0), (0, 0), 0),
-        ('BOTTOMPADDING', (0, 0), (0, 0), 0),
+    # ═══ Shared widths — all sections use PW (190mm) total ═══
+    _RW = 50*mm; _EW = 50*mm; _CW2 = 60*mm; _GAP = PW - _EW - _CW2 - _RW
+
+    # ═══ ROW 1: Logo left + Green PROFORMA INVOICE box right ═══
+    logo = Image(logo_path, width=38*mm, height=23*mm) if os.path.exists(logo_path) else ''
+    # Register fonts — Bookman Old Style (classic Windows serif)
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    _tf = 'Helvetica-Bold'
+    _bf = 'Helvetica-Bold'
+    _br = 'Helvetica'
+    try:
+        bos_bold = os.path.join(img_dir, 'BookmanOldStyle-Bold.ttf')
+        bos_reg = os.path.join(img_dir, 'BookmanOldStyle-Regular.ttf')
+        dss_path = os.path.join(img_dir, 'DistinctStyleSans-Light.ttf')
+        if os.path.exists(bos_bold):
+            pdfmetrics.registerFont(TTFont('BookmanOldStyle-Bold', bos_bold))
+            _bf = 'BookmanOldStyle-Bold'
+        if os.path.exists(bos_reg):
+            pdfmetrics.registerFont(TTFont('BookmanOldStyle', bos_reg))
+            _br = 'BookmanOldStyle'
+        if os.path.exists(dss_path):
+            pdfmetrics.registerFont(TTFont('DistinctSans-Light', dss_path))
+            _tf = 'DistinctSans-Light'
+    except Exception:
+        pass
+
+    # Styles using registered fonts
+    s8 = ParagraphStyle('s8', parent=styles['Normal'], fontSize=8, leading=10, fontName=_br)
+    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=7, leading=9, fontName=_br)
+    s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=8, leading=10, fontName=_bf)
+
+    title_p = Paragraph('PROFORMA<br/>INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName='Helvetica-Bold', alignment=1, leading=24))
+    title_box = Table([[title_p]], colWidths=[_RW], rowHeights=[23*mm])
+    title_box.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),G),
+        ('VALIGN',(0,0),(-1,-1),'BOTTOM'),
+        ('LEFTPADDING',(0,0),(-1,-1), 0),
+        ('RIGHTPADDING',(0,0),(-1,-1), 0),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 2),
     ]))
-    elements.append(wrapper)
-    elements.append(Spacer(1, 4*mm))
 
-    # ── Packing Details ──
-    elements.append(Paragraph('<b>PACKING DETAILS</b>', ParagraphStyle('PD', parent=styles['Normal'],
-                              fontSize=9, textColor=colors.white, backColor=green, spaceAfter=2*mm)))
-
-    items_header = ['Product Details', 'No. & Kind of Packages', 'Description of Goods',
-                    'Quantity', 'Price/' + pi.items.first().unit if pi.items.exists() else 'Price', 'Amount']
-    items_data = [items_header]
-
-    for item in pi.items.all():
-        items_data.append([
-            item.product_name,
-            item.packages_description,
-            item.description_of_goods,
-            f'{item.quantity:,.0f}',
-            f'{item.unit_price:,.2f}',
-            f'{item.total_price:,.2f}',
-        ])
-
-    items_data.append(['', '', '', '', 'Total', f'{pi.total:,.2f}'])
-    items_data.append(['', '', f'Amount Chargeable: {pi.currency} {pi.amount_in_words}', '', '', ''])
-
-    it = Table(items_data, colWidths=[30*mm, 40*mm, 45*mm, 22*mm, 22*mm, 26*mm])
-    it.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-        ('BACKGROUND', (0, 0), (-1, 0), green),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTSIZE', (0, 0), (-1, -1), 7),
-        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
-        ('FONT', (-2, -2), (-1, -2), 'Helvetica-Bold'),
+    h0 = Table([[logo, '', '', title_box]], colWidths=[_EW, _CW2, _GAP, _RW])
+    h0.setStyle(TableStyle([
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('SPAN',(0,0),(1,0)),
+        ('LEFTPADDING',(3,0),(3,0), 0),
+        ('RIGHTPADDING',(3,0),(3,0), 0),
+        ('TOPPADDING',(3,0),(3,0), 0),
+        ('BOTTOMPADDING',(3,0),(3,0), 0),
     ]))
-    elements.append(it)
-    elements.append(Spacer(1, 4*mm))
+    el.append(h0); el.append(Spacer(1, 0))
 
-    # ── Bank Details left | Seal center-right | Auth + Sign right ──
-    bank_text = pi.bank_details.replace('\n', '<br/>')
-    bank_para = Paragraph(f'<b>Bank Details</b><br/>{bank_text}', small)
+    # ═══ ROW 2: EXPORTER | CONSIGNEE | PI Number + Date (aligned at same line) ═══
+    LGR = colors.HexColor('#e8e8e8')
+    MGR = colors.HexColor('#d0d0d0')
 
-    seal_img = Image(seal_path, width=22*mm, height=22*mm) if os.path.exists(seal_path) else ''
-    sign_img = Image(sign_path, width=25*mm, height=12*mm) if os.path.exists(sign_path) else ''
-
-    auth_style = ParagraphStyle('Auth', parent=styles['Normal'], fontSize=8, alignment=2)
-    sign_style = ParagraphStyle('AS', parent=styles['Normal'], fontSize=7, alignment=2)
-
-    # Build right side: auth text + seal + sign stacked
-    right_data = [
-        [Paragraph('<b>For Kriya Biosys Private Limited</b>', auth_style)],
-        [seal_img],
-        [sign_img],
-        [Paragraph('Authorized Signatory', sign_style)],
+    # Right column: PRO. Invoice Number + Date (NO green box — that's above now)
+    right_rows = [
+        [Paragraph('<b>PRO. Invoice Number</b>', ParagraphStyle('pn', fontSize=10, fontName=_bf, alignment=1))],
+        [Paragraph(f'{pi.invoice_number}', ParagraphStyle('pv', fontSize=10, fontName=_br, alignment=1))],
+        [Paragraph('<b>Date</b>', ParagraphStyle('dl', fontSize=10, fontName=_bf, alignment=1))],
+        [Paragraph(f'{pi.invoice_date.strftime("%d-%m-%Y")}', ParagraphStyle('dv', fontSize=10, fontName=_br, alignment=1))],
     ]
-    right_table = Table(right_data, colWidths=[55*mm])
-    right_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 1),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+    rc = Table(right_rows, colWidths=[50*mm], rowHeights=[7*mm, 7*mm, 7*mm, 7*mm])
+    DKG = colors.HexColor('#c0c0c0')   # Darker gray for PRO. Invoice Number
+    MDG = colors.HexColor('#d5d5d5')   # Medium gray for Date
+    VLG = colors.HexColor('#f0f0f0')   # Very light gray for values
+
+    rc.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,0), MDG),   # Same gray as Date - PRO. Invoice Number
+        ('BACKGROUND', (0,1), (0,1), VLG),   # Very light gray - value
+        ('BACKGROUND', (0,2), (0,2), MDG),   # Medium gray - Date
+        ('BACKGROUND', (0,3), (0,3), VLG),   # Very light gray - value
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        # NO borders, NO lines
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
 
-    footer_data = [[bank_para, right_table]]
-    ft = Table(footer_data, colWidths=[120*mm, 65*mm])
-    ft.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    # Exporter + Consignee rows — 4 columns: Exporter | Consignee | GAP | Right Panel
+    RW = 50*mm  # Right panel width (same as green box above)
+    GAP = 3*mm  # Gap between content and right panel
+    EW = 60*mm  # Exporter width
+    CW2 = PW - EW - GAP - RW  # Consignee width (fills remaining)
+
+    rows = [
+        [Paragraph('Exporter',s8b), Paragraph('Consignee',s8b), '', rc],
+        [Paragraph(EXPORTER["name"],s8b), Paragraph(pi.client_company_name,s8b), '', ''],
+        [Paragraph('D.no : 233, Aarthi Nagar,',s7), Paragraph(f'{pi.client_tax_number}',s7), '', ''],
+        [Paragraph('Mohan Nagar, Narasothipatti,',s7), Paragraph(f'{pi.client_address}',s7), '', ''],
+        [Paragraph('Salem - 636004, Tamilnadu',s7), Paragraph(f'{pi.client_pincode}',s7), '', ''],
+        [Paragraph(f'GSTIN : {EXPORTER["gstin"]}',s7), Paragraph(f'{pi.client_city_state_country}',s7), '', ''],
+        [Paragraph(f'EMAIL : {EXPORTER["email"]}',s7), Paragraph(f'Tel: {pi.client_phone}',s7), '', ''],
+        [Paragraph(f'IEC : {EXPORTER["iec"]}',s7), '', '', ''],
+    ]
+    t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*7)
+    t1.setStyle(TableStyle([
+        # Gray strip ONLY on columns 0-1, NOT gap (col 2) or right panel (col 3)
+        ('BACKGROUND', (0,0), (1,0), colors.HexColor('#d5d5d5')),
+        ('BACKGROUND', (2,0), (2,0), W),  # Gap column white
+        ('BACKGROUND', (3,0), (3,0), W),  # Right panel white (it has its own bg)
+        ('LINEBELOW', (0,0), (1,0), 0.3, GR),
+        # Header row: vertically center text
+        ('VALIGN', (0,0), (1,0), 'MIDDLE'),
+        # Right panel spans all rows
+        ('SPAN', (3,0), (3,7)),
+        ('VALIGN', (0,1), (-1,-1), 'TOP'),
+        ('VALIGN', (3,0), (3,0), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        # Zero left padding on exporter+consignee so content aligns with header
+        ('LEFTPADDING', (0,0), (1,-1), 3),
+        # No padding on right panel column
+        ('LEFTPADDING', (3,0), (3,0), 0),
+        ('RIGHTPADDING', (3,0), (3,0), 0),
+        ('TOPPADDING', (3,0), (3,0), 0),
+        ('BOTTOMPADDING', (3,0), (3,0), 0),
+        # No padding on gap column
+        ('LEFTPADDING', (2,0), (2,-1), 0),
+        ('RIGHTPADDING', (2,0), (2,-1), 0),
     ]))
-    elements.append(ft)
-    elements.append(Spacer(1, 4*mm))
+    el.append(t1); el.append(Spacer(1, 0))
 
-    # ── Declaration ──
-    elements.append(Paragraph(
-        '<b>Declaration:</b> We declare that this Invoice shows the Actual Price of the Goods '
-        'described and that all particulars are true and correct <b>E. & O.E</b>',
-        ParagraphStyle('Decl', parent=styles['Normal'], fontSize=7, alignment=1)))
-    elements.append(Paragraph('" Go Organic ! Save Planet ! "',
-                              ParagraphStyle('Motto', parent=styles['Normal'], fontSize=7, alignment=1,
-                                            textColor=green)))
+    # ── SHIPMENT DETAILS: Bookman labels (blue), Bookman values, Montserrat sidebar ──
+    NAVY = colors.HexColor('#1a3a5c')
+    lb = ParagraphStyle('lb', parent=styles['Normal'], fontSize=8, leading=11, fontName=_bf, textColor=NAVY)
+    vl = ParagraphStyle('vl', parent=styles['Normal'], fontSize=8, leading=11, fontName=_br)
 
-    doc.build(elements)
+    sd = [
+        [Paragraph('<b>Country of Origin</b>',lb), Paragraph(pi.country_of_origin,vl),
+         Paragraph('<b>Country of Final Destination</b>',lb), Paragraph(pi.country_of_final_destination,vl)],
+        [Paragraph('<b>Port of Loading</b>',lb), Paragraph(pi.port_of_loading or '',vl),
+         Paragraph('<b>Port of Discharge</b>',lb), Paragraph(pi.port_of_discharge or '',vl)],
+        [Paragraph('<b>Vessel / Flight No</b>',lb), Paragraph(pi.vessel_flight_no or '',vl),
+         Paragraph('<b>Final Destination</b>',lb), Paragraph(pi.final_destination or '',vl)],
+        [Paragraph('<b>Terms of Trade</b>',lb), Paragraph(pi.terms_of_trade or '',vl),
+         Paragraph('<b>Terms of Delivery</b>',lb), Paragraph(pi.terms_of_delivery or '',vl)],
+        [Paragraph('<b>Buyer Reference</b>',lb), Paragraph(pi.buyer_reference or '',vl), '', ''],
+    ]
+    _sw = PW - 8*mm  # shipment content width = 182mm
+    # Label1(32) + Value1(38) + Label2(50) + Value2(62) = 182mm
+    st = Table(sd, colWidths=[32*mm, 38*mm, 50*mm, _sw - 32*mm - 38*mm - 50*mm])
+    st.setStyle(TableStyle([
+        ('FONTSIZE',(0,0),(-1,-1), 8),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,0), 1),     # First row: minimal top padding to align with sidebar
+        ('TOPPADDING',(0,1),(-1,-1), 4),     # Other rows: normal padding
+        ('BOTTOMPADDING',(0,0),(-1,-1), 4),
+        ('LEFTPADDING',(0,0),(-1,-1), 4),
+    ]))
+    sidebar = RotatedText('SHIPMENT  DETAILS', 8*mm, 32*mm, G, 7, _tf)
+    sw = Table([[sidebar, st]], colWidths=[8*mm, PW - 8*mm])
+    sw.setStyle(TableStyle([
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('LEFTPADDING',(0,0),(-1,-1),0),
+        ('RIGHTPADDING',(0,0),(-1,-1),0),
+        ('TOPPADDING',(0,0),(-1,-1),0),
+        ('BOTTOMPADDING',(0,0),(-1,-1),0),
+    ]))
+    el.append(sw); el.append(Spacer(1, 1*mm))
+
+    # Column widths: must be consistent across header, body, total, and title
+    CW = [30*mm, 40*mm, 46*mm, 20*mm, 24*mm, 30*mm]  # total = 190mm = PW
+
+    # ── PACKING DETAILS: right-aligned, same width as table below ──
+    _cf = 'Comfortaa-Bold' if 'Comfortaa-Bold' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
+    pd_title = Table([[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=16, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_cf))]], colWidths=[sum(CW)])
+    el.append(pd_title)
+    el.append(Spacer(1, 1*mm))
+
+    hdr = ['Product Details', 'No. & Kind of Packages', 'Description of Goods', 'Quantity', 'Price/Ltr', 'Amount']
+    data = [hdr]
+    for item in pi.items.all():
+        data.append([item.product_name, item.packages_description, item.description_of_goods,
+                     f'{item.quantity:,.0f}', f'{item.unit_price:,.2f}', f'{item.total_price:,.2f}'])
+
+    it = Table(data, colWidths=CW)
+    it.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0), G),
+        ('TEXTCOLOR',(0,0),(-1,0), W),
+        ('FONT',(0,0),(-1,0), _bf),
+        ('FONTSIZE',(0,0),(-1,0), 7),            # header size
+        ('FONT',(0,1),(-1,-1), _br),             # body font: Bookman Regular
+        ('FONTSIZE',(0,1),(-1,-1), 7),            # body size
+        # Left-align first 3 columns (text), right-align last 3 (numbers)
+        ('ALIGN',(0,0),(2,-1),'LEFT'),
+        ('ALIGN',(3,1),(3,-1),'CENTER'),   # Quantity body: center
+        ('ALIGN',(4,0),(-1,-1),'RIGHT'),   # Price + Amount: right
+        ('ALIGN',(3,0),(3,0),'CENTER'),    # Quantity header: center
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,-1), 4),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 4),
+        ('LEFTPADDING',(0,0),(-1,-1), 3),
+        ('RIGHTPADDING',(0,0),(-1,-1), 3),
+    ]))
+    el.append(it)
+
+    # ── Total row — aligned exactly with Amount column ──
+    total_val = sum(i.total_price for i in pi.items.all())
+    ts_g = ParagraphStyle('tsg', fontSize=9, textColor=G, fontName='Helvetica-Bold', alignment=2)
+    # Use same column widths so "Total" and value align with table columns
+    tot = Table([
+        ['', '', '', '', Paragraph('<b>Total</b>', ts_g), Paragraph(f'<b>{total_val:,.2f}</b>', ts_g)]
+    ], colWidths=CW)
+    tot.setStyle(TableStyle([
+        ('ALIGN',(0,0),(-1,-1),'RIGHT'),
+        ('TOPPADDING',(0,0),(-1,-1), 3),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 3),
+        ('RIGHTPADDING',(0,0),(-1,-1), 3),
+    ]))
+    el.append(tot)
+
+    # ── Amount Chargeable strip — same width as packing table ──
+    TW = sum(CW)  # total table width
+    ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1)
+    ac = Table([[Paragraph(f'Amount Chargeable : {pi.currency} {pi.amount_in_words}', ac_style)]],
+               colWidths=[TW])
+    ac.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#dce9d0')),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    el.append(ac)
+    el.append(Spacer(1, 6*mm))
+
+    # ═══ BANK DETAILS (vertical list) + SEAL + SIGN (right side) ═══
+    bk_lb = ParagraphStyle('bklb', parent=styles['Normal'], fontSize=7, leading=9, fontName=_bf)
+    bk_vl = ParagraphStyle('bkvl', parent=styles['Normal'], fontSize=7, leading=9, fontName=_br)
+    bk_hd = ParagraphStyle('bkhd', parent=styles['Normal'], fontSize=8, leading=10, fontName=_bf)
+
+    bank_lines = pi.bank_details.strip().split('\n')
+    bank_rows = []
+    for line in bank_lines:
+        if ':' in line:
+            label, value = line.split(':', 1)
+            bank_rows.append([Paragraph(label.strip(), bk_lb), Paragraph(f': {value.strip()}', bk_vl)])
+        else:
+            bank_rows.append([Paragraph(line.strip(), bk_lb), ''])
+
+    bank_table = Table(
+        [[Paragraph('Bank Details', bk_hd), '']] + bank_rows,
+        colWidths=[26*mm, 60*mm]
+    )
+    bank_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('SPAN', (0,0), (1,0)),  # "Bank Details" header spans both columns
+    ]))
+    bank_p = bank_table
+
+    seal = Image(seal_path, width=20*mm, height=20*mm) if os.path.exists(seal_path) else ''
+    sign = Image(sign_path, width=22*mm, height=11*mm) if os.path.exists(sign_path) else ''
+
+    # Right side: "For Kriya..." → seal+sign side by side → "Authorised Signature"
+    auth_top = Paragraph('<b>For Kriya Biosys Private Limited</b>',
+                         ParagraphStyle('fk', fontSize=9, alignment=1, fontName=_bf))
+    seal_sign = Table([[seal, sign]], colWidths=[22*mm, 25*mm])
+    seal_sign.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'BOTTOM'), ('ALIGN',(0,0),(-1,-1),'CENTER')]))
+    auth_bottom = Paragraph('Authorised Signature',
+                            ParagraphStyle('as3', fontSize=9, alignment=1, fontName=_br))
+
+    right_block = Table([
+        [auth_top],
+        [seal_sign],
+        [auth_bottom],
+    ], colWidths=[70*mm])
+    right_block.setStyle(TableStyle([
+        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,-1), 2),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 2),
+    ]))
+
+    # Bank left, auth block right
+    TW = sum(CW)
+    bank_row = Table([[bank_p, right_block]], colWidths=[TW - 72*mm, 72*mm])
+    bank_row.setStyle(TableStyle([
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('LEFTPADDING',(0,0),(0,0), 0),
+        ('RIGHTPADDING',(0,0),(0,0), 0),
+    ]))
+    el.append(bank_row)
+    el.append(Spacer(1, 4*mm))
+
+    # ═══ DECLARATION ═══
+    el.append(Paragraph(
+        '<b>Declaration :</b> We declare that this Invoice shows the Actual Price of the Goods '
+        'described and that all particulars are true and correct &nbsp;<b>E. &amp; O.E</b>',
+        ParagraphStyle('d', fontSize=7, alignment=1)))
+    el.append(Paragraph('" Go Organic ! Save Planet ! "',
+                        ParagraphStyle('m', fontSize=8, alignment=1, fontName=_bf)))
+
+    doc.build(el)
     buffer.seek(0)
     return buffer
 

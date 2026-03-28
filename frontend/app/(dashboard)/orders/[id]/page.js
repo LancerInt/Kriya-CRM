@@ -10,6 +10,8 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import PIEditorModal from "@/components/finance/PIEditorModal";
+import CIEditorModal from "@/components/finance/CIEditorModal";
+import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 
 function fmtDate(d) { if (!d) return "\u2014"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
@@ -69,6 +71,18 @@ export default function OrderDetailPage() {
   const [piLoading, setPiLoading] = useState(false);
   const [piSending, setPiSending] = useState(false);
   const [piItems, setPiItems] = useState([]);
+  const [showCiModal, setShowCiModal] = useState(false);
+  const [ci, setCi] = useState(null);
+  const [ciForm, setCiForm] = useState({});
+  const [ciLoading, setCiLoading] = useState(false);
+  const [ciSending, setCiSending] = useState(false);
+  const [ciItems, setCiItems] = useState([]);
+  const [showQtModal, setShowQtModal] = useState(false);
+  const [qt, setQt] = useState(null);
+  const [qtForm, setQtForm] = useState({});
+  const [qtLoading, setQtLoading] = useState(false);
+  const [qtSending, setQtSending] = useState(false);
+  const [qtItems, setQtItems] = useState([]);
 
   const loadOrder = () => {
     Promise.all([
@@ -159,8 +173,9 @@ export default function OrderDetailPage() {
   const handleSavePI = async () => {
     if (!pi) return;
     try {
-      const res = await api.patch(`/finance/pi/${pi.id}/`, piForm);
+      const res = await api.post(`/finance/pi/${pi.id}/save-with-items/`, { ...piForm, items: piItems });
       setPi(res.data);
+      setPiItems(res.data.items || []);
       toast.success("PI saved");
     } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
   };
@@ -188,6 +203,114 @@ export default function OrderDetailPage() {
     finally { setPiSending(false); }
   };
 
+  // ── CI Handlers ──
+  const handleGenerateCI = async () => {
+    setCiLoading(true);
+    setShowCiModal(true);
+    try {
+      const existing = await api.get(`/finance/ci/`, { params: { order: id } });
+      const ciList = existing.data.results || existing.data;
+      if (ciList.length > 0) {
+        setCi(ciList[0]);
+        setCiForm(ciList[0]);
+        setCiItems(ciList[0].items || []);
+      } else {
+        const res = await api.post(`/finance/ci/create-from-order/`, { order_id: id });
+        setCi(res.data);
+        setCiForm(res.data);
+        setCiItems(res.data.items || []);
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to generate CI")); setShowCiModal(false); }
+    finally { setCiLoading(false); }
+  };
+
+  const handleSaveCI = async () => {
+    if (!ci) return;
+    try {
+      const res = await api.post(`/finance/ci/${ci.id}/save-with-items/`, { ...ciForm, items: ciItems });
+      setCi(res.data);
+      setCiItems(res.data.items || []);
+      toast.success("CI saved");
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+  };
+
+  const handlePreviewCI = async () => {
+    if (!ci) return;
+    await handleSaveCI();
+    try {
+      const res = await api.get(`/finance/ci/${ci.id}/generate-pdf/`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      window.open(url, "_blank");
+    } catch { toast.error("Failed to preview"); }
+  };
+
+  const handleSendCI = async () => {
+    if (!ci) return;
+    setCiSending(true);
+    try {
+      await handleSaveCI();
+      const res = await api.post(`/finance/ci/${ci.id}/send-email/`);
+      toast.success(`CI sent to ${res.data.sent_to}`);
+      setShowCiModal(false);
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send CI")); }
+    finally { setCiSending(false); }
+  };
+
+  // ── Quotation Handlers ──
+  const handleGenerateQt = async () => {
+    setQtLoading(true);
+    setShowQtModal(true);
+    try {
+      // Check if quotation already linked to this order
+      if (order?.quotation) {
+        const res = await api.get(`/quotations/quotations/${order.quotation}/`);
+        setQt(res.data);
+        setQtForm(res.data);
+        setQtItems(res.data.items || []);
+      } else {
+        const res = await api.post(`/quotations/quotations/create-from-order/`, { order_id: id });
+        setQt(res.data);
+        setQtForm(res.data);
+        setQtItems(res.data.items || []);
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to generate Quotation")); setShowQtModal(false); }
+    finally { setQtLoading(false); }
+  };
+
+  const handleSaveQt = async () => {
+    if (!qt) return;
+    try {
+      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, items: qtItems });
+      setQt(res.data);
+      setQtItems(res.data.items || []);
+      toast.success("Quotation saved");
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+  };
+
+  const handlePreviewQt = async () => {
+    if (!qt) return;
+    await handleSaveQt();
+    try {
+      const res = await api.get(`/quotations/quotations/${qt.id}/generate-pdf/`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      window.open(url, "_blank");
+    } catch { toast.error("Failed to preview"); }
+  };
+
+  const handleSendQt = async () => {
+    if (!qt) return;
+    setQtSending(true);
+    try {
+      await handleSaveQt();
+      const res = await api.post(`/quotations/quotations/${qt.id}/send-to-client/`, { send_via: "email" });
+      toast.success("Quotation sent!");
+      setShowQtModal(false);
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send Quotation")); }
+    finally { setQtSending(false); }
+  };
+
   if (loading) return <LoadingSpinner size="lg" />;
   if (!order) return <p className="text-center text-gray-500 py-8">Order not found</p>;
 
@@ -198,7 +321,9 @@ export default function OrderDetailPage() {
         subtitle={`${order.client_name} \u00b7 ${order.currency} ${Number(order.total).toLocaleString()}`}
         action={
           <div className="flex gap-2">
+            <button onClick={handleGenerateQt} className="px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Generate Quotation</button>
             <button onClick={handleGeneratePI} className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">Generate PI</button>
+            <button onClick={handleGenerateCI} className="px-3 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700">Generate CI</button>
             <button onClick={handleDownloadPDF} className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">PDF</button>
             <button onClick={() => setShowDocModal(true)} className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Upload Doc</button>
             <button onClick={() => router.back()} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Back</button>
@@ -360,6 +485,36 @@ export default function OrderDetailPage() {
         piItems={piItems} setPiItems={setPiItems}
         onSave={handleSavePI} onPreview={handlePreviewPI}
         onSend={handleSendPI} sending={piSending}
+      />
+
+      {/* CI Editor — Commercial Invoice template */}
+      {ciLoading && showCiModal && (
+        <Modal open={true} onClose={() => setShowCiModal(false)} title="Loading CI..." size="sm">
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-600" /></div>
+        </Modal>
+      )}
+      <CIEditorModal
+        open={showCiModal && !ciLoading}
+        onClose={() => setShowCiModal(false)}
+        ci={ci} ciForm={ciForm} setCiForm={setCiForm}
+        ciItems={ciItems} setCiItems={setCiItems}
+        onSave={handleSaveCI} onPreview={handlePreviewCI}
+        onSend={handleSendCI} sending={ciSending}
+      />
+
+      {/* Quotation Editor */}
+      {qtLoading && showQtModal && (
+        <Modal open={true} onClose={() => setShowQtModal(false)} title="Loading Quotation..." size="sm">
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600" /></div>
+        </Modal>
+      )}
+      <QuotationEditorModal
+        open={showQtModal && !qtLoading}
+        onClose={() => setShowQtModal(false)}
+        qt={qt} qtForm={qtForm} setQtForm={setQtForm}
+        qtItems={qtItems} setQtItems={setQtItems}
+        onSave={handleSaveQt} onPreview={handlePreviewQt}
+        onSend={handleSendQt} sending={qtSending}
       />
 
     </div>
