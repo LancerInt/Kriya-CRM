@@ -186,7 +186,8 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'currency', 'delivery_terms', 'payment_terms', 'payment_terms_detail',
             'freight_terms', 'country_of_origin', 'country_of_final_destination',
             'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
-            'final_destination', 'packaging_details', 'validity_days', 'notes',
+            'final_destination', 'packaging_details', 'display_overrides',
+            'validity_days', 'notes',
         }
         for field in allowed:
             if field in data:

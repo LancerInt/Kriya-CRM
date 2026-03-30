@@ -82,7 +82,7 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'country_of_origin', 'country_of_final_destination', 'port_of_loading',
             'port_of_discharge', 'vessel_flight_no', 'final_destination',
             'terms_of_trade', 'terms_of_delivery', 'buyer_reference',
-            'currency', 'amount_in_words', 'bank_details',
+            'currency', 'amount_in_words', 'bank_details', 'display_overrides',
         }
         for field in allowed:
             if field in data:
@@ -107,6 +107,14 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                     total_price=line_total,
                 )
             pi.total = total
+            # Auto-update amount_in_words with grand total (including freight/insurance/discount)
+            ov = pi.display_overrides if isinstance(pi.display_overrides, dict) else {}
+            freight = float(ov.get('_freight', 0) or 0)
+            insurance = float(ov.get('_insurance', 0) or 0)
+            discount = float(ov.get('_discount', 0) or 0)
+            grand_total = total + freight + insurance - discount
+            from finance.pi_service import _number_to_words
+            pi.amount_in_words = _number_to_words(grand_total, pi.currency)
         pi.save()
         return Response(ProformaInvoiceSerializer(pi).data)
 

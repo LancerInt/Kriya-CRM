@@ -88,6 +88,7 @@ class Quotation(TimeStampedModel):
     final_destination = models.CharField(max_length=100, blank=True)
 
     packaging_details = models.TextField(blank=True)
+    display_overrides = models.JSONField(default=dict, blank=True, help_text='Custom labels, footer text, consignee lines etc. from the editor form')
     validity_days = models.IntegerField(default=30)
     subtotal = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=15, decimal_places=2, default=0)

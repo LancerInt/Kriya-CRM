@@ -23,6 +23,24 @@ function ChannelBadge({ channel }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[channel] || "bg-gray-100 text-gray-800"}`}>{channel === "whatsapp" ? "WhatsApp" : "Email"}</span>;
 }
 
+function stripHtml(html) {
+  if (!html) return "";
+  let text = html;
+  // Convert block elements to newlines
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<\/div>/gi, "\n");
+  text = text.replace(/<\/p>/gi, "\n");
+  text = text.replace(/<\/li>/gi, "\n");
+  text = text.replace(/<\/tr>/gi, "\n");
+  // Strip remaining tags
+  text = text.replace(/<[^>]+>/g, "");
+  // Decode HTML entities
+  text = text.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+  // Collapse multiple blank lines but keep single line breaks
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
+
 export default function QuoteRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +104,12 @@ export default function QuoteRequestsPage() {
   const handleSaveQt = async () => {
     if (!qt) return;
     try {
-      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, items: qtItems });
+      // Collect _ prefixed keys into display_overrides for PDF/email
+      const display_overrides = {};
+      Object.entries(qtForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, display_overrides, items: qtItems });
       setQt(res.data);
       setQtItems(res.data.items || []);
       toast.success("Quotation saved");
@@ -183,8 +206,12 @@ export default function QuoteRequestsPage() {
               </div>
               {qr.linked_quotation_number && (
                 <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-xs text-green-600 font-medium">Draft: {qr.linked_quotation_number}</span>
-                  <button onClick={(e) => { e.stopPropagation(); handleOpenQuote(qr); }} className="text-xs bg-teal-600 text-white px-2 py-1 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                  <span className="text-xs text-green-600 font-medium">{qr.linked_quotation_status === "sent" ? "Sent" : "Draft"}: {qr.linked_quotation_number}</span>
+                  {qr.linked_quotation_status === "sent" ? (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Mail Sent</span>
+                  ) : (
+                    <button onClick={(e) => { e.stopPropagation(); handleOpenQuote(qr); }} className="text-xs bg-teal-600 text-white px-2 py-1 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                  )}
                 </div>
               )}
             </div>
@@ -203,7 +230,7 @@ export default function QuoteRequestsPage() {
                 <ConfidenceBadge value={selectedQR.ai_confidence} />
               </div>
               {selectedQR.source_subject && <p className="font-medium text-sm mb-1">{selectedQR.source_subject}</p>}
-              <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto">{selectedQR.source_body}</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto">{stripHtml(selectedQR.source_body)}</p>
             </div>
 
             {/* Sender Info */}
@@ -242,26 +269,30 @@ export default function QuoteRequestsPage() {
             {/* Linked Quotation */}
             {selectedQR.linked_quotation_number && (
               <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
-                <span className="text-sm text-green-700 font-medium">Draft Quotation: {selectedQR.linked_quotation_number}</span>
-                <button onClick={() => handleOpenQuote(selectedQR)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">Open & Enter Rates</button>
+                <span className="text-sm text-green-700 font-medium">{selectedQR.linked_quotation_status === "sent" ? "Sent" : "Draft"} Quotation: {selectedQR.linked_quotation_number}</span>
+                {selectedQR.linked_quotation_status === "sent" ? (
+                  <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg">Mail Sent</span>
+                ) : (
+                  <button onClick={() => handleOpenQuote(selectedQR)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">Open & Enter Rates</button>
+                )}
               </div>
             )}
 
             {/* Actions */}
             <div className="flex items-center justify-between pt-3 border-t">
-              <div className="flex gap-2">
+              <div>
                 {selectedQR.status === "new" && (
-                  <button onClick={() => handleStatusChange(selectedQR, "reviewed")} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Mark Reviewed</button>
+                  <button onClick={() => { handleStatusChange(selectedQR, "reviewed"); setShowReview(false); }} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Mark Reviewed</button>
                 )}
-                <button onClick={() => handleReject(selectedQR)} className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Reject</button>
               </div>
               <div className="flex gap-2">
                 {!selectedQR.linked_quotation ? (
                   <button onClick={() => handleGenerateQuote(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Generate Draft Quote</button>
+                ) : selectedQR.linked_quotation_status === "sent" ? (
+                  <span className="px-4 py-2 bg-green-100 text-green-700 text-sm font-medium rounded-lg">Mail Sent</span>
                 ) : (
                   <button onClick={() => handleOpenQuote(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Open & Enter Rates</button>
                 )}
-                <button onClick={() => setShowReview(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
               </div>
             </div>
           </div>

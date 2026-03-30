@@ -101,7 +101,7 @@ def generate_pi_pdf(pi):
     styles = getSampleStyleSheet()
     el = []
 
-    G = colors.HexColor('#4a7c2e')  # Kriya green
+    G = colors.HexColor('#558b2f')  # Kriya green
     LG = colors.HexColor('#8ab56b')  # lighter green for accent
     GR = colors.HexColor('#cccccc')  # grid grey
     W = colors.white
@@ -135,22 +135,22 @@ def generate_pi_pdf(pi):
     # Register fonts — Bookman Old Style (classic Windows serif)
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    _tf = 'Helvetica-Bold'
     _bf = 'Helvetica-Bold'
     _br = 'Helvetica'
+    _mt = 'Helvetica'  # Montserrat Regular for titles
     try:
         bos_bold = os.path.join(img_dir, 'BookmanOldStyle-Bold.ttf')
         bos_reg = os.path.join(img_dir, 'BookmanOldStyle-Regular.ttf')
-        dss_path = os.path.join(img_dir, 'DistinctStyleSans-Light.ttf')
+        mont_reg = os.path.join(img_dir, 'Montserrat-Regular.ttf')
         if os.path.exists(bos_bold):
             pdfmetrics.registerFont(TTFont('BookmanOldStyle-Bold', bos_bold))
             _bf = 'BookmanOldStyle-Bold'
         if os.path.exists(bos_reg):
             pdfmetrics.registerFont(TTFont('BookmanOldStyle', bos_reg))
             _br = 'BookmanOldStyle'
-        if os.path.exists(dss_path):
-            pdfmetrics.registerFont(TTFont('DistinctSans-Light', dss_path))
-            _tf = 'DistinctSans-Light'
+        if os.path.exists(mont_reg):
+            pdfmetrics.registerFont(TTFont('Montserrat-Regular', mont_reg))
+            _mt = 'Montserrat-Regular'
     except Exception:
         pass
 
@@ -159,7 +159,7 @@ def generate_pi_pdf(pi):
     s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=7, leading=9, fontName=_br)
     s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=8, leading=10, fontName=_bf)
 
-    title_p = Paragraph('PROFORMA<br/>INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName='Helvetica-Bold', alignment=1, leading=24))
+    title_p = Paragraph('PROFORMA<br/>INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName=_mt, alignment=1, leading=24))
     title_box = Table([[title_p]], colWidths=[_RW], rowHeights=[23*mm])
     title_box.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(-1,-1),G),
@@ -268,21 +268,22 @@ def generate_pi_pdf(pi):
          Paragraph('<b>Terms of Delivery</b>',lb), Paragraph(pi.terms_of_delivery or '',vl)],
         [Paragraph('<b>Buyer Reference</b>',lb), Paragraph(pi.buyer_reference or '',vl), '', ''],
     ]
-    _sw = PW - 8*mm  # shipment content width = 182mm
+    _sw = PW - 11*mm  # shipment content width = 180mm
     # Label1(32) + Value1(38) + Label2(50) + Value2(62) = 182mm
-    st = Table(sd, colWidths=[32*mm, 38*mm, 50*mm, _sw - 32*mm - 38*mm - 50*mm])
+    _rh = 8*mm  # fixed row height
+    st = Table(sd, colWidths=[32*mm, 38*mm, 50*mm, _sw - 32*mm - 38*mm - 50*mm],
+               rowHeights=[_rh]*5)
     st.setStyle(TableStyle([
         ('FONTSIZE',(0,0),(-1,-1), 8),
         ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-        ('TOPPADDING',(0,0),(-1,0), 1),     # First row: minimal top padding to align with sidebar
-        ('TOPPADDING',(0,1),(-1,-1), 4),     # Other rows: normal padding
-        ('BOTTOMPADDING',(0,0),(-1,-1), 4),
+        ('TOPPADDING',(0,0),(-1,-1), 2),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 2),
         ('LEFTPADDING',(0,0),(-1,-1), 4),
     ]))
-    sidebar = RotatedText('SHIPMENT  DETAILS', 8*mm, 32*mm, G, 7, _tf)
-    sw = Table([[sidebar, st]], colWidths=[8*mm, PW - 8*mm])
+    sidebar = RotatedText('SHIPMENT  DETAILS', 12*mm, 5*_rh, G, 9, _mt)
+    sw = Table([[sidebar, st]], colWidths=[12*mm, PW - 12*mm])
     sw.setStyle(TableStyle([
-        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
         ('LEFTPADDING',(0,0),(-1,-1),0),
         ('RIGHTPADDING',(0,0),(-1,-1),0),
         ('TOPPADDING',(0,0),(-1,-1),0),
@@ -326,25 +327,46 @@ def generate_pi_pdf(pi):
     ]))
     el.append(it)
 
-    # ── Total row — aligned exactly with Amount column ──
-    total_val = sum(i.total_price for i in pi.items.all())
-    ts_g = ParagraphStyle('tsg', fontSize=9, textColor=G, fontName='Helvetica-Bold', alignment=2)
-    # Use same column widths so "Total" and value align with table columns
-    tot = Table([
-        ['', '', '', '', Paragraph('<b>Total</b>', ts_g), Paragraph(f'<b>{total_val:,.2f}</b>', ts_g)]
-    ], colWidths=CW)
+    # ── Totals: Freight, Insurance, Sub Total, Discount, Grand Total ──
+    ov = pi.display_overrides if isinstance(pi.display_overrides, dict) else {}
+    total_val = sum(float(i.total_price) for i in pi.items.all())
+    freight = float(ov.get('_freight', 0) or 0)
+    insurance = float(ov.get('_insurance', 0) or 0)
+    sub_total = total_val + freight + insurance
+    discount = float(ov.get('_discount', 0) or 0)
+    discount_label = ov.get('_discount_label', '')
+    grand_total = sub_total - discount
+    prefix = '$' if pi.currency == 'USD' else ''
+
+    ts_g = ParagraphStyle('tsg', fontSize=9, textColor=G, fontName=_bf, alignment=2)
+
+    TW = sum(CW)
+    _lw = TW - 60*mm  # left spacer
+    totals_data = [
+        ['', 'Freight', f'{prefix}{freight:,.2f}'],
+        ['', 'Insurance', f'{prefix}{insurance:,.2f}'],
+        ['', 'Sub Total', f'{prefix}{sub_total:,.2f}'],
+    ]
+    if discount:
+        totals_data.append(['', f'Discount {discount_label}', f'{prefix}{discount:,.2f}'])
+    totals_data.append(['', Paragraph('<b>Grand Total</b>', ts_g), Paragraph(f'<b>{prefix}{grand_total:,.2f}</b>', ts_g)])
+
+    tot = Table(totals_data, colWidths=[_lw, 30*mm, 30*mm])
     tot.setStyle(TableStyle([
-        ('ALIGN',(0,0),(-1,-1),'RIGHT'),
-        ('TOPPADDING',(0,0),(-1,-1), 3),
-        ('BOTTOMPADDING',(0,0),(-1,-1), 3),
-        ('RIGHTPADDING',(0,0),(-1,-1), 3),
+        ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+        ('FONT', (0,0), (-1,-1), _bf),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 3),
+        ('LINEBELOW', (1,-1), (-1,-1), 0.5, G),
     ]))
     el.append(tot)
+    el.append(Spacer(1, 3*mm))
 
-    # ── Amount Chargeable strip — same width as packing table ──
-    TW = sum(CW)  # total table width
+    # ── Amount in Words strip ──
     ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1)
-    ac = Table([[Paragraph(f'Amount Chargeable : {pi.currency} {pi.amount_in_words}', ac_style)]],
+    ac = Table([[Paragraph(f'Amount In Words : {pi.amount_in_words or ""}', ac_style)]],
                colWidths=[TW])
     ac.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#dce9d0')),

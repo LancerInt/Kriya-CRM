@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { login, clearError } from "@/store/slices/authSlice";
 
 export default function LoginPage() {
@@ -83,7 +84,13 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign in"}
             </button>
           </form>
-          <div className="mt-6 p-3 bg-gray-50 rounded-lg">
+          <p className="text-center text-sm text-gray-500 mt-6">
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-indigo-600 font-medium hover:text-indigo-700">
+              Sign up
+            </Link>
+          </p>
+          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-500 font-medium mb-2">Demo credentials:</p>
             <div className="text-xs text-gray-600 space-y-1">
               <p>Admin: <code className="bg-gray-200 px-1 rounded">admin / admin123</code></p>

@@ -119,7 +119,7 @@ def generate_ci_pdf(ci):
     styles = getSampleStyleSheet()
     el = []
 
-    G = colors.HexColor('#4a7c2e')   # Kriya green
+    G = colors.HexColor('#558b2f')   # Kriya green
     GR = colors.HexColor('#cccccc')  # grid grey
     W = colors.white
     B = colors.black
@@ -144,25 +144,25 @@ def generate_ci_pdf(ci):
 
     PW = 190*mm  # page width
 
-    # Register fonts — Bookman Old Style (classic Windows serif)
+    # Register fonts
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    _tf = 'Helvetica-Bold'
     _bf = 'Helvetica-Bold'
     _br = 'Helvetica'
+    _mt = 'Helvetica'
     try:
         bos_bold = os.path.join(img_dir, 'BookmanOldStyle-Bold.ttf')
         bos_reg = os.path.join(img_dir, 'BookmanOldStyle-Regular.ttf')
-        dss_path = os.path.join(img_dir, 'DistinctStyleSans-Light.ttf')
+        mont_reg = os.path.join(img_dir, 'Montserrat-Regular.ttf')
         if os.path.exists(bos_bold):
             pdfmetrics.registerFont(TTFont('BookmanOldStyle-Bold', bos_bold))
             _bf = 'BookmanOldStyle-Bold'
         if os.path.exists(bos_reg):
             pdfmetrics.registerFont(TTFont('BookmanOldStyle', bos_reg))
             _br = 'BookmanOldStyle'
-        if os.path.exists(dss_path):
-            pdfmetrics.registerFont(TTFont('DistinctSans-Light', dss_path))
-            _tf = 'DistinctSans-Light'
+        if os.path.exists(mont_reg):
+            pdfmetrics.registerFont(TTFont('Montserrat-Regular', mont_reg))
+            _mt = 'Montserrat-Regular'
     except Exception:
         pass
 
@@ -180,7 +180,7 @@ def generate_ci_pdf(ci):
     GAP = 3*mm
     EW = 60*mm
     CW2 = PW - EW - GAP - RW
-    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName='Helvetica-Bold', alignment=1, leading=24))
+    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName=_mt, alignment=1, leading=24))
     title_box = Table([[title_p]], colWidths=[RW], rowHeights=[23*mm])
     title_box.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), G),
@@ -226,23 +226,24 @@ def generate_ci_pdf(ci):
     ]))
 
     rows = [
-        [Paragraph('Exporter', s8b), Paragraph('Consignee', s8b), '', rc],
-        [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.client_company_name, s8b), '', ''],
-        [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(f'{ci.client_tax_number}', s7), '', ''],
-        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(f'{ci.client_address}', s7), '', ''],
-        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(f'{ci.client_pincode}', s7), '', ''],
-        [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', s7), Paragraph(f'{ci.client_city_state_country}', s7), '', ''],
-        [Paragraph(f'EMAIL : {EXPORTER["email"]}', s7), Paragraph(f'Tel: {ci.client_phone}', s7), '', ''],
+        [Paragraph('Exporter', s8b), Paragraph('Notify', s8b), '', rc],
+        [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.notify_company_name or ci.client_company_name, s8b), '', ''],
+        [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(ci.notify_address or ci.client_address or '', s7), '', ''],
+        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(f'{ci.client_pincode}', s7), '', ''],
+        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(f'{ci.client_city_state_country}', s7), '', ''],
+        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(f'{ci.client_tax_number}', s7), '', ''],
+        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(f'Tel: {ci.notify_phone or ci.client_phone}', s7), '', ''],
+        [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', s7), '', '', ''],
         [Paragraph(f'IEC : {EXPORTER["iec"]}', s7), '', '', ''],
     ]
-    t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*7)
+    t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*8)
     t1.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (1,0), colors.HexColor('#d5d5d5')),
         ('BACKGROUND', (2,0), (2,0), W),
         ('BACKGROUND', (3,0), (3,0), W),
         ('LINEBELOW', (0,0), (1,0), 0.3, GR),
         ('VALIGN', (0,0), (1,0), 'MIDDLE'),
-        ('SPAN', (3,0), (3,7)),
+        ('SPAN', (3,0), (3,8)),
         ('VALIGN', (0,1), (-1,-1), 'TOP'),
         ('VALIGN', (3,0), (3,0), 'TOP'),
         ('TOPPADDING', (0,0), (-1,-1), 1),
@@ -258,101 +259,112 @@ def generate_ci_pdf(ci):
     el.append(t1)
     el.append(Spacer(1, 1*mm))
 
-    # ═══ NOTIFY PARTY ═══
-    if ci.notify_company_name:
-        notify_rows = [
-            [Paragraph('<b>Notify Party</b>', s8b)],
-            [Paragraph(ci.notify_company_name, s8b)],
-            [Paragraph(ci.notify_address, s7)],
-            [Paragraph(f'Tel: {ci.notify_phone}', s7)],
-        ]
-        nt = Table(notify_rows, colWidths=[PW])
-        nt.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d5d5d5')),
-            ('LINEBELOW', (0,0), (0,0), 0.3, GR),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('TOPPADDING', (0,0), (-1,-1), 1),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-            ('LEFTPADDING', (0,0), (-1,-1), 3),
-        ]))
-        el.append(nt)
-        el.append(Spacer(1, 1*mm))
-
-    # ═══ SHIPMENT / LOADING DETAILS ═══
-    sd = [
-        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(ci.country_of_origin, vl),
-         Paragraph('<b>Country of Final Destination</b>', lb), Paragraph(ci.country_of_final_destination, vl)],
-        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(ci.port_of_loading or '', vl),
-         Paragraph('<b>Port of Discharge</b>', lb), Paragraph(ci.port_of_discharge or '', vl)],
-        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(ci.vessel_flight_no or '', vl),
-         Paragraph('<b>Final Destination</b>', lb), Paragraph(ci.final_destination or '', vl)],
-        [Paragraph('<b>Pre-Carriage By</b>', lb), Paragraph(ci.pre_carriage_by or '', vl),
-         Paragraph('<b>Place of Receipt</b>', lb), Paragraph(ci.place_of_receipt or '', vl)],
-        [Paragraph('<b>Terms of Delivery</b>', lb), Paragraph(ci.terms_of_delivery or '', vl),
-         Paragraph('<b>Payment Terms</b>', lb), Paragraph(ci.payment_terms or '', vl)],
-        [Paragraph('<b>Buyer Order No.</b>', lb),
-         Paragraph(f'{ci.buyer_order_no} dt. {ci.buyer_order_date.strftime("%d-%m-%Y") if ci.buyer_order_date else ""}', vl),
-         '', ''],
+    # ═══ CONSIGNEE (To the Order) ═══
+    consignee_rows = [
+        [Paragraph('<b>Consignee</b>', s8b)],
+        [Paragraph(f'To the Order {ci.client_city_state_country or ci.country_of_final_destination or ""}', s7)],
     ]
-    _sw = PW - 8*mm  # 182mm
-    # Label1(30) + Value1(52) + Label2(42) + Value2(58) = 182mm — wide values to avoid wrapping
-    st = Table(sd, colWidths=[30*mm, 52*mm, 42*mm, _sw - 30*mm - 52*mm - 42*mm])
-    st.setStyle(TableStyle([
-        ('FONTSIZE', (0,0), (-1,-1), 8),
+    cn = Table(consignee_rows, colWidths=[PW])
+    cn.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d5d5d5')),
+        ('LINEBELOW', (0,0), (0,0), 0.3, GR),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,0), 1),
-        ('TOPPADDING', (0,1), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ('LEFTPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('LEFTPADDING', (0,0), (-1,-1), 3),
     ]))
-    sidebar = RotatedText('SHIPMENT  DETAILS', 8*mm, 38*mm, G, 7, _tf)
-    sw = Table([[sidebar, st]], colWidths=[8*mm, PW - 8*mm])
-    sw.setStyle(TableStyle([
+    el.append(cn)
+    el.append(Spacer(1, 1*mm))
+
+    # ═══ SHIPMENT DETAILS (left) + BANK DETAILS (right) — side by side ═══
+    _rh = 7*mm
+    sd = [
+        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(ci.country_of_origin, vl)],
+        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(ci.port_of_loading or '', vl)],
+        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(ci.vessel_flight_no or '', vl)],
+        [Paragraph('<b>Port of Discharge</b>', lb), Paragraph(ci.port_of_discharge or '', vl)],
+        [Paragraph('<b>Country of Final Dest.</b>', lb), Paragraph(ci.country_of_final_destination or '', vl)],
+        [Paragraph('<b>Incoterms</b>', lb), Paragraph(ci.terms_of_delivery or '', vl)],
+        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(ci.payment_terms or '', vl)],
+        [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(ci.buyer_order_no or '', vl)],
+        [Paragraph('<b>Exchange Rate per USD</b>', lb), Paragraph(f'{ci.exchange_rate}' if ci.exchange_rate else '', vl)],
+    ]
+    st = Table(sd, colWidths=[35*mm, 55*mm], rowHeights=[_rh]*9)
+    st.setStyle(TableStyle([
+        ('FONTSIZE', (0,0), (-1,-1), 7),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('LEFTPADDING', (0,0), (-1,-1), 3),
+    ]))
+
+    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 9*_rh, G, 8, _mt)
+
+    # Bank Details table (right side)
+    bk_lb2 = ParagraphStyle('bk2', fontSize=7, leading=9, fontName=_bf)
+    bk_vl2 = ParagraphStyle('bv2', fontSize=7, leading=9, fontName=_br)
+    bank_lines = ci.bank_details.strip().split('\n') if ci.bank_details else []
+    bd = [[Paragraph('<b>Bank Details</b>', s8b), '']]
+    for line in bank_lines:
+        if ':' in line:
+            lbl, val = line.split(':', 1)
+            bd.append([Paragraph(f'<b>{lbl.strip()}</b>', bk_lb2), Paragraph(f': {val.strip()}', bk_vl2)])
+        else:
+            bd.append([Paragraph(line.strip(), bk_lb2), ''])
+    bank_t = Table(bd, colWidths=[25*mm, 55*mm])
+    bank_t.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('SPAN', (0,0), (1,0)),
+    ]))
+
+    # Combine: sidebar | shipment | bank details
+    combo = Table([[sidebar, st, bank_t]], colWidths=[10*mm, 90*mm, PW - 10*mm - 90*mm])
+    combo.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ('TOPPADDING', (0,0), (-1,-1), 0),
         ('BOTTOMPADDING', (0,0), (-1,-1), 0),
     ]))
-    el.append(sw)
+    el.append(combo)
     el.append(Spacer(1, 1*mm))
 
-    # ═══ DESCRIPTION OF GOODS TABLE ═══
-    _cf = 'Comfortaa-Bold' if 'Comfortaa-Bold' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
-    # Product(24) Packages(40) Description(38) HSN(16) Qty(12) Rate(20) USD(22) INR(18) = 190mm
-    CW = [24*mm, 40*mm, 38*mm, 16*mm, 12*mm, 20*mm, 22*mm, 18*mm]
-
-    pd_title = Table([[Paragraph('DESCRIPTION OF GOODS', ParagraphStyle('pd', fontSize=14, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_cf))]], colWidths=[sum(CW)])
+    # ═══ PACKING DETAILS TABLE ═══
+    pd_title = Table([[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=14, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_bf))]], colWidths=[PW])
     el.append(pd_title)
     el.append(Spacer(1, 1*mm))
 
-    # Header row using Paragraphs for wrapping control
+    # Product Name(30) | Packages(30) | Product Details(38) | Qty(16) | Price/Kg(22) | USD(27) | INR(27) = 190mm
+    CW = [30*mm, 30*mm, 38*mm, 16*mm, 22*mm, 27*mm, 27*mm]
+
     hs = ParagraphStyle('hs', fontSize=7, fontName=_bf, textColor=W, leading=9)
     hsr = ParagraphStyle('hsr', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=2)
     hsc = ParagraphStyle('hsc', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=1)
     hdr = [
+        Paragraph('Product Name', hs),
+        Paragraph('No. & Kind of<br/>Packages', hs),
         Paragraph('Product Details', hs),
-        Paragraph('No. & Kind of Packages', hs),
-        Paragraph('Description of Goods', hs),
-        Paragraph('HSN Code', hsc),
-        Paragraph('Qty', hsc),
-        Paragraph('Rate', hsr),
-        Paragraph(f'Amount<br/>({ci.currency})', hsr),
-        Paragraph('Amount<br/>(INR)', hsr),
+        Paragraph('Quantity', hsc),
+        Paragraph('Price/Kg', hsr),
+        Paragraph('Amount in<br/>USD', hsr),
+        Paragraph('Amount in<br/>INR', hsr),
     ]
 
     data = [hdr]
+    xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
     for item in ci.items.all():
-        inr_val = float(item.total_price) * float(ci.exchange_rate) if ci.exchange_rate else 0
+        inr_val = float(item.total_price) * xrate if xrate else 0
         data.append([
             item.product_name,
             item.packages_description,
             item.description_of_goods,
-            item.hsn_code or '',
             f'{item.quantity:,.0f}',
             f'{item.unit_price:,.2f}',
-            f'{item.total_price:,.2f}',
-            f'{inr_val:,.2f}' if ci.exchange_rate else '-',
+            f'${item.total_price:,.2f}',
+            f'Rs.{inr_val:,.2f}' if xrate else 'Rs.0.00',
         ])
 
     it = Table(data, colWidths=CW)
@@ -363,10 +375,10 @@ def generate_ci_pdf(ci):
         # Body styling — regular weight, clean
         ('FONT', (0,1), (-1,-1), _br),
         ('FONTSIZE', (0,1), (-1,-1), 8),
-        # Alignment: left for text cols, center for HSN/Qty, right for numbers
+        # Alignment: left for text cols, center for Qty, right for numbers
         ('ALIGN', (0,1), (2,-1), 'LEFT'),
-        ('ALIGN', (3,1), (4,-1), 'CENTER'),
-        ('ALIGN', (5,1), (-1,-1), 'RIGHT'),
+        ('ALIGN', (3,1), (3,-1), 'CENTER'),
+        ('ALIGN', (4,1), (-1,-1), 'RIGHT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         # Compact padding with extra gap between columns
         ('TOPPADDING', (0,0), (-1,0), 4),
@@ -378,51 +390,54 @@ def generate_ci_pdf(ci):
     ]))
     el.append(it)
 
-    # ═══ TOTALS SECTION (dual currency) ═══
-    ts_g = ParagraphStyle('tsg', fontSize=8, textColor=G, fontName='Helvetica-Bold', alignment=2)
-    ts_r = ParagraphStyle('tsr', fontSize=8, fontName=_br, alignment=2)
+    # ═══ FINANCIAL BREAKDOWN ═══
+    ts_g = ParagraphStyle('tsg', fontSize=8, textColor=G, fontName=_bf, alignment=2)
+    TW = sum(CW)
+    xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
+    total_usd = sum(float(i.total_price) for i in ci.items.all())
+    total_inr = total_usd * xrate
+    frt = float(ci.freight or 0)
+    ins = float(ci.insurance or 0)
+    sub_usd = total_usd + frt + ins
+    sub_inr = sub_usd * xrate
+    igst_r = float(ci.igst_rate or 0)
+    igst_a = sub_inr * igst_r / 100
+    grand_inr = sub_inr + igst_a
 
-    total_rows = [
-        ['', '', '', '', '', 'Total FOB', f'{ci.total_fob_usd:,.2f}', f'{ci.total_fob_inr:,.2f}' if ci.total_fob_inr else '-'],
-        ['', '', '', '', '', 'Freight', f'{ci.freight:,.2f}', f'{ci.freight_inr:,.2f}' if ci.freight_inr else '-'],
-        ['', '', '', '', '', 'Insurance', f'{ci.insurance:,.2f}', f'{ci.insurance_inr:,.2f}' if ci.insurance_inr else '-'],
-        ['', '', '', '', '', Paragraph('<b>Total Invoice</b>', ts_g), Paragraph(f'<b>{ci.total_invoice_usd:,.2f}</b>', ts_g), Paragraph(f'<b>{ci.total_invoice_inr:,.2f}</b>' if ci.total_invoice_inr else '-', ts_g)],
+    _lw = TW - 60*mm
+    totals_data = [
+        ['', '', 'Discount', f'${frt:,.2f}', f'Rs.{(frt * xrate):,.2f}' if xrate else '-'],
+        ['', '', 'Sub Total', f'${sub_usd:,.2f}', f'Rs.{sub_inr:,.2f}' if xrate else '-'],
     ]
-    tot = Table(total_rows, colWidths=CW)
+    if igst_r:
+        totals_data.append(['', '', f'GST {igst_r}%', '', f'Rs.{igst_a:,.2f}' if xrate else '-'])
+    totals_data.append(['', '', Paragraph('<b>Grand Total</b>', ts_g), '', Paragraph(f'<b>Rs.{grand_inr:,.2f}</b>', ts_g) if xrate else Paragraph('-', ts_g)])
+
+    tot = Table(totals_data, colWidths=[_lw, 0, 25*mm, 25*mm, 30*mm])
     tot.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+        ('FONT', (0,0), (-1,-1), _bf),
         ('FONTSIZE', (0,0), (-1,-1), 7),
-        ('FONT', (0,0), (-1,-1), _br),
         ('TOPPADDING', (0,0), (-1,-1), 2),
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-        ('RIGHTPADDING', (0,0), (-1,-1), 2),
-        ('LINEABOVE', (5,0), (-1,0), 0.5, GR),
-        ('LINEBELOW', (5,-1), (-1,-1), 0.5, GR),
+        ('RIGHTPADDING', (0,0), (-1,-1), 3),
+        ('LINEBELOW', (2,-1), (-1,-1), 0.5, G),
     ]))
     el.append(tot)
+    el.append(Spacer(1, 2*mm))
 
-    # ═══ IGST + GRAND TOTAL (INR only) ═══
-    if ci.igst_rate:
-        igst_rows = [
-            ['', '', '', '', '', f'IGST @ {ci.igst_rate}%', '', f'{ci.igst_amount:,.2f}'],
-            ['', '', '', '', '', Paragraph('<b>Grand Total (INR)</b>', ts_g), '', Paragraph(f'<b>{ci.grand_total_inr:,.2f}</b>', ts_g)],
-        ]
-        igst_t = Table(igst_rows, colWidths=CW)
-        igst_t.setStyle(TableStyle([
-            ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
-            ('FONTSIZE', (0,0), (-1,-1), 7),
-            ('FONT', (0,0), (-1,-1), _br),
-            ('TOPPADDING', (0,0), (-1,-1), 2),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('RIGHTPADDING', (0,0), (-1,-1), 2),
-            ('LINEBELOW', (5,-1), (-1,-1), 0.8, G),
-        ]))
-        el.append(igst_t)
+    # ═══ ADDITIONAL DETAILS ═══
+    ad_style = ParagraphStyle('ad', fontSize=7, leading=9, fontName=_br)
+    ad_bold = ParagraphStyle('adb', fontSize=7, leading=9, fontName=_bf)
+    el.append(Paragraph('<b><u>Additional Details</u></b>', ad_bold))
+    el.append(Paragraph(f'<b>FOB</b> : ${total_usd:,.2f}', ad_style))
+    el.append(Paragraph(f'<b>Shipping &amp; Forwarding</b> : ${frt:,.2f}', ad_style))
+    el.append(Paragraph(f'<b>Insurance</b> : ${ins:,.2f}', ad_style))
 
     # ═══ Amount Chargeable strip ═══
     TW = sum(CW)
     ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1)
-    ac = Table([[Paragraph(f'Amount Chargeable : {ci.amount_in_words}', ac_style)]], colWidths=[TW])
+    ac = Table([[Paragraph(f'Amount In Words : {ci.amount_in_words or ""}', ac_style)]], colWidths=[TW])
     ac.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#dce9d0')),
         ('TOPPADDING', (0,0), (-1,-1), 4),
@@ -432,34 +447,22 @@ def generate_ci_pdf(ci):
     el.append(ac)
     el.append(Spacer(1, 6*mm))
 
-    # ═══ BANK DETAILS + SEAL/SIGN ═══
-    bk_lb = ParagraphStyle('bklb', parent=styles['Normal'], fontSize=7, leading=9, fontName=_bf)
-    bk_vl = ParagraphStyle('bkvl', parent=styles['Normal'], fontSize=7, leading=9, fontName=_br)
-    bk_hd = ParagraphStyle('bkhd', parent=styles['Normal'], fontSize=8, leading=10, fontName=_bf)
-
-    bank_lines = ci.bank_details.strip().split('\n')
-    bank_rows = []
-    for line in bank_lines:
-        if ':' in line:
-            label, value = line.split(':', 1)
-            bank_rows.append([Paragraph(label.strip(), bk_lb), Paragraph(f': {value.strip()}', bk_vl)])
-        else:
-            bank_rows.append([Paragraph(line.strip(), bk_lb), ''])
-
-    bank_table = Table(
-        [[Paragraph('Bank Details', bk_hd), '']] + bank_rows,
-        colWidths=[26*mm, 60*mm]
-    )
-    bank_table.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-        ('LEFTPADDING', (0,0), (-1,-1), 0),
-        ('SPAN', (0,0), (1,0)),
-    ]))
-
+    # ═══ DECLARATION + SEAL/SIGN ═══
     seal = Image(seal_path, width=20*mm, height=20*mm) if os.path.exists(seal_path) else ''
     sign = Image(sign_path, width=22*mm, height=11*mm) if os.path.exists(sign_path) else ''
+
+    decl_style = ParagraphStyle('decl', fontSize=7, leading=9, fontName=_br)
+    decl_block = Table([
+        [Paragraph('<b>Declaration :</b>', decl_style)],
+        [Paragraph('We Declare that this Invoice shows the Actual Price of the Goods described and that all particulars are true and correct', decl_style)],
+        [Paragraph('<b>E. &amp; O.E</b>', decl_style)],
+    ], colWidths=[100*mm])
+    decl_block.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+    ]))
 
     auth_top = Paragraph('<b>For Kriya Biosys Private Limited</b>',
                          ParagraphStyle('fk', fontSize=9, alignment=1, fontName=_bf))
@@ -480,20 +483,16 @@ def generate_ci_pdf(ci):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
 
-    bank_row = Table([[bank_table, right_block]], colWidths=[TW - 72*mm, 72*mm])
-    bank_row.setStyle(TableStyle([
+    decl_row = Table([[decl_block, right_block]], colWidths=[TW - 72*mm, 72*mm])
+    decl_row.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('LEFTPADDING', (0,0), (0,0), 0),
         ('RIGHTPADDING', (0,0), (0,0), 0),
     ]))
-    el.append(bank_row)
+    el.append(decl_row)
     el.append(Spacer(1, 4*mm))
 
-    # ═══ DECLARATION ═══
-    el.append(Paragraph(
-        '<b>Declaration :</b> We declare that this Invoice shows the Actual Price of the Goods '
-        'described and that all particulars are true and correct &nbsp;<b>E. &amp; O.E</b>',
-        ParagraphStyle('d', fontSize=7, alignment=1)))
+    # ═══ FOOTER ═══
     el.append(Paragraph('" Go Organic ! Save Planet ! "',
                         ParagraphStyle('m', fontSize=8, alignment=1, fontName=_bf)))
 

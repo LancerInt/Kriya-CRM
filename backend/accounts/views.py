@@ -3,7 +3,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
-from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer, ChangePasswordSerializer
+from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer, ChangePasswordSerializer, SignupSerializer
 
 User = get_user_model()
 
@@ -33,6 +33,21 @@ def login_view(request):
         'refresh': str(refresh),
         'user': UserSerializer(user).data,
     })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def signup_view(request):
+    serializer = SignupSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
+
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+        'user': UserSerializer(user).data,
+    }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])

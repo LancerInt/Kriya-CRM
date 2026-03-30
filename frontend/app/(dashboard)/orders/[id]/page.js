@@ -173,7 +173,11 @@ export default function OrderDetailPage() {
   const handleSavePI = async () => {
     if (!pi) return;
     try {
-      const res = await api.post(`/finance/pi/${pi.id}/save-with-items/`, { ...piForm, items: piItems });
+      const display_overrides = {};
+      Object.entries(piForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/finance/pi/${pi.id}/save-with-items/`, { ...piForm, display_overrides, items: piItems });
       setPi(res.data);
       setPiItems(res.data.items || []);
       toast.success("PI saved");
@@ -281,7 +285,11 @@ export default function OrderDetailPage() {
   const handleSaveQt = async () => {
     if (!qt) return;
     try {
-      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, items: qtItems });
+      const display_overrides = {};
+      Object.entries(qtForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, display_overrides, items: qtItems });
       setQt(res.data);
       setQtItems(res.data.items || []);
       toast.success("Quotation saved");

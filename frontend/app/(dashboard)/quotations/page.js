@@ -96,7 +96,11 @@ export default function QuotationsPage() {
   const handleSaveQt = async () => {
     if (!qt) return;
     try {
-      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, items: qtItems });
+      const display_overrides = {};
+      Object.entries(qtForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/quotations/quotations/${qt.id}/save-with-items/`, { ...qtForm, display_overrides, items: qtItems });
       setQt(res.data);
       setQtItems(res.data.items || []);
       toast.success("Quotation saved");

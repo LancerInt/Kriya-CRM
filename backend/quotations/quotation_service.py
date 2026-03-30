@@ -29,6 +29,8 @@ EXPORTER = {
 def generate_quotation_pdf(q):
     """Generate PDF matching the Kriya Biosys Quotation template."""
     buffer = io.BytesIO()
+    # Display overrides from the editor form (custom labels, consignee lines, footer text)
+    ov = q.display_overrides if isinstance(q.display_overrides, dict) else {}
     client_name = q.client.company_name if q.client else 'Client'
     pdf_title = f'Quotation {q.quotation_number} - {client_name}'
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=12*mm, bottomMargin=10*mm,
@@ -157,26 +159,28 @@ def generate_quotation_pdf(q):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
 
-    # Client info
+    # Client info — use display_overrides if set, otherwise fall back to client model
     client = q.client
-    client_name = client.company_name if client else ''
     client_contact = client.contacts.filter(is_deleted=False).order_by('-is_primary').first() if client else None
-    client_addr = client.address or '' if client else ''
-    client_postal = f'{client.postal_code}' if client and client.postal_code else ''
-    client_city = ', '.join(filter(None, [
-        client.city if client else '',
-        client.state if client else '',
-    ]))
-    client_country = client.country or '' if client else ''
-    client_phone = f'Phone: {client_contact.phone or client.phone_number}' if client_contact and (client_contact.phone or client.phone_number) else ''
+
+    con_line1 = ov.get('_consignee_line1', client.address if client else '')
+    con_line2 = ov.get('_consignee_line2', ', '.join(filter(None, [
+        client.postal_code if client else '', client.city if client else '', client.state if client else '',
+    ])))
+    con_line3 = ov.get('_consignee_line3', client.country if client else '')
+    con_phone = ov.get('_consignee_phone',
+        f'Phone: {client_contact.phone or client.phone_number}' if client_contact and (client_contact.phone or client.phone_number) else '')
+
+    lbl_exp = ov.get('_lbl_exporter', 'Exporter')
+    lbl_con = ov.get('_lbl_consignee', 'Consignee')
 
     rows = [
-        [Paragraph('Exporter', ParagraphStyle('exp', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), Paragraph('Consignee', ParagraphStyle('con', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), '', rc],
+        [Paragraph(lbl_exp, ParagraphStyle('exp', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), Paragraph(lbl_con, ParagraphStyle('con', fontSize=FS, leading=FS+2, fontName=_bf, textColor=colors.HexColor('#404040'), alignment=0)), '', rc],
         [Paragraph(EXPORTER['name'], ParagraphStyle('cn', fontSize=8, leading=10, fontName=_bf)), Paragraph(client_name, s8b), '', ''],
-        [Paragraph(EXPORTER['lines'][0], s7), Paragraph(client_addr, s7), '', ''],
-        [Paragraph(EXPORTER['lines'][1], s7), Paragraph(f'{client_postal} {client_city}', s7), '', ''],
-        [Paragraph(EXPORTER['lines'][2], s7), Paragraph(client_country, s7), '', ''],
-        [Paragraph(f'Contact : {EXPORTER["contact"]}', s7), Paragraph(client_phone, s7), '', ''],
+        [Paragraph(EXPORTER['lines'][0], s7), Paragraph(con_line1, s7), '', ''],
+        [Paragraph(EXPORTER['lines'][1], s7), Paragraph(con_line2, s7), '', ''],
+        [Paragraph(EXPORTER['lines'][2], s7), Paragraph(con_line3, s7), '', ''],
+        [Paragraph(f'Contact : {EXPORTER["contact"]}', s7), Paragraph(con_phone, s7), '', ''],
         [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph('', s7), '', ''],
     ]
     t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*6)
@@ -207,14 +211,14 @@ def generate_quotation_pdf(q):
     delivery_display = q.get_delivery_terms_display() if q.delivery_terms else ''
 
     sd = [
-        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(q.country_of_origin or 'India', vl),
-         Paragraph('<b>Country of Final Destination</b>', lb), Paragraph(q.country_of_final_destination or '', vl)],
-        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(q.port_of_loading or '', vl),
-         Paragraph('<b>Port of Discharge</b>', lb), Paragraph(q.port_of_discharge or '', vl)],
-        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(q.vessel_flight_no or '', vl),
-         Paragraph('<b>Final Destination</b>', lb), Paragraph(q.final_destination or '', vl)],
-        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(payment_display, vl),
-         Paragraph('<b>Terms of Delivery</b>', lb), Paragraph(delivery_display, vl)],
+        [Paragraph(f'<b>{ov.get("_sl1", "Country of Origin")}</b>', lb), Paragraph(q.country_of_origin or 'India', vl),
+         Paragraph(f'<b>{ov.get("_sl2", "Country of Final Destination")}</b>', lb), Paragraph(q.country_of_final_destination or '', vl)],
+        [Paragraph(f'<b>{ov.get("_sl3", "Port of Loading")}</b>', lb), Paragraph(q.port_of_loading or '', vl),
+         Paragraph(f'<b>{ov.get("_sl4", "Port of Discharge")}</b>', lb), Paragraph(q.port_of_discharge or '', vl)],
+        [Paragraph(f'<b>{ov.get("_sl5", "Vessel / Flight No")}</b>', lb), Paragraph(q.vessel_flight_no or '', vl),
+         Paragraph(f'<b>{ov.get("_sl6", "Final Destination")}</b>', lb), Paragraph(q.final_destination or '', vl)],
+        [Paragraph(f'<b>{ov.get("_sl7", "Terms of Trade")}</b>', lb), Paragraph(payment_display, vl),
+         Paragraph(f'<b>{ov.get("_sl8", "Terms of Delivery")}</b>', lb), Paragraph(delivery_display, vl)],
     ]
     _sw = PW - 8*mm  # 182mm
     # Label1(40) + Value1(35) + Label2(62) + Value2(45) = 182mm
@@ -277,9 +281,11 @@ def generate_quotation_pdf(q):
         price = float(item.unit_price) if item.unit_price else 0
         amount = qty * price if qty and price else 0
 
+        # Wrap text columns in Paragraph so long text wraps to next line
+        _bs = ParagraphStyle('bs', fontSize=10, leading=12, fontName=_br)
         data.append([
-            item.product_name,
-            item.description or '',
+            Paragraph(item.product_name or '', _bs),
+            Paragraph(item.description or '', _bs),
             f'{qty:,.0f} {item.unit}' if qty else '-.--',
             f'{prefix}{price:,.2f}' if price else '-.--',
             f'{prefix}{amount:,.2f}' if amount else '-.--',
@@ -329,17 +335,17 @@ def generate_quotation_pdf(q):
     terms_style = ParagraphStyle('ts', fontSize=_fs_terms, leading=_fs_terms+2, fontName=_br)
     terms_bold = ParagraphStyle('tb', fontSize=_fs_terms, leading=_fs_terms+2, fontName=_bf)
 
-    terms_text = Paragraph(
-        '<i>The Quotation is not a contract or a bill it is our best at the total price for the '
+    terms_content = ov.get('_terms_text',
+        'The Quotation is not a contract or a bill it is our best at the total price for the '
         'service and goods described above. The Customer will be billed after indicating '
         'acceptance of this quote. We will be happy to serve you with any further '
-        'information you may need.</i>', terms_style)
+        'information you may need.')
+    terms_text = Paragraph(f'<i>{terms_content}</i>', terms_style)
     validity_text = Paragraph(f'This Quote is Valid for {q.validity_days} Days', terms_style)
 
-    # Delivery note — use font tag for bold since <b> doesn't work with custom TTF
-    delivery_note = ''
-    if q.freight_terms:
-        delivery_note = f'<font name="{_bf}">Sail Start Date </font>: 15 Days from PO'
+    # Delivery note
+    dn = ov.get('_delivery_note', '15 Days from PO')
+    delivery_note = f'<font name="{_bf}">Sail Start Date </font>: {dn}' if dn else ''
 
     delivery_p = Paragraph(delivery_note, terms_style) if delivery_note else Spacer(1, 1)
 
@@ -395,12 +401,12 @@ def generate_quotation_pdf(q):
 
     # ═══ FOOTER STRIPS ═══
     fc = ParagraphStyle('fc', fontSize=FS, fontName=_bf, alignment=1)
-    el.append(Paragraph('<b>Expecting Your Business !</b>', fc))
+    el.append(Paragraph(f'<b>{ov.get("_footer1", "Expecting Your Business !")}</b>', fc))
     el.append(Spacer(1, 2*mm))
 
     # Green email strip
     email_strip = Table([[Paragraph(
-        f'If you have any questions please contact info@kriya.ltd',
+        ov.get('_footer2', 'If you have any questions please contact info@kriya.ltd'),
         ParagraphStyle('es', fontSize=FS, fontName=_br, textColor=W, alignment=1)
     )]], colWidths=[TW])
     email_strip.setStyle(TableStyle([
@@ -411,7 +417,7 @@ def generate_quotation_pdf(q):
     el.append(email_strip)
     el.append(Spacer(1, 3*mm))
 
-    el.append(Paragraph('" Go Organic ! Save Planet ! "',
+    el.append(Paragraph(ov.get('_footer3', '" Go Organic ! Save Planet ! "'),
                         ParagraphStyle('m', fontSize=FS, alignment=1, fontName=_bf)))
 
     doc.build(el)

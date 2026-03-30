@@ -24,17 +24,26 @@ class QuotationItemSerializer(serializers.ModelSerializer):
 class QuotationSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True, read_only=True)
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    client_address = serializers.CharField(source='client.address', read_only=True, default='')
+    client_city = serializers.CharField(source='client.city', read_only=True, default='')
+    client_state = serializers.CharField(source='client.state', read_only=True, default='')
+    client_postal_code = serializers.CharField(source='client.postal_code', read_only=True, default='')
+    client_country = serializers.CharField(source='client.country', read_only=True, default='')
+    client_phone = serializers.CharField(source='client.phone_number', read_only=True, default='')
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default='')
     class Meta:
         model = Quotation
-        fields = ['id', 'quotation_number', 'client', 'client_name', 'inquiry', 'version',
+        fields = ['id', 'quotation_number', 'client', 'client_name',
+                  'client_address', 'client_city', 'client_state',
+                  'client_postal_code', 'client_country', 'client_phone',
+                  'inquiry', 'version',
                   'parent', 'status', 'currency', 'delivery_terms', 'payment_terms',
                   'payment_terms_detail', 'freight_terms',
                   'country_of_origin', 'country_of_final_destination',
                   'port_of_loading', 'port_of_discharge',
                   'vessel_flight_no', 'final_destination',
-                  'packaging_details',
+                  'packaging_details', 'display_overrides',
                   'validity_days', 'subtotal', 'total', 'notes', 'sent_via', 'sent_at',
                   'created_by', 'created_by_name',
                   'approved_by', 'approved_by_name', 'approved_at', 'items', 'created_at', 'updated_at']

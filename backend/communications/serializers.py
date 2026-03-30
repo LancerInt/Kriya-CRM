@@ -135,6 +135,7 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
     source_subject = serializers.CharField(source='source_communication.subject', read_only=True, default='')
     source_body = serializers.CharField(source='source_communication.body', read_only=True, default='')
     linked_quotation_number = serializers.CharField(source='linked_quotation.quotation_number', read_only=True, default='')
+    linked_quotation_status = serializers.CharField(source='linked_quotation.status', read_only=True, default='')
 
     class Meta:
         model = QuoteRequest
@@ -149,7 +150,7 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
             'extracted_packaging', 'extracted_destination_country',
             'extracted_destination_port', 'extracted_delivery_terms',
             'extracted_payment_terms', 'extracted_notes',
-            'linked_quotation', 'linked_quotation_number',
+            'linked_quotation', 'linked_quotation_number', 'linked_quotation_status',
             'source_subject', 'source_body',
             'created_at', 'updated_at',
         ]

@@ -145,6 +145,9 @@ class ProformaInvoice(TimeStampedModel):
     # ── Bank Details ──
     bank_details = models.TextField(default='Bank name: ICICI Bank Ltd\nBranch name: Salem Main Branch\nBeneficiary: Kriya Biosys Private Limited\nIFSC Code: ICIC0006119\nSwift Code: ICICINBB')
 
+    # ── Display overrides (freight, insurance, discount, custom labels from editor) ──
+    display_overrides = models.JSONField(default=dict, blank=True)
+
     # ── PDF ──
     pdf_file = models.FileField(upload_to='proforma_invoices/%Y/%m/', null=True, blank=True)
 

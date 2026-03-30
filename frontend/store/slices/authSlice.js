@@ -12,6 +12,17 @@ export const login = createAsyncThunk("auth/login", async (credentials, { reject
   }
 });
 
+export const signup = createAsyncThunk("auth/signup", async (data, { rejectWithValue }) => {
+  try {
+    const res = await api.post("/auth/signup/", data);
+    localStorage.setItem("access_token", res.data.access);
+    localStorage.setItem("refresh_token", res.data.refresh);
+    return res.data;
+  } catch (err) {
+    return rejectWithValue(err.response?.data || { detail: "Signup failed" });
+  }
+});
+
 export const fetchMe = createAsyncThunk("auth/fetchMe", async (_, { rejectWithValue }) => {
   try {
     const res = await api.get("/auth/me/");
@@ -50,7 +61,29 @@ const authSlice = createSlice({
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload?.detail || "Login failed";
+        state.error = action.payload?.detail || action.payload?.error || "Login failed";
+      })
+      .addCase(signup.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(signup.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.isAuthenticated = true;
+      })
+      .addCase(signup.rejected, (state, action) => {
+        state.loading = false;
+        const err = action.payload;
+        if (typeof err === 'object' && !err.detail) {
+          const msgs = Object.entries(err)
+            .map(([key, val]) => {
+              const message = Array.isArray(val) ? val.join(', ') : val;
+              if (key === 'non_field_errors') return message;
+              return message;
+            })
+            .join('. ');
+          state.error = msgs || "Signup failed";
+        } else {
+          state.error = err?.detail || "Signup failed";
+        }
       })
       .addCase(fetchMe.fulfilled, (state, action) => {
         state.user = action.payload.user || action.payload;
