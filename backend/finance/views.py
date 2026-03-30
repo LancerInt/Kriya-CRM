@@ -191,7 +191,7 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'total_fob_usd', 'total_fob_inr', 'freight_inr', 'insurance_inr',
             'total_invoice_usd', 'total_invoice_inr',
             'igst_rate', 'igst_amount', 'grand_total_inr',
-            'amount_in_words', 'bank_details',
+            'amount_in_words', 'bank_details', 'display_overrides',
         }
         for field in allowed:
             if field in data:

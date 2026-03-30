@@ -114,7 +114,7 @@ def generate_ci_pdf(ci):
     from django.conf import settings
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=12*mm, bottomMargin=10*mm,
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=8*mm, bottomMargin=8*mm,
                             leftMargin=10*mm, rightMargin=10*mm)
     styles = getSampleStyleSheet()
     el = []
@@ -180,7 +180,7 @@ def generate_ci_pdf(ci):
     GAP = 3*mm
     EW = 60*mm
     CW2 = PW - EW - GAP - RW
-    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=14, textColor=W, fontName=_mt, alignment=1, leading=24))
+    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=18, textColor=W, fontName=_mt, alignment=1, leading=20))
     title_box = Table([[title_p]], colWidths=[RW], rowHeights=[23*mm])
     title_box.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), G),
@@ -259,12 +259,12 @@ def generate_ci_pdf(ci):
     el.append(t1)
     el.append(Spacer(1, 1*mm))
 
-    # ═══ CONSIGNEE (To the Order) ═══
+    # ═══ CONSIGNEE (To the Order) — width matches exporter+notify columns ═══
     consignee_rows = [
         [Paragraph('<b>Consignee</b>', s8b)],
         [Paragraph(f'To the Order {ci.client_city_state_country or ci.country_of_final_destination or ""}', s7)],
     ]
-    cn = Table(consignee_rows, colWidths=[PW])
+    cn = Table(consignee_rows, colWidths=[EW + CW2])
     cn.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d5d5d5')),
         ('LINEBELOW', (0,0), (0,0), 0.3, GR),
@@ -274,56 +274,76 @@ def generate_ci_pdf(ci):
         ('LEFTPADDING', (0,0), (-1,-1), 3),
     ]))
     el.append(cn)
-    el.append(Spacer(1, 1*mm))
+    el.append(Spacer(1, 2*mm))
 
-    # ═══ SHIPMENT DETAILS (left) + BANK DETAILS (right) — side by side ═══
+    # ═══ SHIPMENT DETAILS (left) + BANK DETAILS (right) — unified grid like reference ═══
     _rh = 7*mm
-    sd = [
-        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(ci.country_of_origin, vl)],
-        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(ci.port_of_loading or '', vl)],
-        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(ci.vessel_flight_no or '', vl)],
-        [Paragraph('<b>Port of Discharge</b>', lb), Paragraph(ci.port_of_discharge or '', vl)],
-        [Paragraph('<b>Country of Final Dest.</b>', lb), Paragraph(ci.country_of_final_destination or '', vl)],
-        [Paragraph('<b>Incoterms</b>', lb), Paragraph(ci.terms_of_delivery or '', vl)],
-        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(ci.payment_terms or '', vl)],
-        [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(ci.buyer_order_no or '', vl)],
-        [Paragraph('<b>Exchange Rate per USD</b>', lb), Paragraph(f'{ci.exchange_rate}' if ci.exchange_rate else '', vl)],
+    # Parse bank details
+    bk_data = {}
+    for line in (ci.bank_details or '').strip().split('\n'):
+        if ':' in line:
+            k, v = line.split(':', 1)
+            bk_data[k.strip()] = v.strip()
+
+    # 4 columns: ShipLabel(38) | ShipValue(55) | BankLabel(25) | BankValue(rest) = 180mm
+    _sw = PW - 10*mm  # 180mm after sidebar
+    sc = [38*mm, 55*mm, 25*mm, _sw - 38*mm - 55*mm - 25*mm]
+
+    # Flexible bank data lookup
+    def bk(key):
+        """Look up bank detail by key, trying common variations."""
+        for k in [key, key.lower(), key.replace(' ', ''), key.title()]:
+            if k in bk_data:
+                return bk_data[k]
+        # Fuzzy match
+        for k, v in bk_data.items():
+            if key.lower().replace(' ', '') in k.lower().replace(' ', ''):
+                return v
+        return ''
+
+    # Helper: format bank value with colon only if value exists
+    def bkv(key):
+        v = bk(key)
+        return f': {v}' if v else ''
+
+    # Helper: shipment value with colon
+    def sv(val):
+        return f': {val}' if val else ''
+
+    grid = [
+        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(sv(ci.country_of_origin or 'India'), vl),
+         Paragraph('<b>Bank Details</b>', s8b), ''],
+        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(sv(ci.port_of_loading), vl),
+         Paragraph('<b>Bank Name</b>', lb), Paragraph(bkv("Bank name"), vl)],
+        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(sv(ci.vessel_flight_no), vl),
+         Paragraph('<b>Branch name</b>', lb), Paragraph(bkv("Branch name"), vl)],
+        [Paragraph('<b>Port of Discharge</b>', lb), Paragraph(sv(ci.port_of_discharge), vl),
+         Paragraph('<b>Beneficiary</b>', lb), Paragraph(bkv("Beneficiary"), vl)],
+        [Paragraph('<b>Country of Final Dest.</b>', lb), Paragraph(sv(ci.country_of_final_destination), vl),
+         Paragraph('<b>IFSC Code</b>', lb), Paragraph(bkv("IFSC Code"), vl)],
+        [Paragraph('<b>Incoterms</b>', lb), Paragraph(sv(ci.terms_of_delivery), vl),
+         Paragraph('<b>Swift Code</b>', lb), Paragraph(bkv("Swift Code"), vl)],
+        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(sv(ci.payment_terms), vl),
+         Paragraph('<b>A/C No.</b>', lb), Paragraph(bkv("A/C No"), vl)],
+        [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(sv(ci.buyer_order_no), vl),
+         Paragraph('<b>A/C Type</b>', lb), Paragraph(bkv("A/C Type"), vl)],
+        [Paragraph('<b>Exchange Rate per USD</b>', lb), Paragraph(f': Rs.{ci.exchange_rate}' if ci.exchange_rate else '', vl),
+         '', ''],
     ]
-    st = Table(sd, colWidths=[35*mm, 55*mm], rowHeights=[_rh]*9)
+    st = Table(grid, colWidths=sc, rowHeights=[_rh]*9)
     st.setStyle(TableStyle([
         ('FONTSIZE', (0,0), (-1,-1), 7),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 1),
         ('BOTTOMPADDING', (0,0), (-1,-1), 1),
         ('LEFTPADDING', (0,0), (-1,-1), 3),
+        ('SPAN', (2,0), (3,0)),  # "Bank Details" header spans 2 cols
     ]))
 
-    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 9*_rh, G, 8, _mt)
-
-    # Bank Details table (right side)
-    bk_lb2 = ParagraphStyle('bk2', fontSize=7, leading=9, fontName=_bf)
-    bk_vl2 = ParagraphStyle('bv2', fontSize=7, leading=9, fontName=_br)
-    bank_lines = ci.bank_details.strip().split('\n') if ci.bank_details else []
-    bd = [[Paragraph('<b>Bank Details</b>', s8b), '']]
-    for line in bank_lines:
-        if ':' in line:
-            lbl, val = line.split(':', 1)
-            bd.append([Paragraph(f'<b>{lbl.strip()}</b>', bk_lb2), Paragraph(f': {val.strip()}', bk_vl2)])
-        else:
-            bd.append([Paragraph(line.strip(), bk_lb2), ''])
-    bank_t = Table(bd, colWidths=[25*mm, 55*mm])
-    bank_t.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-        ('LEFTPADDING', (0,0), (-1,-1), 2),
-        ('SPAN', (0,0), (1,0)),
-    ]))
-
-    # Combine: sidebar | shipment | bank details
-    combo = Table([[sidebar, st, bank_t]], colWidths=[10*mm, 90*mm, PW - 10*mm - 90*mm])
+    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 9*_rh, G, 9, _mt)
+    combo = Table([[sidebar, st]], colWidths=[10*mm, _sw])
     combo.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ('TOPPADDING', (0,0), (-1,-1), 0),
@@ -333,7 +353,16 @@ def generate_ci_pdf(ci):
     el.append(Spacer(1, 1*mm))
 
     # ═══ PACKING DETAILS TABLE ═══
-    pd_title = Table([[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=14, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_bf))]], colWidths=[PW])
+    # Register Arial for PACKING DETAILS (same as Quotation)
+    _ar = _br
+    try:
+        arial_path = os.path.join(img_dir, 'Arial-Regular.ttf')
+        if os.path.exists(arial_path):
+            pdfmetrics.registerFont(TTFont('Arial-Regular', arial_path))
+            _ar = 'Arial-Regular'
+    except Exception:
+        pass
+    pd_title = Table([[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=18, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_ar))]], colWidths=[PW])
     el.append(pd_title)
     el.append(Spacer(1, 1*mm))
 
@@ -353,14 +382,15 @@ def generate_ci_pdf(ci):
         Paragraph('Amount in<br/>INR', hsr),
     ]
 
+    _bs = ParagraphStyle('bs', fontSize=7, leading=9, fontName=_br)
     data = [hdr]
     xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
     for item in ci.items.all():
         inr_val = float(item.total_price) * xrate if xrate else 0
         data.append([
-            item.product_name,
-            item.packages_description,
-            item.description_of_goods,
+            Paragraph(item.product_name or '', _bs),
+            Paragraph(item.packages_description or '', _bs),
+            Paragraph(item.description_of_goods or '', _bs),
             f'{item.quantity:,.0f}',
             f'{item.unit_price:,.2f}',
             f'${item.total_price:,.2f}',
@@ -390,38 +420,47 @@ def generate_ci_pdf(ci):
     ]))
     el.append(it)
 
-    # ═══ FINANCIAL BREAKDOWN ═══
+    # ═══ FINANCIAL BREAKDOWN — aligned with packing table columns ═══
     ts_g = ParagraphStyle('tsg', fontSize=8, textColor=G, fontName=_bf, alignment=2)
     TW = sum(CW)
-    xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
     total_usd = sum(float(i.total_price) for i in ci.items.all())
     total_inr = total_usd * xrate
     frt = float(ci.freight or 0)
     ins = float(ci.insurance or 0)
+    disc_usd = float(ci.display_overrides.get('_ci_discount_usd', 0) if isinstance(ci.display_overrides, dict) else 0) or 0
+    disc_inr = float(ci.display_overrides.get('_ci_discount', 0) if isinstance(ci.display_overrides, dict) else 0) or 0
     sub_usd = total_usd + frt + ins
     sub_inr = sub_usd * xrate
     igst_r = float(ci.igst_rate or 0)
     igst_a = sub_inr * igst_r / 100
-    grand_inr = sub_inr + igst_a
+    grand_inr = sub_inr + igst_a - disc_inr
 
-    _lw = TW - 60*mm
+    # Use same CW columns: spacer fills first 4 cols, then label(Price/Kg) + USD + INR
+    # CW = [30, 30, 38, 16, 22, 27, 27] = 190mm
+    # We want: empty(30+30+38) | label(16+22=38) | USD(27) | INR(27)
+    _spacer = CW[0] + CW[1] + CW[2]  # 98mm
+    _label = CW[3] + CW[4]  # 38mm
+    _usd = CW[5]  # 27mm
+    _inr = CW[6]  # 27mm
+    tcw = [_spacer, _label, _usd, _inr]
+
     totals_data = [
-        ['', '', 'Discount', f'${frt:,.2f}', f'Rs.{(frt * xrate):,.2f}' if xrate else '-'],
-        ['', '', 'Sub Total', f'${sub_usd:,.2f}', f'Rs.{sub_inr:,.2f}' if xrate else '-'],
+        ['', 'Discount', f'${disc_usd:,.2f}', f'Rs.{disc_inr:,.2f}'],
+        ['', 'Sub Total', f'${sub_usd:,.2f}', f'Rs.{sub_inr:,.2f}' if xrate else '-'],
     ]
     if igst_r:
-        totals_data.append(['', '', f'GST {igst_r}%', '', f'Rs.{igst_a:,.2f}' if xrate else '-'])
-    totals_data.append(['', '', Paragraph('<b>Grand Total</b>', ts_g), '', Paragraph(f'<b>Rs.{grand_inr:,.2f}</b>', ts_g) if xrate else Paragraph('-', ts_g)])
+        totals_data.append(['', f'GST {igst_r}%', '', f'Rs.{igst_a:,.2f}' if xrate else '-'])
+    totals_data.append(['', Paragraph('<b>Grand Total</b>', ts_g), '', Paragraph(f'<b>Rs.{grand_inr:,.2f}</b>', ts_g) if xrate else Paragraph('-', ts_g)])
 
-    tot = Table(totals_data, colWidths=[_lw, 0, 25*mm, 25*mm, 30*mm])
+    tot = Table(totals_data, colWidths=tcw)
     tot.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
         ('FONT', (0,0), (-1,-1), _bf),
         ('FONTSIZE', (0,0), (-1,-1), 7),
         ('TOPPADDING', (0,0), (-1,-1), 2),
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-        ('RIGHTPADDING', (0,0), (-1,-1), 3),
-        ('LINEBELOW', (2,-1), (-1,-1), 0.5, G),
+        ('RIGHTPADDING', (0,0), (-1,-1), 5),
+        ('LINEBELOW', (1,-1), (-1,-1), 0.5, G),
     ]))
     el.append(tot)
     el.append(Spacer(1, 2*mm))
@@ -443,9 +482,9 @@ def generate_ci_pdf(ci):
         ('TOPPADDING', (0,0), (-1,-1), 4),
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
-    el.append(Spacer(1, 2*mm))
+    el.append(Spacer(1, 1*mm))
     el.append(ac)
-    el.append(Spacer(1, 6*mm))
+    el.append(Spacer(1, 3*mm))
 
     # ═══ DECLARATION + SEAL/SIGN ═══
     seal = Image(seal_path, width=20*mm, height=20*mm) if os.path.exists(seal_path) else ''
@@ -490,7 +529,7 @@ def generate_ci_pdf(ci):
         ('RIGHTPADDING', (0,0), (0,0), 0),
     ]))
     el.append(decl_row)
-    el.append(Spacer(1, 4*mm))
+    el.append(Spacer(1, 2*mm))
 
     # ═══ FOOTER ═══
     el.append(Paragraph('" Go Organic ! Save Planet ! "',

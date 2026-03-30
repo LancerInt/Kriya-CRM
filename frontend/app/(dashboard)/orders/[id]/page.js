@@ -231,7 +231,11 @@ export default function OrderDetailPage() {
   const handleSaveCI = async () => {
     if (!ci) return;
     try {
-      const res = await api.post(`/finance/ci/${ci.id}/save-with-items/`, { ...ciForm, items: ciItems });
+      const display_overrides = {};
+      Object.entries(ciForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/finance/ci/${ci.id}/save-with-items/`, { ...ciForm, display_overrides, items: ciItems });
       setCi(res.data);
       setCiItems(res.data.items || []);
       toast.success("CI saved");

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import api from "@/lib/axios";
@@ -347,8 +347,14 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [selectedComm, setSelectedComm] = useState(null);
   const [showDraftModal, setShowDraftModal] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
   const [draftForm, setDraftForm] = useState({ subject: "", body: "", cc: "" });
   const [sendingDraft, setSendingDraft] = useState(false);
+  const [adminManagerEmails, setAdminManagerEmails] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [filterSearch, setFilterSearch] = useState("");
+  const [draftAttachments, setDraftAttachments] = useState([]);
   const [form, setForm] = useState({ comm_type: "email", direction: "outbound", subject: "", body: "" });
   const [submitting, setSubmitting] = useState(false);
 
@@ -356,6 +362,15 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const primaryContact = client?.contacts?.find((c) => c.is_primary) || client?.contacts?.[0];
   const contactEmail = primaryContact?.email || "";
   const contactPhone = primaryContact?.phone || "";
+
+  // Fetch admin/manager emails for auto CC
+  useEffect(() => {
+    api.get("/auth/users/").then(r => {
+      const users = r.data.results || r.data;
+      const emails = users.filter(u => u.email && (u.role === 'admin' || u.role === 'manager')).map(u => u.email).join(", ");
+      setAdminManagerEmails(emails);
+    }).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -374,7 +389,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     try {
       const res = await api.get(`/communications/drafts/${draftId}/`);
       setDraft(res.data);
-      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: res.data.cc || "" });
+      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: res.data.cc || adminManagerEmails });
+      setDraftAttachments([]);
       setShowDraftModal(true);
     } catch { toast.error("Failed to load draft"); }
   };
@@ -382,10 +398,32 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const handleSendDraft = async () => {
     setSendingDraft(true);
     try {
+      // Save draft updates first
       await api.patch(`/communications/drafts/${draft.id}/`, draftForm);
-      await api.post(`/communications/drafts/${draft.id}/send/`);
+
+      if (draftAttachments.length > 0) {
+        // Send via send-email endpoint with attachments
+        const fd = new FormData();
+        fd.append("to", draft.to_email);
+        fd.append("subject", draftForm.subject);
+        fd.append("body", draftForm.body.replace(/\n/g, '<br>'));
+        if (draftForm.cc) fd.append("cc", draftForm.cc);
+        // Find email account
+        const accounts = await api.get("/communications/email-accounts/");
+        const account = accounts.data.results?.[0] || accounts.data[0];
+        if (account) fd.append("email_account", account.id);
+        if (draft.client) fd.append("client", draft.client);
+        draftAttachments.forEach(file => fd.append("attachments", file));
+        await api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        // Mark draft as sent
+        await api.post(`/communications/drafts/${draft.id}/send/`);
+      } else {
+        await api.post(`/communications/drafts/${draft.id}/send/`);
+      }
+
       toast.success("Email sent!");
       setShowDraftModal(false);
+      setDraftAttachments([]);
       reload();
     } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
     finally { setSendingDraft(false); }
@@ -401,13 +439,64 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     } catch { toast.error("Failed to discard"); }
   };
 
-  const handleRegenerateDraft = async () => {
+  const handleVoiceToText = () => {
+    // Stop if already listening
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Voice recognition not supported. Use Chrome or Edge.");
+      return;
+    }
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
+
+    // Clear AI-generated body when voice starts
+    setDraftForm(prev => ({ ...prev, body: '' }));
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript + ' ';
+      }
+      if (transcript.trim()) {
+        setDraftForm(prev => ({ ...prev, body: prev.body + (prev.body ? '\n' : '') + transcript.trim() }));
+      }
+    };
+
+    recognition.onerror = (e) => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (e.error === 'not-allowed') {
+        toast.error("Microphone access denied. Allow microphone in browser settings.");
+      } else if (e.error === 'no-speech') {
+        toast.error("No speech detected. Try again.");
+      } else {
+        toast.error(`Voice error: ${e.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
     try {
-      const res = await api.post(`/communications/drafts/${draft.id}/regenerate/`);
-      setDraft(res.data);
-      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: draftForm.cc });
-      toast.success("Draft regenerated!");
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to regenerate")); }
+      recognition.start();
+      setIsListening(true);
+      toast.success("Listening... Speak now");
+    } catch (e) {
+      toast.error("Failed to start voice recognition");
+      setIsListening(false);
+    }
   };
 
   const columns = [
@@ -455,12 +544,31 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
   return (
     <>
-      <div className="flex justify-end gap-2 mb-4">
-        <button onClick={() => setShowEmailModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Send Email</button>
-        <button onClick={() => setShowWhatsAppModal(true)} className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">Send WhatsApp</button>
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Log Communication</button>
+      <div className="flex items-center justify-between gap-2 mb-4">
+        {/* Filters */}
+        <div className="flex items-center gap-2">
+          {["all", "email", "whatsapp", "call", "note"].map(t => (
+            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-xs font-medium rounded-full ${filterType === t ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {t === "all" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+          <input value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} placeholder="Search subject, email..." className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 w-44" />
+        </div>
+        {/* Actions */}
+        <div className="flex gap-2">
+          <button onClick={() => setShowEmailModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Send Email</button>
+          <button onClick={() => setShowWhatsAppModal(true)} className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">Send WhatsApp</button>
+          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Log Communication</button>
+        </div>
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
+      <DataTable columns={columns} data={data.filter(row => {
+        if (filterType !== "all" && row.comm_type !== filterType) return false;
+        if (filterSearch) {
+          const q = filterSearch.toLowerCase();
+          return (row.subject || "").toLowerCase().includes(q) || (row.external_email || "").toLowerCase().includes(q) || (row.external_phone || "").includes(q) || (row.body || "").toLowerCase().includes(q);
+        }
+        return true;
+      })} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
       <ComposeEmailModal open={showEmailModal} onClose={() => setShowEmailModal(false)} clientId={clientId} contactEmail={contactEmail} onSent={reload} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} clientId={clientId} contactPhone={contactPhone} onSent={reload} />
 
@@ -643,10 +751,36 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               <textarea value={draftForm.body} onChange={(e) => setDraftForm({ ...draftForm, body: e.target.value })} rows={10} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm" />
             </div>
 
+            {/* Attachments */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Attachments</label>
+              <div className="flex items-center gap-2">
+                <label className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer flex items-center gap-1">
+                  📎 Add Files
+                  <input type="file" multiple onChange={(e) => setDraftAttachments(prev => [...prev, ...Array.from(e.target.files)])} className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip" />
+                </label>
+                <span className="text-xs text-gray-400">{draftAttachments.length > 0 ? `${draftAttachments.length} file(s)` : "No files attached"}</span>
+              </div>
+              {draftAttachments.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {draftAttachments.map((file, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500">📄</span>
+                        <span className="font-medium">{file.name}</span>
+                        <span className="text-gray-400">{(file.size / 1024).toFixed(1)} KB</span>
+                      </div>
+                      <button onClick={() => setDraftAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between pt-2 border-t border-gray-200">
               <div className="flex gap-2">
-                <button onClick={handleRegenerateDraft} className="px-3 py-2 text-xs text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100 font-medium">
-                  Regenerate AI
+                <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
+                  {isListening ? '⏹ Stop Recording' : '🎤 Voice to Text'}
                 </button>
                 <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
                   Discard
