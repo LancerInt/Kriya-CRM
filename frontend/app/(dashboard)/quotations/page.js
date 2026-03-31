@@ -12,6 +12,7 @@ import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 export default function QuotationsPage() {
   const dispatch = useDispatch();
@@ -135,7 +136,7 @@ export default function QuotationsPage() {
     { key: "quotation_number", label: "Number", render: (row) => (
       <button onClick={() => handleOpenQuotation(row)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.quotation_number || `Q-${row.id?.slice(0, 8)}`}</button>
     )},
-    { key: "client_name", label: "Client" },
+    { key: "client_name", label: "Account" },
     { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "created_at", label: "Date", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "\u2014" },
@@ -168,7 +169,7 @@ export default function QuotationsPage() {
   return (
     <div>
       <PageHeader
-        title="Quotations"
+        title="Quotes"
         action={
           <div className="flex gap-2">
             <AISummaryButton variant="button" title="Quotations Summary" prompt="Summarize the current quotations pipeline. Use get_pipeline_summary and get_orders tools. Show: total quotations by status, conversion rate, top clients, and pending actions." />
@@ -181,17 +182,16 @@ export default function QuotationsPage() {
       <DataTable columns={columns} data={list} loading={loading} emptyTitle="No quotations" emptyDescription="Create your first quotation" />
 
       {/* Client Picker Modal */}
-      <Modal open={showClientPicker} onClose={() => setShowClientPicker(false)} title="Select Client">
+      <Modal open={showClientPicker} onClose={() => setShowClientPicker(false)} title="Select Account">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-            <select value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500">
-              <option value="">Select a client...</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.company_name}</option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelect
+            label="Account"
+            required
+            value={selectedClient}
+            onChange={(v) => setSelectedClient(v)}
+            options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+            placeholder="Select an account..."
+          />
           <div className="flex gap-3">
             <button onClick={handleClientSelected} className="px-6 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700">Create</button>
             <button onClick={() => setShowClientPicker(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>

@@ -28,7 +28,7 @@ class CommunicationSerializer(serializers.ModelSerializer):
                   'whatsapp_message_id', 'external_phone', 'external_email',
                   'email_cc', 'draft_id', 'draft_status',
                   'is_client_mail', 'classification', 'is_classified',
-                  'created_at']
+                  'is_read', 'created_at']
 
     def get_draft_id(self, obj):
         draft = obj.drafts.filter(is_deleted=False).order_by('-created_at').first()

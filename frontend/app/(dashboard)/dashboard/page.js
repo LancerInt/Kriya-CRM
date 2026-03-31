@@ -30,7 +30,7 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
         <StatsCard
-          title="Total Clients"
+          title="Total Accounts"
           value={stats?.clients?.total || 0}
           icon={HiOutlineUsers}
           color="indigo"
@@ -44,13 +44,13 @@ export default function DashboardPage() {
           subtitle={`${stats?.tasks?.overdue || 0} overdue`}
         />
         <StatsCard
-          title="Pipeline Inquiries"
+          title="Active Leads"
           value={stats?.pipeline?.total || 0}
           icon={HiOutlineFunnel}
           color="purple"
         />
         <StatsCard
-          title="Active Orders"
+          title="Sales Orders"
           value={stats?.orders?.active || 0}
           icon={HiOutlineShoppingCart}
           color="green"
@@ -62,7 +62,7 @@ export default function DashboardPage() {
         <h2 className="text-lg font-semibold mb-4">Quick Overview</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <h3 className="text-sm font-medium text-gray-500 mb-3">Pipeline by Stage</h3>
+            <h3 className="text-sm font-medium text-gray-500 mb-3">Leads by Stage</h3>
             {stats?.pipeline?.by_stage ? (
               <div className="space-y-2">
                 {Object.entries(stats.pipeline.by_stage).map(([stage, count]) => (

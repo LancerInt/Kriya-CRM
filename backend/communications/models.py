@@ -90,6 +90,7 @@ class Communication(TimeStampedModel):
         default=Classification.CLIENT, db_index=True,
     )
     is_classified = models.BooleanField(default=False, help_text='True if classification has been run')
+    is_read = models.BooleanField(default=False, db_index=True, help_text='True if this communication has been read')
 
     # Email integration fields
     email_message_id = models.CharField(max_length=500, blank=True, db_index=True)

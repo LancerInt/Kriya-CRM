@@ -44,6 +44,95 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         if comm.client:
             comm.client.save(update_fields=['updated_at'])
 
+    @action(detail=True, methods=['get'], url_path='thread')
+    def thread(self, request, pk=None):
+        """Get the full email thread for this communication."""
+        comm = self.get_object()
+
+        # Mark as read on open
+        if not comm.is_read:
+            comm.is_read = True
+            comm.save(update_fields=['is_read'])
+
+        thread_messages = [comm]
+
+        if comm.comm_type == 'email' and (comm.email_message_id or comm.email_in_reply_to):
+            # Collect all message IDs and in-reply-to chains
+            seen_ids = {str(comm.id)}
+            message_ids = set()
+            if comm.email_message_id:
+                message_ids.add(comm.email_message_id)
+            if comm.email_in_reply_to:
+                message_ids.add(comm.email_in_reply_to)
+
+            # Also match by subject thread (Re: / Fwd:)
+            base_subject = comm.subject or ''
+            for prefix in ['Re: ', 'RE: ', 'Fwd: ', 'FWD: ', 'Fw: ']:
+                if base_subject.startswith(prefix):
+                    base_subject = base_subject[len(prefix):]
+
+            # Fetch related emails by message-id chain + subject match
+            related = Communication.objects.filter(
+                is_deleted=False,
+                comm_type='email',
+            ).filter(
+                Q(email_message_id__in=message_ids) |
+                Q(email_in_reply_to__in=message_ids) |
+                Q(email_in_reply_to=comm.email_message_id) |
+                (Q(client=comm.client, external_email=comm.external_email, subject__icontains=base_subject) if base_subject and comm.client else Q())
+            ).exclude(id=comm.id).order_by('created_at')
+
+            for msg in related:
+                if str(msg.id) not in seen_ids:
+                    seen_ids.add(str(msg.id))
+                    thread_messages.append(msg)
+                    # Follow the chain further
+                    if msg.email_message_id:
+                        message_ids.add(msg.email_message_id)
+
+            # Second pass for deeper threads
+            if len(message_ids) > 2:
+                deeper = Communication.objects.filter(
+                    is_deleted=False, comm_type='email',
+                ).filter(
+                    Q(email_message_id__in=message_ids) | Q(email_in_reply_to__in=message_ids)
+                ).order_by('created_at')
+                for msg in deeper:
+                    if str(msg.id) not in seen_ids:
+                        seen_ids.add(str(msg.id))
+                        thread_messages.append(msg)
+
+        # Sort by date ascending (oldest first)
+        thread_messages.sort(key=lambda m: m.created_at)
+
+        return Response({
+            'communication': CommunicationSerializer(comm).data,
+            'thread': CommunicationSerializer(thread_messages, many=True).data,
+            'thread_count': len(thread_messages),
+        })
+
+    @action(detail=True, methods=['post'], url_path='mark-read')
+    def mark_read(self, request, pk=None):
+        """Mark a communication as read."""
+        comm = self.get_object()
+        comm.is_read = True
+        comm.save(update_fields=['is_read'])
+        return Response({'is_read': True})
+
+    @action(detail=True, methods=['post'], url_path='mark-unread')
+    def mark_unread(self, request, pk=None):
+        """Mark a communication as unread."""
+        comm = self.get_object()
+        comm.is_read = False
+        comm.save(update_fields=['is_read'])
+        return Response({'is_read': False})
+
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        """Mark all communications as read."""
+        self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({'status': 'all marked as read'})
+
     @action(detail=True, methods=['post'], url_path='mark-as-client')
     def mark_as_client(self, request, pk=None):
         """Mark an unmatched communication as client mail and assign to a client."""
@@ -502,12 +591,24 @@ def whatsapp_webhook_view(request):
                 external_phone=from_phone,
             )
 
-            # Auto-detect quote request
-            try:
-                from communications.auto_quote_service import process_communication_for_quote
-                process_communication_for_quote(comm)
-            except Exception as qe:
-                logger.error(f'Quote request detection failed for WA {comm.id}: {qe}')
+            # Auto-detect PI request first (takes priority)
+            pi_created = False
+            if client:
+                try:
+                    from communications.auto_pi_service import process_communication_for_pi
+                    pi_result = process_communication_for_pi(comm)
+                    if pi_result:
+                        pi_created = True
+                except Exception as pe:
+                    logger.error(f'PI detection failed for WA {comm.id}: {pe}')
+
+            # Auto-detect quote request (skip if PI was detected)
+            if not pi_created:
+                try:
+                    from communications.auto_quote_service import process_communication_for_quote
+                    process_communication_for_quote(comm)
+                except Exception as qe:
+                    logger.error(f'Quote request detection failed for WA {comm.id}: {qe}')
 
     except Exception as e:
         logger.error(f'WhatsApp webhook processing error: {e}')

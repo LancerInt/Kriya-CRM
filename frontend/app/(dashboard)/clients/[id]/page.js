@@ -153,7 +153,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
 
         {/* Client Info */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="font-semibold mb-4">Client Information</h3>
+          <h3 className="font-semibold mb-4">Account Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Status:</span> <StatusBadge status={client.status} /></div>
             <div><span className="text-gray-500">Country:</span> <span className="ml-1">{client.country || "\u2014"}</span></div>
@@ -161,7 +161,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
             <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
             <div><span className="text-gray-500">Currency:</span> <span className="ml-1">{client.preferred_currency}</span></div>
             <div>
-              <span className="text-gray-500">Main Executive:</span>
+              <span className="text-gray-500">Account Owner:</span>
               {canAssign ? (
                 <select
                   value={client.primary_executive || ""}
@@ -173,11 +173,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
 
                     let confirmed = false;
                     if (!client.primary_executive && newId) {
-                      confirmed = confirm(`Assign ${newName} as main executive for ${client.company_name}?`);
+                      confirmed = confirm(`Assign ${newName} as account owner for ${client.company_name}?`);
                     } else if (client.primary_executive && newId && client.primary_executive !== newId) {
-                      confirmed = confirm(`Transfer main executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE primary access to ${client.company_name}\n• ${newName} will GAIN primary access to ${client.company_name}`);
+                      confirmed = confirm(`Transfer account owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE primary access to ${client.company_name}\n• ${newName} will GAIN primary access to ${client.company_name}`);
                     } else if (client.primary_executive && !newId) {
-                      confirmed = confirm(`Remove ${oldName} as main executive?\n\n${oldName} will lose primary access to ${client.company_name}.`);
+                      confirmed = confirm(`Remove ${oldName} as account owner?\n\n${oldName} will lose primary access to ${client.company_name}.`);
                     } else {
                       confirmed = true;
                     }
@@ -190,11 +190,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                     try {
                       await api.patch(`/clients/${client.id}/`, { primary_executive: newId });
                       if (!client.primary_executive && newId) {
-                        toast.success(`${newName} assigned as main executive`);
+                        toast.success(`${newName} assigned as account owner`);
                       } else if (client.primary_executive && newId) {
-                        toast.success(`Main executive transferred to ${newName}`);
+                        toast.success(`Account owner transferred to ${newName}`);
                       } else {
-                        toast.success(`Main executive removed`);
+                        toast.success(`Account owner removed`);
                       }
                       onClientUpdate();
                     } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
@@ -211,7 +211,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
               )}
             </div>
             <div>
-              <span className="text-gray-500">Shadow Executive:</span>
+              <span className="text-gray-500">Secondary Owner:</span>
               {canAssign ? (
                 <select
                   value={client.shadow_executive || ""}
@@ -224,11 +224,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
 
                     let confirmed = false;
                     if (!client.shadow_executive && newId) {
-                      confirmed = confirm(`Assign ${newName} as shadow executive?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
+                      confirmed = confirm(`Assign ${newName} as secondary owner?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
                     } else if (client.shadow_executive && newId && client.shadow_executive !== newId) {
-                      confirmed = confirm(`Transfer shadow executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
+                      confirmed = confirm(`Transfer secondary owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
                     } else if (client.shadow_executive && !newId) {
-                      confirmed = confirm(`Remove ${oldName} as shadow executive?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
+                      confirmed = confirm(`Remove ${oldName} as secondary owner?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
                     } else {
                       confirmed = true;
                     }
@@ -241,11 +241,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                     try {
                       await api.patch(`/clients/${client.id}/`, { shadow_executive: newId });
                       if (!client.shadow_executive && newId) {
-                        toast.success(`${newName} assigned as shadow executive`);
+                        toast.success(`${newName} assigned as secondary owner`);
                       } else if (client.shadow_executive && newId) {
-                        toast.success(`Shadow executive transferred from ${oldName} to ${newName}`);
+                        toast.success(`Secondary owner transferred from ${oldName} to ${newName}`);
                       } else {
-                        toast.success(`Shadow executive removed`);
+                        toast.success(`Secondary owner removed`);
                       }
                       onClientUpdate();
                     } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
@@ -868,7 +868,7 @@ function TasksTab({ clientId, activeTab, client }) {
     }
   }, [activeTab]);
 
-  // For executives: auto-assign to shadow executive of this client
+  // For executives: auto-assign to secondary owner of this client
   useEffect(() => {
     if (isExecutive && client?.shadow_executive && !form.owner) {
       setForm((f) => ({ ...f, owner: client.shadow_executive }));
@@ -930,9 +930,9 @@ function TasksTab({ clientId, activeTab, client }) {
             {isExecutive ? (
               <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 <option value="">Select assignee</option>
-                {/* Shadow executive */}
+                {/* Secondary owner */}
                 {client?.shadow_executive && users.filter((u) => u.id === client.shadow_executive).map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Shadow Executive)</option>
+                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Secondary Owner)</option>
                 ))}
                 {/* Managers */}
                 {users.filter((u) => u.role === "manager").map((u) => (

@@ -170,12 +170,12 @@ export default function QuoteRequestsPage() {
 
   return (
     <div>
-      <PageHeader title="Quote Requests" subtitle={`${requests.filter(r => r.status === "new").length} new requests`} />
+      <PageHeader title="Inquiries" subtitle={`${requests.filter(r => r.status === "new").length} new inquiries`} />
 
       {requests.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <p className="text-gray-500">No quote requests yet.</p>
-          <p className="text-sm text-gray-400 mt-1">Auto-generated when clients request quotes via Email or WhatsApp.</p>
+          <p className="text-gray-500">No inquiries yet.</p>
+          <p className="text-sm text-gray-400 mt-1">Auto-generated when accounts request quotes via Email or WhatsApp.</p>
         </div>
       ) : (
         <div className="space-y-3">

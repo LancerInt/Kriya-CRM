@@ -76,6 +76,7 @@ def sync_emails(email_account_id=None):
                 is_client_mail=classification['is_client_mail'],
                 classification=classification['classification'],
                 is_classified=True,
+                is_read=(direction == 'outbound'),
             )
 
             # Override created_at with the actual email date

@@ -8,6 +8,7 @@ import PIEditorModal from "@/components/finance/PIEditorModal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 export default function ProformaInvoicesPage() {
   const [piList, setPiList] = useState([]);
@@ -165,7 +166,7 @@ export default function ProformaInvoicesPage() {
                   )}
                 </div>
                 <div className="text-right text-xs text-gray-400">
-                  {piData.invoice_date ? format(new Date(piData.invoice_date), "MMM d, yyyy") : ""}
+                  {piData.created_at ? format(new Date(piData.created_at), "MMM d, yyyy h:mm a") : ""}
                 </div>
               </div>
               <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
@@ -191,14 +192,15 @@ export default function ProformaInvoicesPage() {
       {/* Client Picker Modal */}
       <Modal open={showClientPicker} onClose={() => { setShowClientPicker(false); setSelectedClient(""); }} title="Create Proforma Invoice">
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">Select a client to create a new Proforma Invoice.</p>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-            <select value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option value="">Select Client</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-            </select>
-          </div>
+          <p className="text-sm text-gray-600">Select an account to create a new Proforma Invoice.</p>
+          <SearchableSelect
+            label="Account"
+            required
+            value={selectedClient}
+            onChange={(v) => setSelectedClient(v)}
+            options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+            placeholder="Select Account"
+          />
           <div className="flex gap-3 pt-2">
             <button onClick={handleCreatePI} disabled={!selectedClient} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">Create PI</button>
             <button onClick={() => { setShowClientPicker(false); setSelectedClient(""); }} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>

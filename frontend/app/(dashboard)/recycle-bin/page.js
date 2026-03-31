@@ -59,12 +59,12 @@ export default function RecycleBinPage() {
   return (
     <div>
       <PageHeader
-        title="Recycle Bin"
-        subtitle={`${items.length} deleted item${items.length !== 1 ? "s" : ""}`}
+        title="Archive"
+        subtitle={`${items.length} archived item${items.length !== 1 ? "s" : ""}`}
         action={
           isAdminOrManager && items.length > 0 ? (
             <button onClick={handleEmptyAll} className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700">
-              Empty Recycle Bin
+              Empty Archive
             </button>
           ) : null
         }
@@ -91,8 +91,8 @@ export default function RecycleBinPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
           <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-          <p className="text-gray-500 font-medium">Recycle bin is empty</p>
-          <p className="text-sm text-gray-400 mt-1">Deleted items will appear here for 30 days before permanent removal</p>
+          <p className="text-gray-500 font-medium">Archive is empty</p>
+          <p className="text-sm text-gray-400 mt-1">Archived items will appear here for 30 days before permanent removal</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -148,13 +148,14 @@ export default function RecycleBinPage() {
       )}
 
       <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-        <p className="font-medium">How the Recycle Bin works:</p>
+        <p className="font-medium">How Archive works:</p>
         <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-700">
           <li>Deleted items are moved here instead of being permanently removed</li>
-          <li>Items are <strong>automatically purged after 30 days</strong></li>
+          <li><strong>Promotions, Spam, Social, Updates</strong> emails are <strong>auto-archived after 2 days</strong></li>
+          <li>All archived items are <strong>permanently purged after 30 days</strong></li>
           <li>Click <strong>Restore</strong> to recover an item back to its original location</li>
           <li>Click <strong>Delete Forever</strong> to permanently remove immediately</li>
-          {isAdminOrManager && <li><strong>Empty Recycle Bin</strong> permanently removes everything (admin/manager only)</li>}
+          {isAdminOrManager && <li><strong>Empty Archive</strong> permanently removes everything (admin/manager only)</li>}
         </ul>
       </div>
     </div>

@@ -8,14 +8,15 @@ import Modal from "@/components/ui/Modal";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 const stages = [
-  { key: "inquiry", label: "Inquiry", color: "bg-purple-500" },
-  { key: "discussion", label: "Discussion", color: "bg-blue-500" },
+  { key: "inquiry", label: "New Lead", color: "bg-purple-500" },
+  { key: "discussion", label: "Qualification", color: "bg-blue-500" },
   { key: "sample", label: "Sample", color: "bg-cyan-500" },
-  { key: "quotation", label: "Quotation", color: "bg-yellow-500" },
+  { key: "quotation", label: "Proposal", color: "bg-yellow-500" },
   { key: "negotiation", label: "Negotiation", color: "bg-orange-500" },
-  { key: "order_confirmed", label: "Order Confirmed", color: "bg-green-500" },
+  { key: "order_confirmed", label: "Closed Won", color: "bg-green-500" },
 ];
 
 export default function PipelinePage() {
@@ -37,18 +38,18 @@ export default function PipelinePage() {
   const handleAdvance = async (id) => {
     try {
       await dispatch(advanceInquiry(id)).unwrap();
-      toast.success("Inquiry advanced");
+      toast.success("Lead advanced");
     } catch (err) {
       toast.error(err?.detail || "Cannot advance");
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this inquiry?")) return;
+    if (!confirm("Delete this lead?")) return;
     try {
       const { default: api } = await import("@/lib/axios");
       await api.delete(`/quotations/inquiries/${id}/`);
-      toast.success("Inquiry deleted");
+      toast.success("Lead deleted");
       dispatch(fetchInquiries());
     } catch { toast.error("Failed to delete"); }
   };
@@ -57,9 +58,9 @@ export default function PipelinePage() {
     e.preventDefault();
     try {
       await dispatch(createInquiry(form)).unwrap();
-      toast.success("Inquiry created");
+      toast.success("Lead created");
       setShowModal(false);
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to create inquiry")); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create lead")); }
   };
 
   if (loading) return <LoadingSpinner size="lg" />;
@@ -67,10 +68,10 @@ export default function PipelinePage() {
   return (
     <div>
       <PageHeader
-        title="Sales Pipeline"
+        title="Lead Pipeline"
         action={
           <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-            + New Inquiry
+            + New Lead
           </button>
         }
       />
@@ -90,7 +91,7 @@ export default function PipelinePage() {
                   <div key={item.id} className="group bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-sm font-medium text-gray-900">{item.client_name || "Unknown Client"}</p>
+                        <p className="text-sm font-medium text-gray-900">{item.client_name || "Unknown Account"}</p>
                         <p className="text-xs text-gray-500 mt-1">{item.product_name || "\u2014"}</p>
                       </div>
                       <button onClick={() => handleDelete(item.id)} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded" title="Delete">
@@ -110,7 +111,7 @@ export default function PipelinePage() {
                 ))}
                 {items.length === 0 && (
                   <div className="text-center py-8 text-xs text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
-                    No inquiries
+                    No leads
                   </div>
                 )}
               </div>
@@ -119,39 +120,44 @@ export default function PipelinePage() {
         })}
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Inquiry">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Lead">
         <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-            <select value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option value="">Select client</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
-            <select value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option value="">Select product</option>
-              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
-            <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option value="email">Email</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="call">Call</option>
-              <option value="website">Website</option>
-              <option value="referral">Referral</option>
-              <option value="exhibition">Exhibition</option>
-            </select>
-          </div>
+          <SearchableSelect
+            label="Account"
+            required
+            value={form.client}
+            onChange={(v) => setForm({ ...form, client: v })}
+            options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+            placeholder="Select account"
+          />
+          <SearchableSelect
+            label="Product"
+            value={form.product}
+            onChange={(v) => setForm({ ...form, product: v })}
+            options={products.map((p) => ({ value: p.id, label: p.name }))}
+            placeholder="Select product"
+          />
+          <SearchableSelect
+            label="Source"
+            value={form.source}
+            onChange={(v) => setForm({ ...form, source: v || "email" })}
+            options={[
+              { value: "email", label: "Email" },
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "call", label: "Call" },
+              { value: "website", label: "Website" },
+              { value: "referral", label: "Referral" },
+              { value: "exhibition", label: "Exhibition" },
+            ]}
+            placeholder="Select source"
+            searchable={false}
+          />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Create Inquiry</button>
+            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Create Lead</button>
             <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
         </form>

@@ -93,7 +93,7 @@ export default function ShipmentsPage() {
 
   const columns = [
     { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-medium text-gray-900">{row.shipment_number}</span> },
-    { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
+    { key: "client_name", label: "Account", render: (row) => row.client_name || "\u2014" },
     { key: "order_number", label: "Order #", render: (row) => row.order_number || "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "port_of_loading", label: "Port of Loading", render: (row) => row.port_of_loading || "\u2014" },

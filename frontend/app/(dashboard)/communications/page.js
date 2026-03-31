@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useRouter } from "next/navigation";
 import { fetchCommunications, createCommunication } from "@/store/slices/communicationSlice";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
@@ -13,6 +14,7 @@ import { format } from "date-fns";
 import api from "@/lib/axios";
 import AISummaryButton from "@/components/ai/AISummaryButton";
 import { getErrorMessage } from "@/lib/errorHandler";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 const CLASSIFICATION_COLORS = {
   promotion: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", icon: "%" },
@@ -41,6 +43,7 @@ const FILTER_TABS = [
 
 export default function CommunicationsPage() {
   const dispatch = useDispatch();
+  const router = useRouter();
   const { list, loading } = useSelector((state) => state.communications);
   const [showModal, setShowModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -57,6 +60,7 @@ export default function CommunicationsPage() {
   const [filterExec, setFilterExec] = useState("");
   const [executives, setExecutives] = useState([]);
   const [unmatchedCategory, setUnmatchedCategory] = useState("all");
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   const loadData = useCallback(() => {
     dispatch(fetchCommunications());
@@ -85,6 +89,7 @@ export default function CommunicationsPage() {
     return filtered;
   }, [list, filterTab, filterClient, filterExec, unmatchedCategory]);
 
+  const unreadCount = useMemo(() => list.filter((item) => !item.is_read && item.is_client_mail).length, [list]);
   const unmatchedEmails = useMemo(() => list.filter((item) => !item.is_client_mail), [list]);
   const unmatchedCount = unmatchedEmails.length;
   const classificationCounts = useMemo(() => {
@@ -105,6 +110,88 @@ export default function CommunicationsPage() {
       setAssignClient("");
       loadData();
     } catch (err) { toast.error(getErrorMessage(err, "Failed to assign client")); }
+  };
+
+  const handleMarkRead = async (comm) => {
+    if (comm.is_read) return;
+    try {
+      await api.post(`/communications/${comm.id}/mark-read/`);
+      loadData();
+    } catch {}
+  };
+
+  const handleToggleRead = async (comm) => {
+    try {
+      if (comm.is_read) {
+        await api.post(`/communications/${comm.id}/mark-unread/`);
+      } else {
+        await api.post(`/communications/${comm.id}/mark-read/`);
+      }
+      loadData();
+    } catch {}
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.post("/communications/mark-all-read/");
+      toast.success("All marked as read");
+      loadData();
+    } catch {}
+  };
+
+  const handleArchiveEmail = async (commId) => {
+    try {
+      await api.delete(`/communications/${commId}/`);
+      toast.success("Moved to Archive");
+      loadData();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to archive")); }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredList.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredList.map((item) => item.id)));
+    }
+  };
+
+  const handleBulkArchive = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Archive ${selectedIds.size} selected message${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    try {
+      await Promise.all([...selectedIds].map((id) => api.delete(`/communications/${id}/`)));
+      toast.success(`${selectedIds.size} message${selectedIds.size > 1 ? "s" : ""} archived`);
+      setSelectedIds(new Set());
+      loadData();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to archive")); }
+  };
+
+  const handleBulkMarkRead = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      await Promise.all([...selectedIds].map((id) => api.post(`/communications/${id}/mark-read/`)));
+      toast.success(`${selectedIds.size} marked as read`);
+      setSelectedIds(new Set());
+      loadData();
+    } catch {}
+  };
+
+  const handleBulkMarkUnread = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      await Promise.all([...selectedIds].map((id) => api.post(`/communications/${id}/mark-unread/`)));
+      toast.success(`${selectedIds.size} marked as unread`);
+      setSelectedIds(new Set());
+      loadData();
+    } catch {}
   };
 
   const handleReclassify = async (commId) => {
@@ -139,28 +226,46 @@ export default function CommunicationsPage() {
 
   // Columns for main (client) view
   const clientColumns = [
+    { key: "_select", label: "", render: (row) => (
+      <input type="checkbox" checked={selectedIds.has(row.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(row.id); }} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+    )},
+    { key: "is_read", label: "", render: (row) => (
+      !row.is_read && row.direction === "inbound" ? (
+        <span className="w-2.5 h-2.5 bg-blue-500 rounded-full inline-block" title="Unread" />
+      ) : null
+    )},
     { key: "comm_type", label: "Type", render: (row) => <StatusBadge status={row.comm_type} /> },
     { key: "direction", label: "Direction", render: (row) => <span className={`text-xs font-medium ${row.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>{row.direction}</span> },
-    { key: "subject", label: "Subject", render: (row) => <span className="font-medium">{row.subject || "\u2014"}</span> },
-    { key: "client_name", label: "Client", render: (row) => row.client_name ? (
-      <span>{row.client_name}</span>
+    { key: "subject", label: "Subject", render: (row) => (
+      <span className={row.is_read ? "text-gray-600" : "font-semibold text-gray-900"}>{row.subject || "\u2014"}</span>
+    )},
+    { key: "client_name", label: "Account", render: (row) => row.client_name ? (
+      <span className={row.is_read ? "" : "font-medium"}>{row.client_name}</span>
     ) : (
       <button onClick={(e) => { e.stopPropagation(); setAssignModal(row.id); setAssignClient(""); }} className="text-xs text-orange-600 hover:text-orange-700 font-medium bg-orange-50 px-2 py-1 rounded">
-        Accept Client
+        Assign Account
       </button>
     )},
-    { key: "external_contact", label: "External Party", render: (row) => <span className="text-sm text-gray-600">{row.external_email || row.external_phone || "\u2014"}</span> },
-    { key: "assigned_executive", label: "Assigned Executive", render: (row) => row.assigned_executive ? (
+    { key: "external_contact", label: "Contact", render: (row) => <span className={`text-sm ${row.is_read ? "text-gray-500" : "text-gray-700 font-medium"}`}>{row.external_email || row.external_phone || "\u2014"}</span> },
+    { key: "assigned_executive", label: "Account Owner", render: (row) => row.assigned_executive ? (
       <span className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 rounded-lg">{row.assigned_executive}</span>
     ) : <span className="text-sm text-gray-400">{"\u2014"}</span> },
-    { key: "created_at", label: "Date", render: (row) => { try { return format(new Date(row.created_at), "MMM d, yyyy HH:mm"); } catch { return "\u2014"; } } },
+    { key: "created_at", label: "Date", render: (row) => { try { return <span className={row.is_read ? "" : "font-medium"}>{format(new Date(row.created_at), "MMM d, yyyy HH:mm")}</span>; } catch { return "\u2014"; } } },
     { key: "actions", label: "", render: (row) => (
-      <button onClick={(e) => { e.stopPropagation(); setSelectedComm(row); }} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">Snapshot</button>
+      <div className="flex gap-1">
+        <button onClick={(e) => { e.stopPropagation(); handleToggleRead(row); }} className={`px-2 py-1 text-xs font-medium rounded-lg ${row.is_read ? "text-gray-500 bg-gray-100 hover:bg-gray-200" : "text-blue-600 bg-blue-50 hover:bg-blue-100"}`}>
+          {row.is_read ? "Mark Unread" : "Mark Read"}
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); handleMarkRead(row); setSelectedComm(row); }} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">View</button>
+      </div>
     )},
   ];
 
   // Columns for unmatched view
   const unmatchedColumns = [
+    { key: "_select", label: "", render: (row) => (
+      <input type="checkbox" checked={selectedIds.has(row.id)} onChange={(e) => { e.stopPropagation(); toggleSelect(row.id); }} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+    )},
     { key: "classification", label: "Category", render: (row) => classificationBadge(row.classification) },
     { key: "direction", label: "Direction", render: (row) => <span className={`text-xs font-medium ${row.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>{row.direction}</span> },
     { key: "subject", label: "Subject", render: (row) => <span className="font-medium">{row.subject || "\u2014"}</span> },
@@ -177,6 +282,9 @@ export default function CommunicationsPage() {
         <button onClick={(e) => { e.stopPropagation(); setSelectedComm(row); }} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">
           View
         </button>
+        <button onClick={(e) => { e.stopPropagation(); if (confirm("Archive this email? It can be restored from Archive within 30 days.")) handleArchiveEmail(row.id); }} className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100">
+          Archive
+        </button>
       </div>
     )},
   ];
@@ -186,9 +294,14 @@ export default function CommunicationsPage() {
   return (
     <div>
       <PageHeader
-        title="Communications"
+        title="Activities"
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {unreadCount > 0 && (
+              <button onClick={handleMarkAllRead} className="px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 border border-blue-200">
+                {unreadCount} unread — Mark all read
+              </button>
+            )}
             <AISummaryButton variant="button" title="Communications Summary" prompt="Summarize all recent client communications. Use get_recent_communications tool to fetch the latest emails, WhatsApp messages, calls and notes. Group by client, highlight important items, pending replies, and suggested follow-ups." />
             <button onClick={() => setShowEmailModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
               Compose Email
@@ -197,7 +310,7 @@ export default function CommunicationsPage() {
               Send WhatsApp
             </button>
             <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-              + Log Communication
+              + New Activity
             </button>
           </div>
         }
@@ -209,7 +322,7 @@ export default function CommunicationsPage() {
           {FILTER_TABS.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setFilterTab(tab.key); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
+              onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
               className={`px-4 py-1.5 text-sm font-medium rounded-lg ${
                 filterTab === tab.key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
@@ -219,15 +332,21 @@ export default function CommunicationsPage() {
           ))}
         </div>
         {!isUnmatched && (
-          <div className="flex gap-2">
-            <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="">All Clients</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-            </select>
-            <select value={filterExec} onChange={(e) => setFilterExec(e.target.value)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="">All Executives</option>
-              {executives.map((u) => <option key={u.id} value={u.full_name}>{u.full_name}</option>)}
-            </select>
+          <div className="flex gap-2" style={{ minWidth: "360px" }}>
+            <SearchableSelect
+              value={filterClient}
+              onChange={(v) => setFilterClient(v)}
+              options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+              placeholder="All Accounts"
+              className="w-44"
+            />
+            <SearchableSelect
+              value={filterExec}
+              onChange={(v) => setFilterExec(v)}
+              options={executives.map((u) => ({ value: u.full_name, label: u.full_name }))}
+              placeholder="All Owners"
+              className="w-44"
+            />
           </div>
         )}
       </div>
@@ -263,40 +382,71 @@ export default function CommunicationsPage() {
         </div>
       )}
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <input type="checkbox" checked={selectedIds.size === filteredList.length && filteredList.length > 0} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-sm font-medium text-indigo-700">{selectedIds.size} selected</span>
+          <div className="flex gap-2 ml-auto">
+            <button onClick={handleBulkMarkRead} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200">Mark Read</button>
+            <button onClick={handleBulkMarkUnread} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Mark Unread</button>
+            <button onClick={handleBulkArchive} className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200">Archive</button>
+            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Select All row */}
+      {selectedIds.size === 0 && filteredList.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-xs text-gray-400">Select all</span>
+        </div>
+      )}
+
       <DataTable
         columns={isUnmatched ? unmatchedColumns : clientColumns}
         data={filteredList}
         loading={loading}
-        emptyTitle={isUnmatched ? "No unmatched emails" : "No communications"}
+        emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
         emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
       />
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Communication" size="lg">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">
         <form onSubmit={handleCreate} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-              <select value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                <option value="">Select</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select value={form.comm_type} onChange={(e) => setForm({ ...form, comm_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                <option value="email">Email</option>
-                <option value="whatsapp">WhatsApp</option>
-                <option value="call">Call</option>
-                <option value="note">Note</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Direction</label>
-              <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                <option value="inbound">Inbound</option>
-                <option value="outbound">Outbound</option>
-              </select>
-            </div>
+            <SearchableSelect
+              label="Account"
+              required
+              value={form.client}
+              onChange={(v) => setForm({ ...form, client: v })}
+              options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+              placeholder="Select Account"
+            />
+            <SearchableSelect
+              label="Type"
+              value={form.comm_type}
+              onChange={(v) => setForm({ ...form, comm_type: v || "email" })}
+              options={[
+                { value: "email", label: "Email" },
+                { value: "whatsapp", label: "WhatsApp" },
+                { value: "call", label: "Call" },
+                { value: "note", label: "Note" },
+              ]}
+              placeholder="Select Type"
+              searchable={false}
+            />
+            <SearchableSelect
+              label="Direction"
+              value={form.direction}
+              onChange={(v) => setForm({ ...form, direction: v || "inbound" })}
+              options={[
+                { value: "inbound", label: "Inbound" },
+                { value: "outbound", label: "Outbound" },
+              ]}
+              placeholder="Select Direction"
+              searchable={false}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
@@ -307,7 +457,7 @@ export default function CommunicationsPage() {
             <textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} required rows={4} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Log Communication</button>
+            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Log Activity</button>
             <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
         </form>
@@ -316,17 +466,18 @@ export default function CommunicationsPage() {
       <ComposeEmailModal open={showEmailModal} onClose={() => setShowEmailModal(false)} onSent={handleSent} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} onSent={handleSent} />
 
-      {/* Accept Client / Move to Client Modal */}
+      {/* Assign Account / Move to Client Modal */}
       <Modal open={!!assignModal} onClose={() => { setAssignModal(null); setShowAddClient(false); setNewClientName(""); }} title="Move to Client">
         <div className="space-y-4">
           <p className="text-sm text-gray-600">Assign this email to a client. It will be moved from Unmatched to the Communications timeline.</p>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
-            <select value={assignClient} onChange={(e) => { setAssignClient(e.target.value); setShowAddClient(false); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-              <option value="">Select Client</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-            </select>
-          </div>
+          <SearchableSelect
+            label="Account"
+            required
+            value={assignClient}
+            onChange={(v) => { setAssignClient(v); setShowAddClient(false); }}
+            options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+            placeholder="Select Account"
+          />
           <div className="text-center text-xs text-gray-400">or</div>
           {!showAddClient ? (
             <button onClick={() => { setShowAddClient(true); setAssignClient(""); }} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 hover:border-indigo-300">+ Add New Client</button>
@@ -412,7 +563,7 @@ export default function CommunicationsPage() {
               )}
               {selectedComm.assigned_executive && (
                 <div>
-                  <span className="text-gray-500 block text-xs">Assigned Executive</span>
+                  <span className="text-gray-500 block text-xs">Account Owner</span>
                   <span className="font-medium">{selectedComm.assigned_executive}</span>
                 </div>
               )}

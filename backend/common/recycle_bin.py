@@ -31,6 +31,13 @@ RECYCLABLE_MODELS = {
 
 def _get_display(obj, model_label):
     """Get a human-readable display string for a deleted object."""
+    # For Communications, show classification + subject
+    if model_label == 'communications.Communication':
+        classification = getattr(obj, 'classification', '')
+        subject = obj.subject or 'No subject'
+        if classification and classification != 'client':
+            return f'[{classification.title()}] {subject}'
+        return subject
     if hasattr(obj, 'company_name'):
         return obj.company_name
     if hasattr(obj, 'name') and obj.name:
@@ -68,14 +75,19 @@ def recycle_bin_list(request):
             if obj.deleted_at:
                 days_left = max(0, 30 - (timezone.now() - obj.deleted_at).days)
 
-            items.append({
+            item_data = {
                 'id': str(obj.id),
                 'model': model_label,
                 'type': display_name,
                 'name': _get_display(obj, model_label),
                 'deleted_at': obj.deleted_at.isoformat() if obj.deleted_at else None,
                 'days_left': days_left,
-            })
+            }
+            # Add classification for communications so Archive shows category
+            if model_label == 'communications.Communication' and hasattr(obj, 'classification'):
+                item_data['classification'] = obj.classification
+                item_data['external_email'] = obj.external_email or ''
+            items.append(item_data)
 
     # Sort by deleted_at descending
     items.sort(key=lambda x: x['deleted_at'] or '', reverse=True)

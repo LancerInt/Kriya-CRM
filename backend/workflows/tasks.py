@@ -479,3 +479,27 @@ def purge_recycle_bin():
     count = auto_purge_expired()
     logger.info(f"purge_recycle_bin: {count} expired items permanently deleted")
     return f'{count} expired items purged'
+
+
+@shared_task(name='workflows.auto_archive_non_client_emails')
+def auto_archive_non_client_emails():
+    """Auto-archive (soft delete) non-client emails older than 2 days.
+    Affects: promotions, spam, social, updates, unknown.
+    They go to Archive for 30 days, then auto-purge."""
+    from communications.models import Communication
+    from django.utils import timezone
+    from datetime import timedelta
+
+    cutoff = timezone.now() - timedelta(days=2)
+    qs = Communication.objects.filter(
+        is_deleted=False,
+        is_client_mail=False,
+        classification__in=['promotion', 'spam', 'social', 'update', 'unknown'],
+        created_at__lt=cutoff,
+    )
+    count = 0
+    for comm in qs:
+        comm.soft_delete()
+        count += 1
+    logger.info(f"auto_archive_non_client_emails: {count} non-client emails archived")
+    return f'{count} non-client emails archived'

@@ -114,14 +114,20 @@ def process_communication_for_pi(communication):
     if not is_pi:
         return None
 
-    # Check if a draft PI already exists for this client (avoid duplicates)
+    # Check if a draft PI already exists for this client
     existing = ProformaInvoice.objects.filter(
         client=communication.client,
         status='draft',
         is_deleted=False,
     ).first()
     if existing:
-        logger.info(f'Draft PI already exists for client {communication.client.company_name}, skipping auto-create')
+        # If existing draft has empty items, fill them with extracted product info
+        empty_items = existing.items.filter(product_name='')
+        if empty_items.exists():
+            _fill_pi_items(existing, check_text)
+            logger.info(f'Updated empty items in existing draft PI {existing.invoice_number}')
+        else:
+            logger.info(f'Draft PI already exists for client {communication.client.company_name}, skipping')
         return existing
 
     logger.info(f'PI intent detected (confidence={confidence}) for comm {communication.id}')
@@ -153,65 +159,7 @@ def process_communication_for_pi(communication):
         bank_details=DEFAULT_BANK,
     )
 
-    # Extract product details from the email text
-    from communications.quote_request_parser import extract_quote_fields
-    fields = extract_quote_fields(check_text)
-
-    raw_product_text = fields.get('product', '')
-    quantity = 0
-    unit = fields.get('unit', 'Ltrs')
-
-    try:
-        quantity = float(fields.get('quantity', 0)) if fields.get('quantity') else 0
-    except (ValueError, TypeError):
-        pass
-
-    # Try to match to Product master to get client_brand_names and product name
-    matched_product = None
-    pi_product_name = ''       # Product Details column = client brand name
-    pi_description = ''        # Description of Goods column = company product name
-
-    if raw_product_text:
-        try:
-            from communications.auto_quote_service import _match_product
-            matched_product = _match_product(raw_product_text)
-        except Exception:
-            pass
-
-    if matched_product:
-        # Use client_brand_names from Product master as PI product name
-        # Pick the brand name that best matches what the client wrote
-        brand_names = [b.strip() for b in matched_product.client_brand_names.split(',') if b.strip()]
-        if brand_names:
-            # Find the brand name closest to what client said
-            raw_lower = raw_product_text.lower()
-            best_brand = brand_names[0]
-            for bn in brand_names:
-                if bn.lower() in raw_lower or raw_lower in bn.lower():
-                    best_brand = bn
-                    break
-            pi_product_name = best_brand
-        else:
-            # No brand names stored, use what client wrote
-            pi_product_name = raw_product_text
-
-        # Company product name goes in Description of Goods
-        pi_description = str(matched_product)
-    else:
-        # No match — put raw text as product name, leave description empty
-        pi_product_name = raw_product_text
-
-    # For PI: product_name = client brand name, description_of_goods = company product name
-    ProformaInvoiceItem.objects.create(
-        pi=pi,
-        product_name=pi_product_name,
-        client_product_name=pi_product_name,
-        description_of_goods=pi_description,
-        quantity=quantity,
-        unit=unit,
-        unit_price=0,
-        total_price=0,
-    )
+    _fill_pi_items(pi, check_text)
 
     # Notify the assigned executive
     try:
@@ -230,3 +178,62 @@ def process_communication_for_pi(communication):
 
     logger.info(f'Draft PI {invoice_number} auto-created for client {client.company_name}')
     return pi
+
+
+def _fill_pi_items(pi, text):
+    """Extract product info from email text and fill PI items."""
+    from finance.models import ProformaInvoiceItem
+    from communications.quote_request_parser import extract_quote_fields
+
+    fields = extract_quote_fields(text)
+    raw_product_text = fields.get('product', '')
+    quantity = 0
+    unit = fields.get('unit', 'Ltrs')
+
+    try:
+        quantity = float(fields.get('quantity', 0)) if fields.get('quantity') else 0
+    except (ValueError, TypeError):
+        pass
+
+    # Match to Product master
+    matched_product = None
+    pi_product_name = ''
+    pi_description = ''
+
+    if raw_product_text:
+        try:
+            from communications.auto_quote_service import _match_product
+            matched_product = _match_product(raw_product_text)
+        except Exception:
+            pass
+
+    if matched_product:
+        # client_brand_names -> PI Product Details
+        brand_names = [b.strip() for b in matched_product.client_brand_names.split(',') if b.strip()]
+        if brand_names:
+            raw_lower = raw_product_text.lower()
+            best_brand = brand_names[0]
+            for bn in brand_names:
+                if bn.lower() in raw_lower or raw_lower in bn.lower():
+                    best_brand = bn
+                    break
+            pi_product_name = best_brand
+        else:
+            pi_product_name = raw_product_text
+        # Product.name -> PI Description of Goods
+        pi_description = str(matched_product)
+    else:
+        pi_product_name = raw_product_text
+
+    # Delete empty items and create filled one
+    pi.items.filter(product_name='').delete()
+    ProformaInvoiceItem.objects.create(
+        pi=pi,
+        product_name=pi_product_name,
+        client_product_name=pi_product_name,
+        description_of_goods=pi_description,
+        quantity=quantity,
+        unit=unit,
+        unit_price=0,
+        total_price=0,
+    )

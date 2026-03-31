@@ -46,7 +46,7 @@ export default function ClientsPage() {
   }, [isExecutive, tab, list, myClients, shadowClients]);
 
   const columns = [
-    { key: "company_name", label: "Company", render: (row) => (
+    { key: "company_name", label: "Account Name", render: (row) => (
       <div className="flex items-center gap-2">
         <span className="font-medium text-gray-900">{row.company_name}</span>
         {isExecutive && row.client_role === "shadow" && (
@@ -69,20 +69,20 @@ export default function ClientsPage() {
       </select>
     )},
     { key: "contact_count", label: "Contacts", render: (row) => row.contact_count || 0 },
-    { key: "primary_executive_name", label: "Executive", render: (row) => row.primary_executive_name || "-" },
+    { key: "primary_executive_name", label: "Account Owner", render: (row) => row.primary_executive_name || "-" },
   ];
 
   return (
     <div>
       <PageHeader
-        title="Clients"
-        subtitle={`${displayList.length} client${displayList.length !== 1 ? "s" : ""}`}
+        title="Accounts"
+        subtitle={`${displayList.length} account${displayList.length !== 1 ? "s" : ""}`}
         action={
           <Link
             href="/clients/new"
             className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
           >
-            + Add Client
+            + New Account
           </Link>
         }
       />
@@ -94,10 +94,10 @@ export default function ClientsPage() {
             All ({list.length})
           </button>
           <button onClick={() => setTab("my")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "my" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            My Clients ({myClients.length})
+            My Accounts ({myClients.length})
           </button>
           <button onClick={() => setTab("shadow")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "shadow" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}>
-            Shadow Clients ({shadowClients.length})
+            Shared Accounts ({shadowClients.length})
           </button>
         </div>
       )}
@@ -106,8 +106,8 @@ export default function ClientsPage() {
         columns={columns}
         data={displayList}
         loading={loading}
-        emptyTitle="No clients"
-        emptyDescription={isExecutive ? "No clients assigned to you" : "Create your first client to get started"}
+        emptyTitle="No accounts"
+        emptyDescription={isExecutive ? "No accounts assigned to you" : "Create your first account to get started"}
         onRowClick={(row) => router.push(`/clients/${row.id}`)}
       />
     </div>
