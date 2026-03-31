@@ -70,12 +70,25 @@ def create_pi_from_order(order, user):
     )
 
     # Copy items from order
+    # PI: product_name = client brand name from Product master
+    #     description_of_goods = company product name from Product master
     for item in order.items.all():
+        pi_product_name = item.client_product_name or item.product_name
+        pi_description = item.product_name
+
+        # If product FK exists, pull client_brand_names from Product master
+        if item.product and item.product.client_brand_names:
+            brand_names = [b.strip() for b in item.product.client_brand_names.split(',') if b.strip()]
+            if brand_names:
+                pi_product_name = brand_names[0]  # First brand name
+            pi_description = str(item.product)  # Company product name with concentration
+
         ProformaInvoiceItem.objects.create(
             pi=pi,
-            product_name=item.product_name,
+            product_name=pi_product_name,
+            client_product_name=item.client_product_name,
             packages_description=f'{int(item.quantity)} {item.unit} Container Packing',
-            description_of_goods=item.description or item.product_name,
+            description_of_goods=pi_description,
             quantity=item.quantity,
             unit=item.unit,
             unit_price=item.unit_price,

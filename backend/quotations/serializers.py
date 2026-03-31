@@ -14,7 +14,7 @@ class InquirySerializer(serializers.ModelSerializer):
 class QuotationItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuotationItem
-        fields = ['id', 'product', 'product_name', 'description', 'quantity', 'unit', 'unit_price', 'total_price']
+        fields = ['id', 'product', 'product_name', 'client_product_name', 'description', 'quantity', 'unit', 'unit_price', 'total_price']
         read_only_fields = ['total_price']
         extra_kwargs = {
             'product_name': {'required': False, 'default': ''},

@@ -62,6 +62,14 @@ class Communication(TimeStampedModel):
         INBOUND = 'inbound', 'Inbound'
         OUTBOUND = 'outbound', 'Outbound'
 
+    class Classification(models.TextChoices):
+        CLIENT = 'client', 'Client'
+        PROMOTION = 'promotion', 'Promotion'
+        UPDATE = 'update', 'Update'
+        SOCIAL = 'social', 'Social'
+        SPAM = 'spam', 'Spam'
+        UNKNOWN = 'unknown', 'Unknown'
+
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='communications', null=True, blank=True)
     contact = models.ForeignKey('clients.Contact', on_delete=models.SET_NULL, null=True, blank=True)
     user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='communications')
@@ -74,6 +82,14 @@ class Communication(TimeStampedModel):
     ai_summary = models.TextField(blank=True, help_text='AI-generated summary')
     ai_extracted_intent = models.TextField(blank=True)
     ai_suggested_reply = models.TextField(blank=True)
+
+    # Email classification fields
+    is_client_mail = models.BooleanField(default=True, help_text='True if matched to a client')
+    classification = models.CharField(
+        max_length=20, choices=Classification.choices,
+        default=Classification.CLIENT, db_index=True,
+    )
+    is_classified = models.BooleanField(default=False, help_text='True if classification has been run')
 
     # Email integration fields
     email_message_id = models.CharField(max_length=500, blank=True, db_index=True)

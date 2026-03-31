@@ -17,7 +17,7 @@ export default function DataTable({ columns, data, loading, emptyTitle, emptyDes
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap"
                 >
                   {col.label}
                 </th>

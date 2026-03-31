@@ -47,7 +47,7 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
     setPiItems(items);
   };
 
-  const addItem = () => setPiItems([...piItems, { id: `new-${Date.now()}`, product_name: "", packages_description: "", description_of_goods: "", quantity: "", unit: "Ltrs", unit_price: "", total_price: 0 }]);
+  const addItem = () => setPiItems([...piItems, { id: `new-${Date.now()}`, product_name: "", client_product_name: "", packages_description: "", description_of_goods: "", quantity: "", unit: "Ltrs", unit_price: "", total_price: 0 }]);
   const removeItem = (i) => setPiItems(piItems.filter((_, idx) => idx !== i));
 
   // ── Additional totals (UI placeholders bound to piForm) ──
@@ -182,8 +182,8 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
           <tbody>
             {piItems.map((item, i) => (
               <tr key={item.id || i}>
-                <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} /></td>
-                <td className="border border-gray-400 p-0"><input value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} className={ic} /></td>
+                <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} placeholder="Client's product name" /></td>
+                <td className="border border-gray-400 p-0"><input value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} className={ic} placeholder="Company product name" /></td>
                 <td className="border border-gray-400 p-0"><input value={item.packages_description} onChange={(e) => updateItem(i, "packages_description", e.target.value)} className={ic} /></td>
                 <td className="border border-gray-400 p-0"><input type="number" value={item.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} className={icr} /></td>
                 <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={item.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className={icr} /></td>

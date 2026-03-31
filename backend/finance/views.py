@@ -155,6 +155,100 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'], url_path='convert-to-order')
+    def convert_to_order(self, request, pk=None):
+        """Convert a Proforma Invoice into an Order."""
+        from orders.models import Order, OrderItem
+        pi = self.get_object()
+
+        # Check if order already exists for this PI
+        if pi.order:
+            from orders.serializers import OrderSerializer
+            return Response(OrderSerializer(pi.order).data)
+
+        # Generate order number
+        order_count = Order.objects.count() + 1
+        order = Order.objects.create(
+            order_number=f'ORD-{order_count:05d}',
+            client=pi.client,
+            order_type='pi_based',
+            currency=pi.currency,
+            delivery_terms=pi.terms_of_delivery.split(' - ')[0].strip() if pi.terms_of_delivery else 'FOB',
+            payment_terms=pi.terms_of_trade or '',
+            total=pi.total,
+            notes=f'Converted from PI {pi.invoice_number}',
+            created_by=request.user,
+        )
+
+        for item in pi.items.all():
+            OrderItem.objects.create(
+                order=order,
+                product_name=item.product_name,
+                client_product_name=item.client_product_name,
+                description=item.description_of_goods or '',
+                quantity=item.quantity,
+                unit=item.unit,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+            )
+
+        # Link PI to order
+        pi.order = order
+        pi.save(update_fields=['order'])
+
+        from orders.serializers import OrderSerializer
+        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='create-standalone')
+    def create_standalone(self, request):
+        """Create a standalone PI (not from an order) for a client."""
+        from .models import ProformaInvoiceItem
+        from .pi_service import DEFAULT_BANK
+        from datetime import date as dt_date
+
+        client_id = request.data.get('client_id')
+        if not client_id:
+            return Response({'error': 'client_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from clients.models import Client
+        try:
+            client = Client.objects.get(id=client_id, is_deleted=False)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        count = ProformaInvoice.objects.count() + 1
+        today = dt_date.today()
+        invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
+
+        pi = ProformaInvoice.objects.create(
+            client=client,
+            invoice_number=invoice_number,
+            invoice_date=today,
+            created_by=request.user,
+            client_company_name=client.company_name,
+            client_tax_number=client.tax_number or '',
+            client_address=client.address or '',
+            client_pincode=client.postal_code or '',
+            client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
+            client_phone=client.phone_number or '',
+            country_of_origin='India',
+            country_of_final_destination=client.country or '',
+            currency=client.preferred_currency or 'USD',
+            bank_details=DEFAULT_BANK,
+        )
+
+        # Add one blank item
+        ProformaInvoiceItem.objects.create(
+            pi=pi,
+            product_name='',
+            quantity=0,
+            unit='Ltrs',
+            unit_price=0,
+            total_price=0,
+        )
+
+        return Response(ProformaInvoiceSerializer(pi).data, status=status.HTTP_201_CREATED)
+
 
 class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = CommercialInvoiceSerializer

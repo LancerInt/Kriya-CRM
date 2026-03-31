@@ -234,9 +234,22 @@ def _generate_draft_quotation(quote_request):
     except (ValueError, TypeError):
         pass
 
+    # Match extracted product name to Product master
+    client_product_name = qr.extracted_product or 'Product TBD'
+    company_product_name = client_product_name
+    matched_product = None
+
+    if qr.extracted_product:
+        matched_product = _match_product(qr.extracted_product)
+        if matched_product:
+            company_product_name = str(matched_product)  # includes concentration
+        # If no match, both names stay the same — executive can fix later
+
     QuotationItem.objects.create(
         quotation=quotation,
-        product_name=qr.extracted_product or 'Product TBD',
+        product=matched_product,
+        product_name=company_product_name,
+        client_product_name=client_product_name,
         description=qr.extracted_packaging or '',
         quantity=qty,
         unit=qr.extracted_unit or 'MT',
@@ -245,6 +258,64 @@ def _generate_draft_quotation(quote_request):
     )
 
     return quotation
+
+
+def _match_product(extracted_name):
+    """
+    Try to match an extracted product name to the Product master.
+    Checks: exact name, client_brand_names, name+concentration similarity.
+    Returns Product instance or None.
+    """
+    import re
+    from products.models import Product
+
+    if not extracted_name:
+        return None
+
+    name_lower = extracted_name.strip().lower()
+
+    # 1. Exact name match (case-insensitive)
+    product = Product.objects.filter(is_deleted=False, name__iexact=name_lower).first()
+    if product:
+        return product
+
+    # 2. Extract concentration from client name (e.g. "aza 3%" → "3%")
+    conc_match = re.search(r'(\d+\.?\d*)\s*%', name_lower)
+    name_without_conc = re.sub(r'\s*\d+\.?\d*\s*%', '', name_lower).strip()
+
+    # 3. Check client_brand_names field
+    for product in Product.objects.filter(is_deleted=False, client_brand_names__gt=''):
+        for brand in product.client_brand_names.split(','):
+            brand = brand.strip().lower()
+            if brand and brand in name_lower:
+                # If concentration was specified, verify it matches
+                if conc_match and product.concentration:
+                    if conc_match.group(1) in product.concentration:
+                        return product
+                elif not conc_match:
+                    return product
+                # Brand matched but concentration didn't — still return as best match
+                return product
+
+    # 4. Partial name match against product name
+    if name_without_conc:
+        for product in Product.objects.filter(is_deleted=False):
+            if name_without_conc in product.name.lower() or product.name.lower() in name_without_conc:
+                if conc_match and product.concentration:
+                    if conc_match.group(1) in product.concentration:
+                        return product
+                else:
+                    return product
+
+    # 5. Active ingredient match
+    if name_without_conc:
+        product = Product.objects.filter(
+            is_deleted=False, active_ingredient__icontains=name_without_conc
+        ).first()
+        if product:
+            return product
+
+    return None
 
 
 def _notify_executive(quote_request, assigned_to):

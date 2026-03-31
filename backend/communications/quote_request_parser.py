@@ -79,12 +79,27 @@ def extract_quote_fields(text):
 
     fields = {}
 
-    # Extract product
-    for pattern in PRODUCT_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            fields['product'] = match.group(0).strip().title()
-            break
+    # Extract product — first check client brand names from DB
+    try:
+        from products.models import Product
+        for product in Product.objects.filter(is_deleted=False, client_brand_names__gt=''):
+            for brand_name in product.client_brand_names.split(','):
+                brand_name = brand_name.strip()
+                if brand_name and re.search(r'\b' + re.escape(brand_name) + r'\b', text, re.IGNORECASE):
+                    fields['product'] = product.name
+                    break
+            if 'product' in fields:
+                break
+    except Exception:
+        pass
+
+    # Then check hardcoded product patterns
+    if 'product' not in fields:
+        for pattern in PRODUCT_PATTERNS:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                fields['product'] = match.group(0).strip().title()
+                break
 
     # If no known product matched, try to find product-like phrases
     if 'product' not in fields:

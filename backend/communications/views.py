@@ -23,12 +23,15 @@ logger = logging.getLogger(__name__)
 
 class CommunicationViewSet(viewsets.ModelViewSet):
     serializer_class = CommunicationSerializer
-    filterset_fields = ['client', 'comm_type', 'direction', 'is_follow_up_required']
+    filterset_fields = ['client', 'comm_type', 'direction', 'is_follow_up_required',
+                        'is_client_mail', 'classification']
     search_fields = ['subject', 'body']
     ordering_fields = ['created_at']
 
     def get_queryset(self):
-        qs = Communication.objects.filter(is_deleted=False).select_related('user', 'contact', 'client').prefetch_related('attachments')
+        qs = Communication.objects.filter(is_deleted=False).select_related(
+            'user', 'contact', 'client', 'client__primary_executive',
+        ).prefetch_related('attachments')
         user = self.request.user
         if user.role == 'executive':
             from clients.views import get_client_qs_for_user
@@ -40,6 +43,49 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         comm = serializer.save(user=self.request.user)
         if comm.client:
             comm.client.save(update_fields=['updated_at'])
+
+    @action(detail=True, methods=['post'], url_path='mark-as-client')
+    def mark_as_client(self, request, pk=None):
+        """Mark an unmatched communication as client mail and assign to a client."""
+        comm = self.get_object()
+        client_id = request.data.get('client')
+        if not client_id:
+            return Response({'error': 'client id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from clients.models import Client
+        try:
+            client = Client.objects.get(id=client_id, is_deleted=False)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        comm.client = client
+        comm.is_client_mail = True
+        comm.classification = 'client'
+        comm.is_classified = True
+        comm.save(update_fields=['client', 'is_client_mail', 'classification', 'is_classified'])
+        return Response(CommunicationSerializer(comm).data)
+
+    @action(detail=True, methods=['post'], url_path='reclassify')
+    def reclassify(self, request, pk=None):
+        """Re-run classification on a communication."""
+        comm = self.get_object()
+        from .email_classifier import reclassify_communication
+        result = reclassify_communication(comm)
+        return Response({
+            'is_client_mail': result['is_client_mail'],
+            'classification': result['classification'],
+        })
+
+    @action(detail=False, methods=['get'], url_path='classification-counts')
+    def classification_counts(self, request):
+        """Return counts of non-client emails grouped by classification."""
+        from django.db.models import Count
+        qs = self.get_queryset().filter(is_client_mail=False)
+        counts = qs.values('classification').annotate(count=Count('id'))
+        result = {item['classification']: item['count'] for item in counts}
+        total = sum(result.values())
+        result['total'] = total
+        return Response(result)
 
 
 class EmailAccountViewSet(viewsets.ModelViewSet):

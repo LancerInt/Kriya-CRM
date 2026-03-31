@@ -5,7 +5,7 @@ from .models import Order, OrderItem, OrderStatusHistory, OrderDocument, Workflo
 class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
-        fields = ['id', 'product', 'product_name', 'description', 'quantity', 'unit', 'unit_price', 'total_price']
+        fields = ['id', 'product', 'product_name', 'client_product_name', 'description', 'quantity', 'unit', 'unit_price', 'total_price']
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):

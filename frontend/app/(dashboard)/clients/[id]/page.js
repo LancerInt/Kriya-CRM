@@ -79,6 +79,8 @@ function LastConversation({ clientId }) {
 
 // ── Overview Tab ──
 function OverviewTab({ client, timeline, stats, onClientUpdate }) {
+  const currentUser = useSelector((state) => state.auth.user);
+  const canAssign = currentUser?.role === "admin" || currentUser?.role === "manager";
   const [allUsers, setAllUsers] = useState([]);
   const [showContactModal, setShowContactModal] = useState(false);
 
@@ -158,56 +160,106 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
             <div><span className="text-gray-500">City:</span> <span className="ml-1">{client.city || "\u2014"}</span></div>
             <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
             <div><span className="text-gray-500">Currency:</span> <span className="ml-1">{client.preferred_currency}</span></div>
-            <div><span className="text-gray-500">Main Executive:</span> <span className="ml-1">{client.primary_executive_name || client.executive_name || "\u2014"}</span></div>
+            <div>
+              <span className="text-gray-500">Main Executive:</span>
+              {canAssign ? (
+                <select
+                  value={client.primary_executive || ""}
+                  onChange={async (e) => {
+                    const newId = e.target.value || null;
+                    const newUser = allUsers.find((u) => u.id === newId);
+                    const oldName = client.primary_executive_name || client.executive_name || "";
+                    const newName = newUser ? `${newUser.first_name} ${newUser.last_name}` : "";
+
+                    let confirmed = false;
+                    if (!client.primary_executive && newId) {
+                      confirmed = confirm(`Assign ${newName} as main executive for ${client.company_name}?`);
+                    } else if (client.primary_executive && newId && client.primary_executive !== newId) {
+                      confirmed = confirm(`Transfer main executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE primary access to ${client.company_name}\n• ${newName} will GAIN primary access to ${client.company_name}`);
+                    } else if (client.primary_executive && !newId) {
+                      confirmed = confirm(`Remove ${oldName} as main executive?\n\n${oldName} will lose primary access to ${client.company_name}.`);
+                    } else {
+                      confirmed = true;
+                    }
+
+                    if (!confirmed) {
+                      e.target.value = client.primary_executive || "";
+                      return;
+                    }
+
+                    try {
+                      await api.patch(`/clients/${client.id}/`, { primary_executive: newId });
+                      if (!client.primary_executive && newId) {
+                        toast.success(`${newName} assigned as main executive`);
+                      } else if (client.primary_executive && newId) {
+                        toast.success(`Main executive transferred to ${newName}`);
+                      } else {
+                        toast.success(`Main executive removed`);
+                      }
+                      onClientUpdate();
+                    } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+                  }}
+                  className="ml-1 text-sm border-b border-gray-300 bg-transparent outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">Not assigned</option>
+                  {allUsers.filter((u) => u.id !== client.shadow_executive).map((u) => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="ml-1">{client.primary_executive_name || client.executive_name || "\u2014"}</span>
+              )}
+            </div>
             <div>
               <span className="text-gray-500">Shadow Executive:</span>
-              <select
-                value={client.shadow_executive || ""}
-                onChange={async (e) => {
-                  const newId = e.target.value || null;
-                  const newUser = allUsers.find((u) => u.id === newId);
-                  const oldUser = allUsers.find((u) => u.id === client.shadow_executive);
-                  const newName = newUser ? `${newUser.first_name} ${newUser.last_name}` : "";
-                  const oldName = oldUser ? `${oldUser.first_name} ${oldUser.last_name}` : "";
+              {canAssign ? (
+                <select
+                  value={client.shadow_executive || ""}
+                  onChange={async (e) => {
+                    const newId = e.target.value || null;
+                    const newUser = allUsers.find((u) => u.id === newId);
+                    const oldUser = allUsers.find((u) => u.id === client.shadow_executive);
+                    const newName = newUser ? `${newUser.first_name} ${newUser.last_name}` : "";
+                    const oldName = oldUser ? `${oldUser.first_name} ${oldUser.last_name}` : "";
 
-                  let confirmed = false;
-                  if (!client.shadow_executive && newId) {
-                    // First time assigning
-                    confirmed = confirm(`Assign ${newName} as shadow executive?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
-                  } else if (client.shadow_executive && newId && client.shadow_executive !== newId) {
-                    // Transferring from one to another
-                    confirmed = confirm(`Transfer shadow executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
-                  } else if (client.shadow_executive && !newId) {
-                    // Removing shadow executive
-                    confirmed = confirm(`Remove ${oldName} as shadow executive?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
-                  } else {
-                    confirmed = true;
-                  }
-
-                  if (!confirmed) {
-                    e.target.value = client.shadow_executive || "";
-                    return;
-                  }
-
-                  try {
-                    await api.patch(`/clients/${client.id}/`, { shadow_executive: newId });
+                    let confirmed = false;
                     if (!client.shadow_executive && newId) {
-                      toast.success(`${newName} assigned as shadow executive`);
-                    } else if (client.shadow_executive && newId) {
-                      toast.success(`Shadow executive transferred from ${oldName} to ${newName}`);
+                      confirmed = confirm(`Assign ${newName} as shadow executive?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
+                    } else if (client.shadow_executive && newId && client.shadow_executive !== newId) {
+                      confirmed = confirm(`Transfer shadow executive from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
+                    } else if (client.shadow_executive && !newId) {
+                      confirmed = confirm(`Remove ${oldName} as shadow executive?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
                     } else {
-                      toast.success(`Shadow executive removed`);
+                      confirmed = true;
                     }
-                    onClientUpdate();
-                  } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
-                }}
-                className="ml-1 text-sm border-b border-gray-300 bg-transparent outline-none focus:border-indigo-500 cursor-pointer"
-              >
-                <option value="">Not assigned</option>
-                {allUsers.filter((u) => u.id !== client.primary_executive).map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
-                ))}
-              </select>
+
+                    if (!confirmed) {
+                      e.target.value = client.shadow_executive || "";
+                      return;
+                    }
+
+                    try {
+                      await api.patch(`/clients/${client.id}/`, { shadow_executive: newId });
+                      if (!client.shadow_executive && newId) {
+                        toast.success(`${newName} assigned as shadow executive`);
+                      } else if (client.shadow_executive && newId) {
+                        toast.success(`Shadow executive transferred from ${oldName} to ${newName}`);
+                      } else {
+                        toast.success(`Shadow executive removed`);
+                      }
+                      onClientUpdate();
+                    } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+                  }}
+                  className="ml-1 text-sm border-b border-gray-300 bg-transparent outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="">Not assigned</option>
+                  {allUsers.filter((u) => u.id !== client.primary_executive).map((u) => (
+                    <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="ml-1">{client.shadow_executive_name || "\u2014"}</span>
+              )}
             </div>
             <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="ml-1">{client.address || "\u2014"}</span></div>
             {client.website && (

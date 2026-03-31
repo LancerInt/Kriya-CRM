@@ -56,6 +56,15 @@ class ClientViewSet(viewsets.ModelViewSet):
             return ClientCreateSerializer
         return ClientDetailSerializer
 
+    def perform_update(self, serializer):
+        user = self.request.user
+        if user.role == 'executive':
+            # Executives cannot change executive assignments
+            for field in ('primary_executive', 'shadow_executive'):
+                if field in serializer.validated_data:
+                    serializer.validated_data.pop(field)
+        serializer.save()
+
     def perform_destroy(self, instance):
         instance.soft_delete()
 

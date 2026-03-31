@@ -166,7 +166,8 @@ class ProformaInvoiceItem(models.Model):
     """Line items for Proforma Invoice — matching Packing Details section."""
     id = models.AutoField(primary_key=True)
     pi = models.ForeignKey(ProformaInvoice, on_delete=models.CASCADE, related_name='items')
-    product_name = models.CharField(max_length=255)
+    product_name = models.CharField(max_length=255, help_text='Company/internal product name')
+    client_product_name = models.CharField(max_length=255, blank=True, default='', help_text='Product name as the client calls it')
     packages_description = models.TextField(blank=True, help_text='No. & Kind of Packages')
     description_of_goods = models.TextField(blank=True, help_text='Description + NCM Code + LOTE')
     quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -274,7 +275,8 @@ class CommercialInvoiceItem(models.Model):
     """Line items for Commercial Invoice — matching Packing Details / Description of Goods."""
     id = models.AutoField(primary_key=True)
     ci = models.ForeignKey(CommercialInvoice, on_delete=models.CASCADE, related_name='items')
-    product_name = models.CharField(max_length=255)
+    product_name = models.CharField(max_length=255, help_text='Company/internal product name')
+    client_product_name = models.CharField(max_length=255, blank=True, default='', help_text='Product name as the client calls it')
     hsn_code = models.CharField(max_length=50, blank=True, help_text='HSN/SAC Code')
     packages_description = models.TextField(blank=True, help_text='No. & Kind of Packages')
     description_of_goods = models.TextField(blank=True)

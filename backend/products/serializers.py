@@ -5,7 +5,8 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ['id', 'name', 'hsn_code', 'category', 'active_ingredient', 'concentration',
-                  'description', 'base_price', 'currency', 'unit', 'is_active', 'created_at']
+                  'description', 'base_price', 'currency', 'unit', 'client_brand_names',
+                  'is_active', 'created_at']
 
     def validate(self, data):
         # Check for exact duplicate — all key fields must match

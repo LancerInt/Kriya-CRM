@@ -25,6 +25,7 @@ import {
   HiOutlineUserGroup,
   HiOutlineTrash,
   HiOutlineInboxArrowDown,
+  HiOutlineDocumentDuplicate,
 } from "react-icons/hi2";
 
 const navItems = [
@@ -36,6 +37,7 @@ const navItems = [
   { name: "Products", href: "/products", icon: HiOutlineCube },
   { name: "Quotations", href: "/quotations", icon: HiOutlineDocumentText },
   { name: "Quote Requests", href: "/quote-requests", icon: HiOutlineInboxArrowDown },
+  { name: "Proforma Invoices", href: "/proforma-invoices", icon: HiOutlineDocumentDuplicate },
   { name: "Orders", href: "/orders", icon: HiOutlineShoppingCart },
   { name: "Shipments", href: "/shipments", icon: HiOutlineTruck },
   { name: "Quality", href: "/quality", icon: HiOutlineShieldCheck },

@@ -205,6 +205,7 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 QuotationItem.objects.create(
                     quotation=q,
                     product_name=item_data.get('product_name', ''),
+                    client_product_name=item_data.get('client_product_name', ''),
                     description=item_data.get('description', ''),
                     quantity=qty,
                     unit=item_data.get('unit', 'KG'),
@@ -386,6 +387,7 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         for qi in q.items.all():
             OrderItem.objects.create(
                 order=order, product=qi.product, product_name=qi.product_name,
+                client_product_name=qi.client_product_name,
                 description=qi.description, quantity=qi.quantity, unit=qi.unit,
                 unit_price=qi.unit_price, total_price=qi.total_price
             )

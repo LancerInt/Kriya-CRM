@@ -84,7 +84,7 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   };
 
   const addItem = () => setQtItems([...qtItems, {
-    id: `new-${Date.now()}`, product_name: "", description: "",
+    id: `new-${Date.now()}`, product_name: "", client_product_name: "", description: "",
     quantity: "", unit: "KG", unit_price: "", total_price: 0
   }]);
   const removeItem = (i) => setQtItems(qtItems.filter((_, idx) => idx !== i));
@@ -192,8 +192,8 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
               const amt = calcAmount(item);
               return (
                 <tr key={item.id || i}>
-                  <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.description != null ? item.description : ""} onChange={(e) => updateItem(i, "description", e.target.value)} className={ic} placeholder="Details / Specs" /></td>
+                  <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} placeholder="Company product name" /></td>
+                  <td className="border border-gray-400 p-0"><input value={item.client_product_name != null ? item.client_product_name : ""} onChange={(e) => updateItem(i, "client_product_name", e.target.value)} className={ic} placeholder="Client's name for this product" /></td>
                   <td className="border border-gray-400 p-0"><input type="number" value={parseFloat(item.quantity) ? item.quantity : ""} onChange={(e) => updateItem(i, "quantity", e.target.value)} placeholder="-.--" className={icr + " w-20"} /></td>
                   <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={parseFloat(item.unit_price) ? item.unit_price : ""} onChange={(e) => updateItem(i, "unit_price", e.target.value)} placeholder="-.--" className={icr + " w-24"} /></td>
                   <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{amt !== null ? amt.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "-.--"}</td>

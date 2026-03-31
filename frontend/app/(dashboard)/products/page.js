@@ -7,7 +7,7 @@ import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 
-const emptyForm = { name: "", hsn_code: "", category: "", active_ingredient: "", concentration: "", description: "", base_price: "", currency: "USD", unit: "MT" };
+const emptyForm = { name: "", hsn_code: "", category: "", active_ingredient: "", concentration: "", description: "", base_price: "", currency: "USD", unit: "MT", client_brand_names: "" };
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
@@ -39,7 +39,7 @@ export default function ProductsPage() {
       category: product.category || "", active_ingredient: product.active_ingredient || "",
       concentration: product.concentration || "", description: product.description || "",
       base_price: product.base_price || "", currency: product.currency || "USD",
-      unit: product.unit || "MT",
+      unit: product.unit || "MT", client_brand_names: product.client_brand_names || "",
     });
     setShowModal(true);
   };
@@ -82,6 +82,13 @@ export default function ProductsPage() {
     { key: "category", label: "Category" },
     { key: "base_price", label: "Base Price", render: (row) => row.base_price ? `$${Number(row.base_price).toLocaleString()}` : "\u2014" },
     { key: "unit", label: "Unit", render: (row) => row.unit || "MT" },
+    { key: "client_brand_names", label: "Client Brand Names", render: (row) => row.client_brand_names ? (
+      <div className="flex flex-wrap gap-1 max-w-xs">
+        {row.client_brand_names.split(",").map((name, i) => (
+          <span key={i} className="px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-50 rounded-full">{name.trim()}</span>
+        ))}
+      </div>
+    ) : <span className="text-gray-400">{"\u2014"}</span> },
     { key: "actions", label: "", render: (row) => (
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => openEdit(row)} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Edit</button>
@@ -160,6 +167,11 @@ export default function ProductsPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} className={inputClass} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Client Brand Names</label>
+            <input value={form.client_brand_names} onChange={(e) => setForm({ ...form, client_brand_names: e.target.value })} placeholder="e.g. aza, azarate, azadin, neem guard" className={inputClass} />
+            <p className="text-xs text-gray-400 mt-1">Comma-separated alternate names clients use for this product</p>
           </div>
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">

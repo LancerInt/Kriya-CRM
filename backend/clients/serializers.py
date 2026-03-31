@@ -34,6 +34,7 @@ class ClientDetailSerializer(serializers.ModelSerializer):
     contacts = ContactSerializer(many=True, read_only=True)
     ports = ClientPortSerializer(many=True, read_only=True)
     executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
+    primary_executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
     shadow_executive_name = serializers.CharField(source='shadow_executive.full_name', read_only=True, default='')
 
     class Meta:

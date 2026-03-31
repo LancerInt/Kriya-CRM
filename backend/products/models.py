@@ -12,6 +12,10 @@ class Product(SoftDeleteModel):
     base_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, default='USD')
     unit = models.CharField(max_length=20, default='MT')
+    client_brand_names = models.TextField(
+        blank=True, default='',
+        help_text='Comma-separated alternate names clients use for this product (e.g. aza, azarate, azadin)',
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

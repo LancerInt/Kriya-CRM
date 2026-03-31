@@ -53,8 +53,8 @@ class GSTRecordSerializer(serializers.ModelSerializer):
 class PIItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProformaInvoiceItem
-        fields = ['id', 'product_name', 'packages_description', 'description_of_goods',
-                  'quantity', 'unit', 'unit_price', 'total_price']
+        fields = ['id', 'product_name', 'client_product_name', 'packages_description',
+                  'description_of_goods', 'quantity', 'unit', 'unit_price', 'total_price']
 
 
 class ProformaInvoiceSerializer(serializers.ModelSerializer):
@@ -70,8 +70,9 @@ class ProformaInvoiceSerializer(serializers.ModelSerializer):
 class CIItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CommercialInvoiceItem
-        fields = ['id', 'product_name', 'hsn_code', 'packages_description',
-                  'description_of_goods', 'quantity', 'unit', 'unit_price', 'total_price']
+        fields = ['id', 'product_name', 'client_product_name', 'hsn_code',
+                  'packages_description', 'description_of_goods',
+                  'quantity', 'unit', 'unit_price', 'total_price']
 
 
 class CommercialInvoiceSerializer(serializers.ModelSerializer):

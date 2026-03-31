@@ -49,6 +49,16 @@ def sync_emails(email_account_id=None):
             # Match to client
             client, contact = ContactMatcher.match_by_email(external)
 
+            # Classify the email
+            from communications.email_classifier import classify_email
+            classification = classify_email(
+                sender_email=external,
+                subject=em['subject'],
+                body=em['body'],
+                client_matched=client is not None,
+                contact_matched=contact is not None,
+            )
+
             comm = Communication.objects.create(
                 client=client,
                 contact=contact,
@@ -63,6 +73,9 @@ def sync_emails(email_account_id=None):
                 email_account=account,
                 external_email=external,
                 email_cc=em.get('cc', ''),
+                is_client_mail=classification['is_client_mail'],
+                classification=classification['classification'],
+                is_classified=True,
             )
 
             # Override created_at with the actual email date
@@ -76,8 +89,19 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Draft generation failed for {comm.id}: {e}')
 
-            # Auto-detect quote request from inbound messages
-            if direction == 'inbound':
+            # Auto-detect PI request first (takes priority over quote request)
+            pi_created = False
+            if direction == 'inbound' and client:
+                try:
+                    from communications.auto_pi_service import process_communication_for_pi
+                    pi_result = process_communication_for_pi(comm)
+                    if pi_result:
+                        pi_created = True
+                except Exception as e:
+                    logger.error(f'PI request detection failed for {comm.id}: {e}')
+
+            # Auto-detect quote request from inbound messages (skip if PI was detected)
+            if direction == 'inbound' and not pi_created:
                 try:
                     from communications.auto_quote_service import process_communication_for_quote
                     process_communication_for_quote(comm)

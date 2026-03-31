@@ -87,13 +87,26 @@ def create_ci_from_order(order, user):
     )
 
     # Copy items from order
+    # CI: product_name = client brand name from Product master
+    #     description_of_goods = company product name from Product master
     for item in order.items.all():
+        ci_product_name = item.client_product_name or item.product_name
+        ci_description = item.product_name
+
+        # If product FK exists, pull client_brand_names from Product master
+        if item.product and item.product.client_brand_names:
+            brand_names = [b.strip() for b in item.product.client_brand_names.split(',') if b.strip()]
+            if brand_names:
+                ci_product_name = brand_names[0]
+            ci_description = str(item.product)
+
         CommercialInvoiceItem.objects.create(
             ci=ci,
-            product_name=item.product_name,
+            product_name=ci_product_name,
+            client_product_name=item.client_product_name,
             hsn_code='',
             packages_description=f'{int(item.quantity)} {item.unit} Container Packing',
-            description_of_goods=item.description or item.product_name,
+            description_of_goods=ci_description,
             quantity=item.quantity,
             unit=item.unit,
             unit_price=item.unit_price,
