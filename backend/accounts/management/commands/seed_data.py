@@ -28,100 +28,61 @@ class Command(BaseCommand):
                 'region': '',
             }
         )
-        admin.set_password('admin123')
+        admin.set_password('admin123')  # {username}123
         admin.save()
 
         manager, _ = User.objects.update_or_create(
-            username='priya',
+            username='shobana',
             defaults={
-                'email': 'priya@kriya.com',
-                'first_name': 'Priya',
-                'last_name': 'Patel',
+                'email': 'shobana@kriya.com',
+                'first_name': 'Shobana',
+                'last_name': '',
                 'role': 'manager',
                 'is_staff': True,
                 'region': '',
             }
         )
-        manager.set_password('manager123')
+        manager.set_password('shobana123')  # {username}123
         manager.save()
 
-        exec_rahul, _ = User.objects.update_or_create(
-            username='rahul',
+        exec_dinesh, _ = User.objects.update_or_create(
+            username='dinesh',
             defaults={
-                'email': 'rahul@kriya.com',
-                'first_name': 'Rahul',
-                'last_name': 'Sharma',
+                'email': 'dinesh@kriya.com',
+                'first_name': 'Dinesh',
+                'last_name': '',
                 'role': 'executive',
                 'region': 'South Asia',
             }
         )
-        exec_rahul.set_password('exec123')
-        exec_rahul.save()
+        exec_dinesh.set_password('dinesh123')  # {username}123
+        exec_dinesh.save()
 
-        exec_anita, _ = User.objects.update_or_create(
-            username='anita',
+        exec_moulee, _ = User.objects.update_or_create(
+            username='moulee',
             defaults={
-                'email': 'anita@kriya.com',
-                'first_name': 'Anita',
-                'last_name': 'Desai',
+                'email': 'moulee@kriya.com',
+                'first_name': 'Moulee',
+                'last_name': '',
                 'role': 'executive',
                 'region': 'Africa',
             }
         )
-        exec_anita.set_password('exec123')
-        exec_anita.save()
+        exec_moulee.set_password('moulee123')  # {username}123
+        exec_moulee.save()
 
-        exec_vikram, _ = User.objects.update_or_create(
-            username='vikram',
+        exec_indra, _ = User.objects.update_or_create(
+            username='indra',
             defaults={
-                'email': 'vikram@kriya.com',
-                'first_name': 'Vikram',
-                'last_name': 'Singh',
+                'email': 'indra@kriya.com',
+                'first_name': 'Indra',
+                'last_name': '',
                 'role': 'executive',
                 'region': 'Americas',
             }
         )
-        exec_vikram.set_password('exec123')
-        exec_vikram.save()
-
-        exec_meera, _ = User.objects.update_or_create(
-            username='meera',
-            defaults={
-                'email': 'meera@kriya.com',
-                'first_name': 'Meera',
-                'last_name': 'Nair',
-                'role': 'executive',
-                'region': 'Europe',
-            }
-        )
-        exec_meera.set_password('exec123')
-        exec_meera.save()
-
-        exec_arjun, _ = User.objects.update_or_create(
-            username='arjun',
-            defaults={
-                'email': 'arjun@kriya.com',
-                'first_name': 'Arjun',
-                'last_name': 'Kapoor',
-                'role': 'executive',
-                'region': 'East Asia & Pacific',
-            }
-        )
-        exec_arjun.set_password('exec123')
-        exec_arjun.save()
-
-        exec_sneha, _ = User.objects.update_or_create(
-            username='sneha',
-            defaults={
-                'email': 'sneha@kriya.com',
-                'first_name': 'Sneha',
-                'last_name': 'Reddy',
-                'role': 'executive',
-                'region': 'Middle East',
-            }
-        )
-        exec_sneha.set_password('exec123')
-        exec_sneha.save()
+        exec_indra.set_password('indra123')  # {username}123
+        exec_indra.save()
 
         # ── Products ──────────────────────────────────────────
 
@@ -141,11 +102,11 @@ class Command(BaseCommand):
         # ── Clients (assigned to correct regional executives) ──
 
         clients_data = [
-            {'company_name': 'AgriGlobal LLC', 'country': 'USA', 'city': 'Houston', 'business_type': 'Distributor', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 50000, 'delivery_terms': 'CIF', 'primary_executive': exec_vikram},
-            {'company_name': 'EuroFarm GmbH', 'country': 'Germany', 'city': 'Hamburg', 'business_type': 'Importer', 'preferred_currency': 'EUR', 'credit_days': 45, 'credit_limit': 75000, 'delivery_terms': 'FOB', 'primary_executive': exec_meera},
-            {'company_name': 'AgroTech Kenya', 'country': 'Kenya', 'city': 'Nairobi', 'business_type': 'Distributor', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 25000, 'delivery_terms': 'CFR', 'primary_executive': exec_anita},
-            {'company_name': 'BioHarvest Brazil', 'country': 'Brazil', 'city': 'Sao Paulo', 'business_type': 'Manufacturer', 'preferred_currency': 'USD', 'credit_days': 60, 'credit_limit': 100000, 'delivery_terms': 'FOB', 'primary_executive': exec_vikram},
-            {'company_name': 'GreenFields Vietnam', 'country': 'Vietnam', 'city': 'Ho Chi Minh', 'business_type': 'Importer', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 30000, 'delivery_terms': 'CIF', 'primary_executive': exec_arjun},
+            {'company_name': 'AgriGlobal LLC', 'country': 'USA', 'city': 'Houston', 'business_type': 'Distributor', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 50000, 'delivery_terms': 'CIF', 'primary_executive': exec_indra},
+            {'company_name': 'EuroFarm GmbH', 'country': 'Germany', 'city': 'Hamburg', 'business_type': 'Importer', 'preferred_currency': 'EUR', 'credit_days': 45, 'credit_limit': 75000, 'delivery_terms': 'FOB', 'primary_executive': exec_moulee},
+            {'company_name': 'AgroTech Kenya', 'country': 'Kenya', 'city': 'Nairobi', 'business_type': 'Distributor', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 25000, 'delivery_terms': 'CFR', 'primary_executive': exec_moulee},
+            {'company_name': 'BioHarvest Brazil', 'country': 'Brazil', 'city': 'Sao Paulo', 'business_type': 'Manufacturer', 'preferred_currency': 'USD', 'credit_days': 60, 'credit_limit': 100000, 'delivery_terms': 'FOB', 'primary_executive': exec_indra},
+            {'company_name': 'GreenFields Vietnam', 'country': 'Vietnam', 'city': 'Ho Chi Minh', 'business_type': 'Importer', 'preferred_currency': 'USD', 'credit_days': 30, 'credit_limit': 30000, 'delivery_terms': 'CIF', 'primary_executive': exec_dinesh},
         ]
 
         # Clean up old clients that may have wrong executive assignments
@@ -181,30 +142,30 @@ class Command(BaseCommand):
 
         Inquiry.objects.get_or_create(
             client=clients[0], product_name='Humic Acid 90%',
-            defaults={'assigned_to': exec_vikram, 'source': 'email', 'stage': 'quotation', 'quantity': '10 MT', 'expected_value': 12000, 'requirements': 'Need 25kg bags, palletized'}
+            defaults={'assigned_to': exec_indra, 'source': 'email', 'stage': 'quotation', 'quantity': '10 MT', 'expected_value': 12000, 'requirements': 'Need 25kg bags, palletized'}
         )
         Inquiry.objects.get_or_create(
             client=clients[1], product_name='Seaweed Extract',
-            defaults={'assigned_to': exec_meera, 'source': 'whatsapp', 'stage': 'discussion', 'quantity': '5 MT', 'expected_value': 12500}
+            defaults={'assigned_to': exec_moulee, 'source': 'whatsapp', 'stage': 'discussion', 'quantity': '5 MT', 'expected_value': 12500}
         )
         Inquiry.objects.get_or_create(
             client=clients[2], product_name='NPK 19-19-19',
-            defaults={'assigned_to': exec_anita, 'source': 'manual', 'stage': 'inquiry', 'quantity': '20 MT', 'expected_value': 16000}
+            defaults={'assigned_to': exec_moulee, 'source': 'manual', 'stage': 'inquiry', 'quantity': '20 MT', 'expected_value': 16000}
         )
 
         # ── Tasks ─────────────────────────────────────────────
 
         Task.objects.get_or_create(
             title='Follow up on Humic Acid inquiry - AgriGlobal',
-            defaults={'client': clients[0], 'owner': exec_vikram, 'created_by': admin, 'priority': 'high', 'description': 'Client interested in 10 MT. Prepare quotation.'}
+            defaults={'client': clients[0], 'owner': exec_indra, 'created_by': admin, 'priority': 'high', 'description': 'Client interested in 10 MT. Prepare quotation.'}
         )
         Task.objects.get_or_create(
             title='Send product catalog to EuroFarm',
-            defaults={'client': clients[1], 'owner': exec_meera, 'created_by': manager, 'priority': 'medium'}
+            defaults={'client': clients[1], 'owner': exec_moulee, 'created_by': manager, 'priority': 'medium'}
         )
         Task.objects.get_or_create(
             title='Collect feedback on NPK sample from AgroTech',
-            defaults={'client': clients[2], 'owner': exec_anita, 'created_by': admin, 'priority': 'high', 'is_auto_generated': True}
+            defaults={'client': clients[2], 'owner': exec_moulee, 'created_by': admin, 'priority': 'high', 'is_auto_generated': True}
         )
 
         # ── Summary ───────────────────────────────────────────
@@ -221,12 +182,9 @@ class Command(BaseCommand):
         self.stdout.write('=' * 60)
         self.stdout.write(f'  {"Role":<12} {"Username":<12} {"Password":<14} {"Name":<20} {"Region":<20}')
         self.stdout.write('-' * 60)
-        self.stdout.write(f'  {"Admin":<12} {"admin":<12} {"admin123":<14} {"Admin User":<20} {"—":<20}')
-        self.stdout.write(f'  {"Manager":<12} {"priya":<12} {"manager123":<14} {"Priya Patel":<20} {"—":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"rahul":<12} {"exec123":<14} {"Rahul Sharma":<20} {"South Asia":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"anita":<12} {"exec123":<14} {"Anita Desai":<20} {"Africa":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"vikram":<12} {"exec123":<14} {"Vikram Singh":<20} {"Americas":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"meera":<12} {"exec123":<14} {"Meera Nair":<20} {"Europe":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"arjun":<12} {"exec123":<14} {"Arjun Kapoor":<20} {"East Asia & Pacific":<20}')
-        self.stdout.write(f'  {"Executive":<12} {"sneha":<12} {"exec123":<14} {"Sneha Reddy":<20} {"Middle East":<20}')
+        self.stdout.write(f'  {"Admin":<12} {"admin":<12} {"admin123":<14} {"Admin":<20} {"—":<20}')
+        self.stdout.write(f'  {"Manager":<12} {"shobana":<12} {"shobana123":<14} {"Shobana":<20} {"—":<20}')
+        self.stdout.write(f'  {"Executive":<12} {"dinesh":<12} {"dinesh123":<14} {"Dinesh":<20} {"South Asia":<20}')
+        self.stdout.write(f'  {"Executive":<12} {"moulee":<12} {"moulee123":<14} {"Moulee":<20} {"Africa":<20}')
+        self.stdout.write(f'  {"Executive":<12} {"indra":<12} {"indra123":<14} {"Indra":<20} {"Americas":<20}')
         self.stdout.write('=' * 60)

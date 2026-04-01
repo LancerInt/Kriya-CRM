@@ -94,7 +94,7 @@ export default function LoginPage() {
             <p className="text-xs text-gray-500 font-medium mb-2">Demo credentials:</p>
             <div className="text-xs text-gray-600 space-y-1">
               <p>Admin: <code className="bg-gray-200 px-1 rounded">admin / admin123</code></p>
-              <p>Manager: <code className="bg-gray-200 px-1 rounded">shobana / manager123</code></p>
+              <p>Manager: <code className="bg-gray-200 px-1 rounded">shobana / shobana123</code></p>
               <p>Executive: <code className="bg-gray-200 px-1 rounded">dinesh / dinesh123</code></p>
             </div>
           </div>
