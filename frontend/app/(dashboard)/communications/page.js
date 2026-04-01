@@ -410,6 +410,7 @@ export default function CommunicationsPage() {
         loading={loading}
         emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
         emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
+        onRowClick={(row) => router.push(`/communications/${row.id}`)}
       />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">

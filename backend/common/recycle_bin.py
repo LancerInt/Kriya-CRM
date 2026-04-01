@@ -10,15 +10,17 @@ from datetime import timedelta
 
 # Models that support soft delete (model_label -> display name)
 RECYCLABLE_MODELS = {
-    'clients.Client': 'Client',
+    'clients.Client': 'Account',
     'clients.Contact': 'Contact',
-    'communications.Communication': 'Communication',
-    'quotations.Inquiry': 'Inquiry',
-    'quotations.Quotation': 'Quotation',
-    'orders.Order': 'Order',
+    'communications.Communication': 'Activity',
+    'communications.QuoteRequest': 'Inquiry',
+    'quotations.Inquiry': 'Lead',
+    'quotations.Quotation': 'Quote',
+    'orders.Order': 'Sales Order',
     'shipments.Shipment': 'Shipment',
     'finance.Invoice': 'Invoice',
     'finance.Payment': 'Payment',
+    'finance.ProformaInvoice': 'Proforma Invoice',
     'tasks.Task': 'Task',
     'meetings.CallLog': 'Meeting',
     'quality.Inspection': 'Inspection',
@@ -38,6 +40,14 @@ def _get_display(obj, model_label):
         if classification and classification != 'client':
             return f'[{classification.title()}] {subject}'
         return subject
+    # For Quote Requests (Inquiries)
+    if model_label == 'communications.QuoteRequest':
+        product = getattr(obj, 'extracted_product', '') or 'Unknown product'
+        sender = getattr(obj, 'sender_name', '') or getattr(obj, 'sender_email', '') or ''
+        return f'{product} - {sender}' if sender else product
+    # For Proforma Invoices
+    if model_label == 'finance.ProformaInvoice':
+        return f'PI {obj.invoice_number} - {obj.client_company_name}'
     if hasattr(obj, 'company_name'):
         return obj.company_name
     if hasattr(obj, 'name') and obj.name:

@@ -16,6 +16,7 @@ export default function ProformaInvoicesPage() {
   const [clients, setClients] = useState([]);
   const [showClientPicker, setShowClientPicker] = useState(false);
   const [selectedClient, setSelectedClient] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // PI editor state
   const [showPiModal, setShowPiModal] = useState(false);
@@ -41,6 +42,31 @@ export default function ProformaInvoicesPage() {
     loadPIs();
     api.get("/clients/").then((r) => setClients(r.data.results || r.data)).catch(() => {});
   }, []);
+
+  const toggleSelect = (id, e) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === piList.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(piList.map((p) => p.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} proforma invoice${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    try {
+      await Promise.all([...selectedIds].map((id) => api.delete(`/finance/pi/${id}/`)));
+      toast.success(`${selectedIds.size} PI${selectedIds.size > 1 ? "s" : ""} deleted`);
+      setSelectedIds(new Set());
+      loadPIs();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
+  };
 
   // ── Create standalone PI ──
   const handleCreatePI = async () => {
@@ -135,6 +161,26 @@ export default function ProformaInvoicesPage() {
         }
       />
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <input type="checkbox" checked={selectedIds.size === piList.length && piList.length > 0} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-sm font-medium text-indigo-700">{selectedIds.size} selected</span>
+          <div className="flex gap-2 ml-auto">
+            <button onClick={handleBulkDelete} className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200">Delete</button>
+            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Select All */}
+      {selectedIds.size === 0 && piList.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-xs text-gray-400">Select all</span>
+        </div>
+      )}
+
       {piList.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <p className="text-gray-500">No proforma invoices yet.</p>
@@ -143,12 +189,14 @@ export default function ProformaInvoicesPage() {
       ) : (
         <div className="space-y-3">
           {piList.map((piData) => (
-            <div key={piData.id} onClick={() => { setSelectedPI(piData); setShowReview(true); }}
-              className={`bg-white rounded-xl border p-4 cursor-pointer hover:shadow-md transition-shadow ${
-                piData.status === "draft" ? "border-amber-300 bg-amber-50/30" : "border-green-300 bg-green-50/20"
+            <div key={piData.id}
+              className={`bg-white rounded-xl border p-4 hover:shadow-md transition-shadow ${
+                selectedIds.has(piData.id) ? "border-indigo-400 bg-indigo-50/30" : piData.status === "draft" ? "border-amber-300 bg-amber-50/30" : "border-green-300 bg-green-50/20"
               }`}>
               <div className="flex items-start justify-between">
-                <div className="flex-1">
+                <div className="flex items-start gap-3 flex-1">
+                  <input type="checkbox" checked={selectedIds.has(piData.id)} onChange={(e) => toggleSelect(piData.id, e)} className="h-4 w-4 mt-1 text-indigo-600 border-gray-300 rounded cursor-pointer flex-shrink-0" />
+                  <div className="flex-1 cursor-pointer" onClick={() => { setSelectedPI(piData); setShowReview(true); }}>
                   <div className="flex items-center gap-2 mb-1">
                     <StatusBadge status={piData.status} />
                     <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{piData.invoice_number}</span>
@@ -164,8 +212,9 @@ export default function ProformaInvoicesPage() {
                       {piData.items.map(item => item.product_name).filter(Boolean).join(", ") || "No products"}
                     </p>
                   )}
+                  </div>
                 </div>
-                <div className="text-right text-xs text-gray-400">
+                <div className="text-right text-xs text-gray-400 flex-shrink-0">
                   {piData.created_at ? format(new Date(piData.created_at), "MMM d, yyyy h:mm a") : ""}
                 </div>
               </div>

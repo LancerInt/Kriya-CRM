@@ -225,6 +225,10 @@ def _fill_pi_items(pi, text):
     else:
         pi_product_name = raw_product_text
 
+    # Get price from product master
+    base_price = float(matched_product.base_price) if matched_product else 0
+    line_total = quantity * base_price
+
     # Delete empty items and create filled one
     pi.items.filter(product_name='').delete()
     ProformaInvoiceItem.objects.create(
@@ -234,6 +238,13 @@ def _fill_pi_items(pi, text):
         description_of_goods=pi_description,
         quantity=quantity,
         unit=unit,
-        unit_price=0,
-        total_price=0,
+        unit_price=base_price,
+        total_price=line_total,
     )
+
+    # Update PI total
+    if line_total > 0:
+        pi.total = line_total
+        from finance.pi_service import _number_to_words
+        pi.amount_in_words = _number_to_words(line_total, pi.currency)
+        pi.save(update_fields=['total', 'amount_in_words'])

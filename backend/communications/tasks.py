@@ -83,6 +83,14 @@ def sync_emails(email_account_id=None):
             if em.get('date'):
                 Communication.objects.filter(id=comm.id).update(created_at=em['date'])
 
+            # Auto-create contact if client matched but no contact
+            if client and not contact and direction == 'inbound':
+                try:
+                    from communications.views import _auto_create_contact
+                    _auto_create_contact(client, comm)
+                except Exception as e:
+                    logger.error(f'Auto-contact creation failed for {comm.id}: {e}')
+
             # Auto-generate AI draft reply for inbound emails with a matched client
             if direction == 'inbound' and client:
                 try:

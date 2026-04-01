@@ -58,23 +58,41 @@ export default function NewClientPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate: at least the first contact must have a name
+    const hasContactName = form.contacts.some((c) => c.name.trim());
+    if (!hasContactName) {
+      toast.error("Please add at least one contact person name for this account");
+      // Focus on the first contact name field
+      const nameInput = document.querySelector('input[name="name"][placeholder="Contact Person Name *"]');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    // Filter out empty contacts (no name)
+    const validContacts = form.contacts.filter((c) => c.name.trim());
+    if (validContacts.length === 0) {
+      toast.error("Please add at least one contact person name");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const submitData = { ...form };
+      const submitData = { ...form, contacts: validContacts };
       if (!submitData.primary_executive) delete submitData.primary_executive;
       if (!submitData.shadow_executive) delete submitData.shadow_executive;
       await dispatch(createClient(submitData)).unwrap();
-      toast.success("Client created successfully");
+      toast.success("Account created successfully");
       dispatch(fetchClients());
       router.push("/clients");
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to create client")); } finally {
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create account")); } finally {
       setSubmitting(false);
     }
   };
 
   return (
     <div>
-      <PageHeader title="Add New Client" />
+      <PageHeader title="New Account" />
       <form onSubmit={handleSubmit} className="max-w-3xl">
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
           <h3 className="font-semibold">Company Details</h3>
@@ -101,18 +119,18 @@ export default function NewClientPage() {
               <input name="business_type" value={form.business_type} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Main Executive *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Account Owner *</label>
               <select name="primary_executive" value={form.primary_executive} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
-                <option value="">Select main executive</option>
+                <option value="">Select account owner</option>
                 {executives.map((u) => (
                   <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Shadow Executive</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Owner</label>
               <select name="shadow_executive" value={form.shadow_executive} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
-                <option value="">Select shadow executive</option>
+                <option value="">Select secondary owner</option>
                 {executives.filter((u) => u.id !== form.primary_executive).map((u) => (
                   <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
                 ))}
@@ -162,20 +180,36 @@ export default function NewClientPage() {
             </div>
           </div>
 
-          <h3 className="font-semibold pt-4 border-t">Contacts</h3>
+          <h3 className="font-semibold pt-4 border-t">Contact Person <span className="text-red-500">*</span></h3>
+          <p className="text-xs text-gray-400 -mt-4">Every account must have at least one contact person</p>
           {form.contacts.map((contact, i) => (
-            <div key={i} className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
-              <input name="name" placeholder="Name *" value={contact.name} onChange={(e) => handleContactChange(i, e)} required className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
-              <input name="email" placeholder="Email" value={contact.email} onChange={(e) => handleContactChange(i, e)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
-              <input name="phone" placeholder="Phone" value={contact.phone} onChange={(e) => handleContactChange(i, e)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
-              <input name="designation" placeholder="Designation" value={contact.designation} onChange={(e) => handleContactChange(i, e)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+            <div key={i} className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+              {i === 0 && <p className="text-xs text-indigo-600 font-medium">Primary Contact</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Contact Person Name *</label>
+                  <input name="name" placeholder="Contact Person Name *" value={contact.name} onChange={(e) => handleContactChange(i, e)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                  <input name="email" placeholder="Email" value={contact.email} onChange={(e) => handleContactChange(i, e)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+                  <input name="phone" placeholder="Phone" value={contact.phone} onChange={(e) => handleContactChange(i, e)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Designation</label>
+                  <input name="designation" placeholder="Designation" value={contact.designation} onChange={(e) => handleContactChange(i, e)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+                </div>
+              </div>
             </div>
           ))}
           <button type="button" onClick={addContact} className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">+ Add another contact</button>
 
           <div className="flex gap-3 pt-4 border-t">
             <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {submitting ? "Creating..." : "Create Client"}
+              {submitting ? "Creating..." : "Create Account"}
             </button>
             <button type="button" onClick={() => router.back()} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">
               Cancel

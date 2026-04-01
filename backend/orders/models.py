@@ -7,8 +7,8 @@ class Order(TimeStampedModel):
 
     class Status(models.TextChoices):
         CONFIRMED = 'confirmed', 'Confirmed'
-        PI_SENT = 'pi_sent', 'PI Sent'
         PO_RECEIVED = 'po_received', 'PO Received'
+        PIF_SENT = 'pif_sent', 'PIF Sent'
         DOCS_PREPARING = 'docs_preparing', 'Documents Preparing'
         DOCS_APPROVED = 'docs_approved', 'Documents Approved'
         FACTORY_READY = 'factory_ready', 'Factory Ready'
@@ -48,6 +48,7 @@ class Order(TimeStampedModel):
     confirmed_at = models.DateTimeField(null=True, blank=True)
     pi_sent_at = models.DateTimeField(null=True, blank=True)
     po_received_at = models.DateTimeField(null=True, blank=True)
+    pif_sent_at = models.DateTimeField(null=True, blank=True)
     docs_approved_at = models.DateTimeField(null=True, blank=True)
     factory_ready_at = models.DateTimeField(null=True, blank=True)
     container_booked_at = models.DateTimeField(null=True, blank=True)

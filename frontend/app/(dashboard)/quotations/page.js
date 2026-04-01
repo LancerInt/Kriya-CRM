@@ -182,7 +182,7 @@ export default function QuotationsPage() {
       <DataTable columns={columns} data={list} loading={loading} emptyTitle="No quotations" emptyDescription="Create your first quotation" />
 
       {/* Client Picker Modal */}
-      <Modal open={showClientPicker} onClose={() => setShowClientPicker(false)} title="Select Account">
+      <Modal open={showClientPicker} onClose={() => setShowClientPicker(false)} title="Select Account" size="lg">
         <div className="space-y-4">
           <SearchableSelect
             label="Account"
@@ -192,7 +192,7 @@ export default function QuotationsPage() {
             options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
             placeholder="Select an account..."
           />
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-4">
             <button onClick={handleClientSelected} className="px-6 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700">Create</button>
             <button onClick={() => setShowClientPicker(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
           </div>

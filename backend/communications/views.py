@@ -21,6 +21,52 @@ from .services import EmailService, WhatsAppService, ContactMatcher
 logger = logging.getLogger(__name__)
 
 
+def _auto_create_contact(client, communication):
+    """Auto-create a contact for the client if the sender's email/phone doesn't exist yet."""
+    from clients.models import Contact
+
+    email = communication.external_email or ''
+    phone = communication.external_phone or ''
+
+    if not email and not phone:
+        return None
+
+    # Check if contact already exists
+    if email:
+        existing = Contact.objects.filter(client=client, email__iexact=email, is_deleted=False).first()
+        if existing:
+            return existing
+    if phone:
+        existing = Contact.objects.filter(client=client, phone=phone, is_deleted=False).first()
+        if existing:
+            return existing
+
+    # Extract a name from the email address
+    name = ''
+    if email and '@' in email:
+        local = email.split('@')[0]
+        # Convert "john.doe" or "john_doe" to "John Doe"
+        name = local.replace('.', ' ').replace('_', ' ').replace('-', ' ').title()
+
+    # Check if client has any contacts at all
+    has_contacts = Contact.objects.filter(client=client, is_deleted=False).exists()
+
+    contact = Contact.objects.create(
+        client=client,
+        name=name or email or phone,
+        email=email,
+        phone=phone,
+        is_primary=not has_contacts,  # First contact is primary
+    )
+
+    # Link contact to communication if not already linked
+    if not communication.contact:
+        communication.contact = contact
+        communication.save(update_fields=['contact'])
+
+    return contact
+
+
 class CommunicationViewSet(viewsets.ModelViewSet):
     serializer_class = CommunicationSerializer
     filterset_fields = ['client', 'comm_type', 'direction', 'is_follow_up_required',
@@ -152,6 +198,10 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         comm.classification = 'client'
         comm.is_classified = True
         comm.save(update_fields=['client', 'is_client_mail', 'classification', 'is_classified'])
+
+        # Auto-create contact if sender email doesn't exist as a contact
+        _auto_create_contact(client, comm)
+
         return Response(CommunicationSerializer(comm).data)
 
     @action(detail=True, methods=['post'], url_path='reclassify')
@@ -346,6 +396,9 @@ class WhatsAppConfigViewSet(viewsets.ModelViewSet):
 
 
 class QuoteRequestViewSet(viewsets.ModelViewSet):
+    def perform_destroy(self, instance):
+        instance.soft_delete()
+
     serializer_class = QuoteRequestSerializer
     filterset_fields = ['status', 'source_channel', 'client', 'assigned_to']
     ordering_fields = ['created_at', 'ai_confidence']
@@ -537,6 +590,47 @@ def send_whatsapp_view(request):
         CommunicationSerializer(comm).data,
         status=status.HTTP_201_CREATED
     )
+
+
+@api_view(['POST'])
+def summarize_voice_text(request):
+    """Summarize raw voice transcript into a professional email body using AI."""
+    raw_text = request.data.get('text', '').strip()
+    context = request.data.get('context', '')  # e.g. client name, subject
+
+    if not raw_text:
+        return Response({'error': 'text is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    prompt = f"""You are a trade executive at Kriya Biosys, an organic agricultural products exporter.
+
+Convert this voice note into a professional email body. Write naturally like a real person — warm, confident, not robotic.
+
+Rules:
+- Write 2-3 paragraphs (around 80-120 words total)
+- First paragraph: address the main point from the voice note
+- Second paragraph: add relevant context, next steps, or additional details
+- Third paragraph (if needed): closing thought or call to action
+- Preserve all specific details (products, prices, quantities, terms) exactly
+- Do NOT add greeting (Dear...) or signature (Best regards...) — system handles that
+
+{f'Context: {context}' if context else ''}
+
+Voice note: "{raw_text}"
+
+Email body:"""
+
+    from .ai_email_service import _generate_with_ai
+    result = _generate_with_ai(prompt)
+
+    if result:
+        return Response({'summarized': result})
+    else:
+        # Fallback: just clean up the text minimally
+        cleaned = raw_text.replace('  ', ' ').strip()
+        # Capitalize first letter of sentences
+        import re
+        cleaned = re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), cleaned)
+        return Response({'summarized': cleaned})
 
 
 @api_view(['GET', 'POST'])

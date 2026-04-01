@@ -97,6 +97,86 @@ def check_overdue_tasks():
     return f'{created_count} overdue task notifications created'
 
 
+@shared_task(name='workflows.check_stale_tasks')
+def check_stale_tasks():
+    """
+    Remind about incomplete tasks:
+    - First reminder: 2 days after assignment
+    - Then: daily at 9:45 AM and 5:00 PM until completed
+    Notifies: assigned executive + all managers + all admins.
+    """
+    from tasks.models import Task
+    from accounts.models import User
+    from notifications.models import Notification
+    from datetime import timedelta
+
+    now = timezone.now()
+    two_days_ago = now - timedelta(days=2)
+
+    # Tasks assigned > 2 days ago, still not done
+    stale_tasks = Task.objects.filter(
+        created_at__lt=two_days_ago,
+        status__in=['pending', 'in_progress'],
+        is_deleted=False,
+    ).select_related('owner', 'client')
+
+    # All managers and admins
+    managers_admins = list(User.objects.filter(
+        role__in=['admin', 'manager'], is_active=True
+    ).values_list('id', flat=True))
+
+    # Avoid duplicate within last 4 hours (since we run twice daily)
+    four_hours_ago = now - timedelta(hours=4)
+
+    created_count = 0
+    for task in stale_tasks:
+        if not task.owner:
+            continue
+
+        # Check if already notified in last 4 hours for this task
+        already = Notification.objects.filter(
+            user=task.owner,
+            link='/tasks',
+            title__icontains=task.title[:25],
+            created_at__gte=four_hours_ago,
+        ).exists()
+        if already:
+            continue
+
+        days_since = (now - task.created_at).days
+        client_name = task.client.company_name if task.client else 'N/A'
+        is_morning = now.hour < 12
+
+        tag = 'Reminder' if days_since > 2 else 'Pending'
+        time_tag = 'Morning' if is_morning else 'Evening'
+
+        # Notify the assigned executive
+        Notification.objects.create(
+            user=task.owner,
+            notification_type='alert',
+            title=f'{tag}: Task pending {days_since}d - {task.title[:50]}',
+            message=f'[{time_tag} Reminder] Your task "{task.title}" (Account: {client_name}) has been {task.status} for {days_since} days. Please complete it.',
+            link='/tasks',
+        )
+        created_count += 1
+
+        # Notify all managers and admins
+        for user_id in managers_admins:
+            if str(user_id) == str(task.owner.id):
+                continue
+            Notification.objects.create(
+                user_id=user_id,
+                notification_type='alert',
+                title=f'{tag}: Task pending {days_since}d - {task.title[:50]}',
+                message=f'[{time_tag} Reminder] Task "{task.title}" assigned to {task.owner.full_name} (Account: {client_name}) has been {task.status} for {days_since} days.',
+                link='/tasks',
+            )
+            created_count += 1
+
+    logger.info(f"check_stale_tasks: {created_count} stale task reminders sent")
+    return f'{created_count} stale task reminders sent'
+
+
 @shared_task(name='workflows.check_overdue_invoices')
 def check_overdue_invoices():
     """

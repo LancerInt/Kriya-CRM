@@ -150,9 +150,9 @@ export default function RecycleBinPage() {
       <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
         <p className="font-medium">How Archive works:</p>
         <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-700">
-          <li>Deleted items are moved here instead of being permanently removed</li>
+          <li>Deleted items from <strong>Activities, Inquiries, Proforma Invoices, Accounts, Quotes, Sales Orders</strong> and all other modules are moved here</li>
           <li><strong>Promotions, Spam, Social, Updates</strong> emails are <strong>auto-archived after 2 days</strong></li>
-          <li>All archived items are <strong>permanently purged after 30 days</strong></li>
+          <li>All archived items are <strong>stored for 30 days</strong>, then permanently deleted</li>
           <li>Click <strong>Restore</strong> to recover an item back to its original location</li>
           <li>Click <strong>Delete Forever</strong> to permanently remove immediately</li>
           {isAdminOrManager && <li><strong>Empty Archive</strong> permanently removes everything (admin/manager only)</li>}

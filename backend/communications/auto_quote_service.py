@@ -253,8 +253,8 @@ def _generate_draft_quotation(quote_request):
         description=qr.extracted_packaging or '',
         quantity=qty,
         unit=qr.extracted_unit or 'MT',
-        unit_price=0,  # Executive fills in pricing
-        total_price=0,
+        unit_price=float(matched_product.base_price) if matched_product else 0,
+        total_price=(qty * float(matched_product.base_price)) if matched_product else 0,
     )
 
     return quotation

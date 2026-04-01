@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 # ── State Machine Definition ──
 # Maps: current_status → list of allowed next statuses
 ALLOWED_TRANSITIONS = {
-    'confirmed': ['pi_sent', 'cancelled'],
-    'pi_sent': ['po_received', 'cancelled'],
-    'po_received': ['docs_preparing', 'cancelled'],
+    'confirmed': ['po_received', 'cancelled'],
+    'po_received': ['pif_sent', 'cancelled'],
+    'pif_sent': ['docs_preparing', 'cancelled'],
     'docs_preparing': ['docs_approved', 'cancelled'],
     'docs_approved': ['factory_ready', 'cancelled'],
     'factory_ready': ['container_booked', 'cancelled'],
@@ -55,8 +55,8 @@ AUTO_EMAIL_STATUSES = ['inspection_passed', 'dispatched', 'in_transit', 'deliver
 # Status timestamp field mapping
 STATUS_TIMESTAMP_MAP = {
     'confirmed': 'confirmed_at',
-    'pi_sent': 'pi_sent_at',
     'po_received': 'po_received_at',
+    'pif_sent': 'pif_sent_at',
     'docs_approved': 'docs_approved_at',
     'factory_ready': 'factory_ready_at',
     'container_booked': 'container_booked_at',
@@ -205,7 +205,7 @@ def get_order_timeline(order):
     from orders.models import Order
 
     all_statuses = [
-        'confirmed', 'pi_sent', 'po_received', 'docs_preparing', 'docs_approved',
+        'confirmed', 'po_received', 'pif_sent', 'docs_preparing', 'docs_approved',
         'factory_ready', 'container_booked', 'inspection', 'inspection_passed',
         'dispatched', 'in_transit', 'arrived', 'customs', 'delivered',
     ]

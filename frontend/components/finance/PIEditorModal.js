@@ -12,6 +12,14 @@ import { getErrorMessage } from "@/lib/errorHandler";
  */
 export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, piItems, setPiItems, onSave, onSend, onPreview, sending }) {
   const piInit = useRef(null);
+  const [products, setProducts] = useState([]);
+
+  // Fetch products for price auto-populate
+  useEffect(() => {
+    if (open && products.length === 0) {
+      api.get("/products/").then((r) => setProducts(r.data.results || r.data)).catch(() => {});
+    }
+  }, [open]);
 
   // Restore saved display_overrides into piForm on load
   useEffect(() => {
@@ -36,6 +44,22 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
   // ── EXISTING CALCULATION LOGIC — UNTOUCHED ──
   const total = piItems.reduce((s, it) => s + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
 
+  const _findProductPrice = (productName) => {
+    if (!productName || products.length === 0) return null;
+    const nameLower = productName.toLowerCase();
+    // Match by product name, brand names, or full name with concentration
+    for (const p of products) {
+      const full = `${p.name}${p.concentration ? ` (${p.concentration})` : ""}`.toLowerCase();
+      if (full === nameLower || p.name.toLowerCase() === nameLower) return { price: p.base_price, unit: p.unit };
+      // Check client brand names
+      if (p.client_brand_names) {
+        const brands = p.client_brand_names.split(",").map(b => b.trim().toLowerCase());
+        if (brands.some(b => b === nameLower || nameLower.includes(b))) return { price: p.base_price, unit: p.unit };
+      }
+    }
+    return null;
+  };
+
   const updateItem = (i, field, value) => {
     const items = [...piItems];
     items[i] = { ...items[i], [field]: value };
@@ -43,6 +67,16 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
       const qty = parseFloat(field === "quantity" ? value : items[i].quantity) || 0;
       const price = parseFloat(field === "unit_price" ? value : items[i].unit_price) || 0;
       items[i].total_price = qty * price;
+    }
+    // Auto-populate price when product_name or description_of_goods changes (only if price is empty)
+    if (field === "product_name" || field === "description_of_goods") {
+      const match = _findProductPrice(value);
+      if (match && !parseFloat(items[i].unit_price)) {
+        items[i].unit_price = match.price;
+        items[i].unit = match.unit || items[i].unit;
+        const qty = parseFloat(items[i].quantity) || 0;
+        items[i].total_price = qty * parseFloat(match.price);
+      }
     }
     setPiItems(items);
   };

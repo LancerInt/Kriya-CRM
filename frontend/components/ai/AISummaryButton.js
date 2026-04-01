@@ -7,19 +7,85 @@ import toast from "react-hot-toast";
 const THINKING_MSGS = ["Analyzing data...", "Generating insights...", "Building summary...", "Almost ready..."];
 
 function MarkdownBlock({ text }) {
-  const lines = (text || "").split("\n");
+  if (!text) return null;
+
+  // Parse into sections: split by ## headings
+  const sections = [];
+  let currentSection = null;
+
+  const lines = text.split("\n");
+  for (const line of lines) {
+    if (line.startsWith("## ")) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { title: line.slice(3).trim(), subsections: [], lines: [] };
+    } else if (line.startsWith("### ") && currentSection) {
+      currentSection.subsections.push({ title: line.slice(4).trim(), lines: [] });
+    } else if (currentSection) {
+      const target = currentSection.subsections.length > 0
+        ? currentSection.subsections[currentSection.subsections.length - 1].lines
+        : currentSection.lines;
+      target.push(line);
+    } else {
+      // Lines before any ## heading
+      if (!sections._intro) sections._intro = [];
+      sections._intro = sections._intro || [];
+      sections._intro.push(line);
+    }
+  }
+  if (currentSection) sections.push(currentSection);
+
+  const renderLine = (line, i) => {
+    let html = line;
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>');
+    html = html.replace(/`(.*?)`/g, '<code class="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-medium">$1</code>');
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      return <li key={i} className="ml-1 flex items-start gap-2 py-0.5"><span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" /><span dangerouslySetInnerHTML={{ __html: html.slice(2) }} /></li>;
+    }
+    const numMatch = line.match(/^(\d+)\.\s(.*)/);
+    if (numMatch) {
+      return <li key={i} className="ml-1 flex items-start gap-2 py-0.5"><span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{numMatch[1]}</span><span dangerouslySetInnerHTML={{ __html: numMatch[2].replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>') }} /></li>;
+    }
+    if (!line.trim()) return null;
+    return <p key={i} className="text-gray-700 py-0.5" dangerouslySetInnerHTML={{ __html: html }} />;
+  };
+
+  const renderLines = (lines) => lines.map((l, i) => renderLine(l, i)).filter(Boolean);
+
+  // If no sections found, render as simple text
+  if (sections.length === 0) {
+    return <div className="text-sm space-y-1">{renderLines(lines)}</div>;
+  }
+
   return (
-    <div className="prose prose-sm max-w-none text-sm">
-      {lines.map((line, i) => {
-        line = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-        line = line.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 rounded text-xs">$1</code>');
-        if (line.startsWith("### ")) return <h4 key={i} className="font-semibold text-sm mt-3 mb-1" dangerouslySetInnerHTML={{ __html: line.slice(4) }} />;
-        if (line.startsWith("## ")) return <h3 key={i} className="font-semibold text-base mt-3 mb-1" dangerouslySetInnerHTML={{ __html: line.slice(3) }} />;
-        if (line.startsWith("- ") || line.startsWith("* ")) return <li key={i} className="ml-4" dangerouslySetInnerHTML={{ __html: line.slice(2) }} />;
-        const numMatch = line.match(/^(\d+)\.\s(.*)/);
-        if (numMatch) return <li key={i} className="ml-4 list-decimal" dangerouslySetInnerHTML={{ __html: numMatch[2] }} />;
-        if (!line.trim()) return <br key={i} />;
-        return <p key={i} dangerouslySetInnerHTML={{ __html: line }} />;
+    <div className="space-y-4">
+      {/* Intro lines before first section */}
+      {sections._intro && sections._intro.length > 0 && (
+        <div className="text-sm text-gray-600">{renderLines(sections._intro)}</div>
+      )}
+
+      {sections.map((section, si) => {
+        const isActions = section.title.toLowerCase().includes("action") || section.title.toLowerCase().includes("recommendation");
+        return (
+          <div key={si} className={`rounded-lg border p-4 ${isActions ? "bg-indigo-50 border-indigo-200" : "bg-white border-gray-200"}`}>
+            <h3 className={`font-semibold text-sm mb-3 flex items-center gap-2 ${isActions ? "text-indigo-800" : "text-gray-800"}`}>
+              {isActions && <span className="text-base">💡</span>}
+              {section.title}
+            </h3>
+
+            {/* Direct lines under section */}
+            {section.lines.filter(l => l.trim()).length > 0 && (
+              <div className="text-sm space-y-0.5 mb-2">{renderLines(section.lines)}</div>
+            )}
+
+            {/* Subsections */}
+            {section.subsections.map((sub, ssi) => (
+              <div key={ssi} className={`${ssi > 0 ? "mt-3 pt-3 border-t border-gray-100" : ""}`}>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{sub.title}</h4>
+                <div className="text-sm space-y-0.5">{renderLines(sub.lines)}</div>
+              </div>
+            ))}
+          </div>
+        );
       })}
     </div>
   );

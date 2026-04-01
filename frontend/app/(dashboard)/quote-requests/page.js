@@ -46,6 +46,7 @@ export default function QuoteRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedQR, setSelectedQR] = useState(null);
   const [showReview, setShowReview] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Quotation editor state
   const [showQtModal, setShowQtModal] = useState(false);
@@ -64,6 +65,31 @@ export default function QuoteRequestsPage() {
   };
 
   useEffect(() => { loadRequests(); }, []);
+
+  const toggleSelect = (id, e) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === requests.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(requests.map((r) => r.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected inquiry${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    try {
+      await Promise.all([...selectedIds].map((id) => api.delete(`/communications/quote-requests/${id}/`)));
+      toast.success(`${selectedIds.size} inquiry${selectedIds.size > 1 ? "s" : ""} deleted`);
+      setSelectedIds(new Set());
+      loadRequests();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
+  };
 
   const handleReview = (qr) => {
     setSelectedQR(qr);
@@ -172,6 +198,26 @@ export default function QuoteRequestsPage() {
     <div>
       <PageHeader title="Inquiries" subtitle={`${requests.filter(r => r.status === "new").length} new inquiries`} />
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <input type="checkbox" checked={selectedIds.size === requests.length && requests.length > 0} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-sm font-medium text-indigo-700">{selectedIds.size} selected</span>
+          <div className="flex gap-2 ml-auto">
+            <button onClick={handleBulkDelete} className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200">Delete</button>
+            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Select All */}
+      {selectedIds.size === 0 && requests.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
+          <span className="text-xs text-gray-400">Select all</span>
+        </div>
+      )}
+
       {requests.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <p className="text-gray-500">No inquiries yet.</p>
@@ -180,10 +226,12 @@ export default function QuoteRequestsPage() {
       ) : (
         <div className="space-y-3">
           {requests.map((qr) => (
-            <div key={qr.id} onClick={() => handleReview(qr)}
-              className={`bg-white rounded-xl border p-4 cursor-pointer hover:shadow-md transition-shadow ${qr.status === "new" ? "border-teal-300 bg-teal-50/30" : "border-gray-200"}`}>
+            <div key={qr.id}
+              className={`bg-white rounded-xl border p-4 hover:shadow-md transition-shadow ${selectedIds.has(qr.id) ? "border-indigo-400 bg-indigo-50/30" : qr.status === "new" ? "border-teal-300 bg-teal-50/30" : "border-gray-200"}`}>
               <div className="flex items-start justify-between">
-                <div className="flex-1">
+                <div className="flex items-start gap-3 flex-1">
+                  <input type="checkbox" checked={selectedIds.has(qr.id)} onChange={(e) => toggleSelect(qr.id, e)} className="h-4 w-4 mt-1 text-indigo-600 border-gray-300 rounded cursor-pointer flex-shrink-0" />
+                  <div className="flex-1 cursor-pointer" onClick={() => handleReview(qr)}>
                   <div className="flex items-center gap-2 mb-1">
                     <ChannelBadge channel={qr.source_channel} />
                     <ConfidenceBadge value={qr.ai_confidence} />
@@ -198,22 +246,30 @@ export default function QuoteRequestsPage() {
                     {qr.extracted_destination_country ? ` · ${qr.extracted_destination_country}` : ""}
                   </p>
                   {qr.source_subject && <p className="text-xs text-gray-400 mt-0.5 truncate">"{qr.source_subject}"</p>}
+                  </div>
                 </div>
-                <div className="text-right text-xs text-gray-400">
+                <div className="text-right text-xs text-gray-400 flex-shrink-0">
                   {qr.created_at ? format(new Date(qr.created_at), "MMM d, h:mm a") : ""}
                   {qr.assigned_to_name && <p className="text-gray-500 mt-0.5">{qr.assigned_to_name}</p>}
                 </div>
               </div>
-              {qr.linked_quotation_number && (
-                <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-xs text-green-600 font-medium">{qr.linked_quotation_status === "sent" ? "Sent" : "Draft"}: {qr.linked_quotation_number}</span>
-                  {qr.linked_quotation_status === "sent" ? (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Mail Sent</span>
-                  ) : (
-                    <button onClick={(e) => { e.stopPropagation(); handleOpenQuote(qr); }} className="text-xs bg-teal-600 text-white px-2 py-1 rounded font-medium hover:bg-teal-700">Enter Rates</button>
-                  )}
-                </div>
-              )}
+              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
+                {qr.linked_quotation_number ? (
+                  <>
+                    <span className="text-xs text-green-600 font-medium">{qr.linked_quotation_status === "sent" ? "Sent" : "Draft"}: {qr.linked_quotation_number}</span>
+                    {qr.linked_quotation_status === "sent" ? (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Mail Sent</span>
+                    ) : (
+                      <button onClick={(e) => { e.stopPropagation(); handleOpenQuote(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-gray-400">No quotation linked</span>
+                    <button onClick={(e) => { e.stopPropagation(); handleGenerateQuote(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>

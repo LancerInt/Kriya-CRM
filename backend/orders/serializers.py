@@ -53,7 +53,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'order_type', 'status', 'currency', 'delivery_terms', 'payment_terms',
             'freight_terms', 'total', 'notes', 'created_by', 'created_by_name',
             'po_document', 'po_number', 'po_received_date',
-            'confirmed_at', 'pi_sent_at', 'po_received_at', 'docs_approved_at',
+            'confirmed_at', 'pi_sent_at', 'po_received_at', 'pif_sent_at', 'docs_approved_at',
             'factory_ready_at', 'container_booked_at', 'inspection_passed_at',
             'dispatched_at', 'delivered_at',
             'allowed_transitions', 'items', 'created_at', 'updated_at',

@@ -44,4 +44,12 @@ app.conf.beat_schedule = {
         'task': 'workflows.auto_archive_non_client_emails',
         'schedule': crontab(hour=3, minute=0),  # 3:00 AM daily
     },
+    'check-stale-tasks-morning': {
+        'task': 'workflows.check_stale_tasks',
+        'schedule': crontab(hour=9, minute=45),  # 9:45 AM daily
+    },
+    'check-stale-tasks-evening': {
+        'task': 'workflows.check_stale_tasks',
+        'schedule': crontab(hour=17, minute=0),  # 5:00 PM daily
+    },
 }

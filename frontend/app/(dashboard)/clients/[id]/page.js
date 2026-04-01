@@ -511,7 +511,10 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     recognition.lang = 'en-US';
     recognitionRef.current = recognition;
 
-    // Clear AI-generated body when voice starts
+    // Store raw transcript chunks
+    let rawTranscript = '';
+
+    // Show "recording" state in body
     setDraftForm(prev => ({ ...prev, body: '' }));
 
     recognition.onresult = (event) => {
@@ -520,7 +523,9 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         transcript += event.results[i][0].transcript + ' ';
       }
       if (transcript.trim()) {
-        setDraftForm(prev => ({ ...prev, body: prev.body + (prev.body ? '\n' : '') + transcript.trim() }));
+        rawTranscript += (rawTranscript ? ' ' : '') + transcript.trim();
+        // Show raw transcript while recording
+        setDraftForm(prev => ({ ...prev, body: rawTranscript }));
       }
     };
 
@@ -539,12 +544,27 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     recognition.onend = () => {
       setIsListening(false);
       recognitionRef.current = null;
+      // When recording stops, send raw transcript to AI for summarization
+      if (rawTranscript.trim()) {
+        setDraftForm(prev => ({ ...prev, body: rawTranscript.trim() + '\n\n⏳ AI is summarizing...' }));
+        const context = `Client: ${client?.company_name || ''}, Subject: ${draftForm.subject || ''}`;
+        api.post('/communications/summarize-voice/', { text: rawTranscript.trim(), context })
+          .then((res) => {
+            setDraftForm(prev => ({ ...prev, body: res.data.summarized }));
+            toast.success("AI summarized your voice input");
+          })
+          .catch(() => {
+            // Keep raw transcript if AI fails
+            setDraftForm(prev => ({ ...prev, body: rawTranscript.trim() }));
+            toast.error("AI summarization failed, keeping raw text");
+          });
+      }
     };
 
     try {
       recognition.start();
       setIsListening(true);
-      toast.success("Listening... Speak now");
+      toast.success("Listening... Speak now. Click stop when done.");
     } catch (e) {
       toast.error("Failed to start voice recognition");
       setIsListening(false);

@@ -92,11 +92,11 @@ def _groq_generate(api_key, model, prompt):
     response = client.chat.completions.create(
         model=model or 'llama-3.3-70b-versatile',
         messages=[
-            {'role': 'system', 'content': 'You are a professional export trade business email writer. Write concise, professional replies.'},
+            {'role': 'system', 'content': 'You are a trade executive. Write natural, human-sounding professional emails. Keep it short and friendly — 1-2 paragraphs max.'},
             {'role': 'user', 'content': prompt},
         ],
-        temperature=0.4,
-        max_tokens=500,
+        temperature=0.7,
+        max_tokens=800,
     )
     return response.choices[0].message.content.strip()
 

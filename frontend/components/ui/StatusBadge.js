@@ -23,6 +23,15 @@ const colorMap = {
   high: "bg-orange-100 text-orange-800",
   urgent: "bg-red-100 text-red-800",
   confirmed: "bg-green-100 text-green-800",
+  pi_sent: "bg-indigo-100 text-indigo-800",
+  po_received: "bg-teal-100 text-teal-800",
+  pif_sent: "bg-violet-100 text-violet-800",
+  docs_preparing: "bg-yellow-100 text-yellow-800",
+  docs_approved: "bg-green-100 text-green-800",
+  factory_ready: "bg-cyan-100 text-cyan-800",
+  container_booked: "bg-blue-100 text-blue-800",
+  inspection: "bg-orange-100 text-orange-800",
+  inspection_passed: "bg-green-100 text-green-800",
   processing: "bg-blue-100 text-blue-800",
   shipped: "bg-indigo-100 text-indigo-800",
   delivered: "bg-green-100 text-green-800",
@@ -56,10 +65,27 @@ const colorMap = {
   other: "bg-gray-100 text-gray-800",
 };
 
+const labelMap = {
+  pi_sent: "PI Sent",
+  po_received: "PO Received",
+  pif_sent: "PIF Sent",
+  docs_preparing: "Docs Preparing",
+  docs_approved: "Docs Approved",
+  factory_ready: "Factory Ready",
+  container_booked: "Container Booked",
+  inspection_passed: "Inspection Passed",
+  in_transit: "In Transit",
+  in_progress: "In Progress",
+  order_confirmed: "Closed Won",
+  feedback_pending: "Feedback Pending",
+  feedback_received: "Feedback Received",
+  pending_approval: "Pending Approval",
+};
+
 export default function StatusBadge({ status }) {
   if (!status) return null;
   const colors = colorMap[status] || "bg-gray-100 text-gray-800";
-  const label = status.replace(/_/g, " ");
+  const label = labelMap[status] || status.replace(/_/g, " ");
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${colors}`}>
       {label}
