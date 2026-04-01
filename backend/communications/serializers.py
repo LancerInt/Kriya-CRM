@@ -15,6 +15,7 @@ class CommunicationSerializer(serializers.ModelSerializer):
     contact_name = serializers.CharField(source='contact.name', read_only=True, default='')
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     assigned_executive = serializers.CharField(source='client.primary_executive.full_name', read_only=True, default='')
+    assigned_executive_id = serializers.CharField(source='client.primary_executive.id', read_only=True, default='')
     attachments = AttachmentSerializer(many=True, read_only=True)
     draft_id = serializers.SerializerMethodField()
     draft_status = serializers.SerializerMethodField()
@@ -23,7 +24,7 @@ class CommunicationSerializer(serializers.ModelSerializer):
         model = Communication
         fields = ['id', 'client', 'client_name', 'contact', 'contact_name', 'user',
                   'user_name', 'comm_type', 'direction', 'subject', 'body', 'status',
-                  'is_follow_up_required', 'ai_summary', 'assigned_executive', 'attachments',
+                  'is_follow_up_required', 'ai_summary', 'assigned_executive', 'assigned_executive_id', 'attachments',
                   'email_message_id', 'email_in_reply_to', 'email_account',
                   'whatsapp_message_id', 'external_phone', 'external_email',
                   'email_cc', 'draft_id', 'draft_status',

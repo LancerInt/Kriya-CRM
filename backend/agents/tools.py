@@ -12,6 +12,18 @@ def _int(val, default=10):
         return default
 
 
+def _is_executive(user):
+    """Check if user is an executive (restricted view)."""
+    return user.role == 'executive'
+
+
+def _filter_by_executive(qs, user, client_field='primary_executive'):
+    """Filter queryset to only show executive's own data."""
+    if _is_executive(user):
+        return qs.filter(**{client_field: user})
+    return qs
+
+
 def get_dashboard_stats(user):
     """Get overview dashboard stats."""
     from clients.models import Client
@@ -21,6 +33,20 @@ def get_dashboard_stats(user):
     from finance.models import Invoice
 
     now = timezone.now()
+
+    if _is_executive(user):
+        my_clients = Client.objects.filter(is_deleted=False, primary_executive=user)
+        client_ids = my_clients.values_list('id', flat=True)
+        return {
+            'total_clients': my_clients.count(),
+            'active_clients': my_clients.filter(status='active').count(),
+            'open_tasks': Task.objects.filter(owner=user, status__in=['pending', 'in_progress']).count(),
+            'overdue_tasks': Task.objects.filter(owner=user, status__in=['pending', 'in_progress'], due_date__lt=now).count(),
+            'active_orders': Order.objects.filter(client_id__in=client_ids).exclude(status__in=['delivered', 'cancelled']).count(),
+            'pipeline_inquiries': Inquiry.objects.filter(assigned_to=user, stage__in=['new', 'contacted', 'proposal']).count(),
+            'pending_invoices': Invoice.objects.filter(client_id__in=client_ids, status__in=['draft', 'sent']).count(),
+        }
+
     return {
         'total_clients': Client.objects.filter(is_deleted=False).count(),
         'active_clients': Client.objects.filter(is_deleted=False, status='active').count(),
@@ -32,11 +58,13 @@ def get_dashboard_stats(user):
     }
 
 
-def search_clients(query='', limit='10', **kwargs):
+def search_clients(user, query='', limit='10', **kwargs):
     """Search clients by name, country, or business type."""
     from clients.models import Client
     limit = _int(limit)
     qs = Client.objects.filter(is_deleted=False)
+    if _is_executive(user):
+        qs = qs.filter(primary_executive=user)
     if query:
         from django.db.models import Q
         qs = qs.filter(
@@ -81,11 +109,13 @@ def get_client_summary(client_id, **kwargs):
     }
 
 
-def get_tasks(status_filter='', client_id='', limit='10', **kwargs):
+def get_tasks(user, status_filter='', client_id='', limit='10', **kwargs):
     """Get tasks with optional filtering."""
     from tasks.models import Task
     limit = _int(limit)
     qs = Task.objects.select_related('client', 'owner').all()
+    if _is_executive(user):
+        qs = qs.filter(owner=user)
     if status_filter:
         qs = qs.filter(status=status_filter)
     if client_id:
@@ -122,11 +152,15 @@ def create_task(title, client_id='', priority='medium', due_date='', description
     return {'id': str(task.id), 'title': task.title, 'status': 'created'}
 
 
-def get_recent_communications(client_id='', comm_type='', limit='10', **kwargs):
+def get_recent_communications(user, client_id='', comm_type='', limit='10', **kwargs):
     """Get recent communications."""
     from communications.models import Communication
     limit = _int(limit)
     qs = Communication.objects.select_related('client', 'user').all()
+    if _is_executive(user):
+        from clients.models import Client
+        my_client_ids = Client.objects.filter(primary_executive=user, is_deleted=False).values_list('id', flat=True)
+        qs = qs.filter(client_id__in=my_client_ids)
     if client_id:
         qs = qs.filter(client_id=client_id)
     if comm_type and comm_type != 'all':
@@ -141,11 +175,15 @@ def get_recent_communications(client_id='', comm_type='', limit='10', **kwargs):
     } for c in comms]
 
 
-def get_orders(client_id='', status_filter='', limit='10', **kwargs):
+def get_orders(user, client_id='', status_filter='', limit='10', **kwargs):
     """Get orders with optional filtering."""
     from orders.models import Order
     limit = _int(limit)
     qs = Order.objects.select_related('client').all()
+    if _is_executive(user):
+        from clients.models import Client
+        my_client_ids = Client.objects.filter(primary_executive=user, is_deleted=False).values_list('id', flat=True)
+        qs = qs.filter(client_id__in=my_client_ids)
     if client_id:
         qs = qs.filter(client_id=client_id)
     if status_filter:
@@ -157,11 +195,15 @@ def get_orders(client_id='', status_filter='', limit='10', **kwargs):
     } for o in qs[:limit]]
 
 
-def get_shipments(client_id='', status_filter='', limit='10', **kwargs):
+def get_shipments(user, client_id='', status_filter='', limit='10', **kwargs):
     """Get shipments with optional filtering."""
     from shipments.models import Shipment
     limit = _int(limit)
     qs = Shipment.objects.select_related('client', 'order').all()
+    if _is_executive(user):
+        from clients.models import Client
+        my_client_ids = Client.objects.filter(primary_executive=user, is_deleted=False).values_list('id', flat=True)
+        qs = qs.filter(client_id__in=my_client_ids)
     if client_id:
         qs = qs.filter(client_id=client_id)
     if status_filter:
@@ -174,25 +216,33 @@ def get_shipments(client_id='', status_filter='', limit='10', **kwargs):
     } for s in qs[:limit]]
 
 
-def get_pipeline_summary(**kwargs):
+def get_pipeline_summary(user, **kwargs):
     """Get pipeline/inquiry summary by stage."""
     from quotations.models import Inquiry
     from django.db.models import Count, Sum
-    stages = Inquiry.objects.values('stage').annotate(
+    qs = Inquiry.objects.all()
+    if _is_executive(user):
+        qs = qs.filter(assigned_to=user)
+    stages = qs.values('stage').annotate(
         count=Count('id'), total_value=Sum('expected_value')
     ).order_by('stage')
     return [{'stage': s['stage'], 'count': s['count'],
              'total_value': str(s['total_value'] or 0)} for s in stages]
 
 
-def get_overdue_invoices(limit='10', **kwargs):
+def get_overdue_invoices(user, limit='10', **kwargs):
     """Get overdue invoices."""
     from finance.models import Invoice
     limit = _int(limit)
-    invoices = Invoice.objects.filter(
+    qs = Invoice.objects.filter(
         status__in=['sent', 'overdue'],
         due_date__lt=timezone.now().date()
-    ).select_related('client')[:limit]
+    ).select_related('client')
+    if _is_executive(user):
+        from clients.models import Client
+        my_client_ids = Client.objects.filter(primary_executive=user, is_deleted=False).values_list('id', flat=True)
+        qs = qs.filter(client_id__in=my_client_ids)
+    invoices = qs[:limit]
     return [{
         'invoice_number': inv.invoice_number, 'client': inv.client.company_name,
         'total': str(inv.total), 'currency': inv.currency,
@@ -232,6 +282,43 @@ def draft_email_reply(communication_id, **kwargs):
         }
     except Communication.DoesNotExist:
         return {'error': 'Communication not found'}
+
+
+def get_executive_overview(user, executive_username='', **kwargs):
+    """Get detailed overview of all executives (admin/manager only)."""
+    from accounts.models import User
+    from clients.models import Client
+    from tasks.models import Task
+    from orders.models import Order
+    from quotations.models import Inquiry
+
+    qs = User.objects.filter(role='executive', is_active=True)
+    if executive_username:
+        qs = qs.filter(username__icontains=executive_username)
+
+    executives = []
+    for exec_user in qs:
+        my_clients = Client.objects.filter(primary_executive=exec_user, is_deleted=False)
+        client_ids = my_clients.values_list('id', flat=True)
+        now = timezone.now()
+
+        executives.append({
+            'name': exec_user.full_name,
+            'username': exec_user.username,
+            'email': exec_user.email,
+            'phone': exec_user.phone,
+            'whatsapp': exec_user.whatsapp,
+            'region': exec_user.region,
+            'total_clients': my_clients.count(),
+            'active_clients': my_clients.filter(status='active').count(),
+            'client_names': list(my_clients.values_list('company_name', flat=True)),
+            'open_tasks': Task.objects.filter(owner=exec_user, status__in=['pending', 'in_progress']).count(),
+            'overdue_tasks': Task.objects.filter(owner=exec_user, status__in=['pending', 'in_progress'], due_date__lt=now).count(),
+            'active_orders': Order.objects.filter(client_id__in=client_ids).exclude(status__in=['delivered', 'cancelled']).count(),
+            'pipeline_inquiries': Inquiry.objects.filter(assigned_to=exec_user).exclude(stage__in=['won', 'lost']).count(),
+        })
+
+    return executives
 
 
 # Tool registry — maps function names to callables and their descriptions
@@ -287,3 +374,19 @@ TOOL_REGISTRY = {
         'parameters': {'limit': 'Max results'},
     },
 }
+
+# Additional tools only available to admin/manager
+ADMIN_TOOL_REGISTRY = {
+    'get_executive_overview': {
+        'fn': get_executive_overview,
+        'description': 'Get detailed overview of all executives including their email, phone, region, assigned clients, open tasks, and performance metrics. Use this when asked about team, executives, or workload.',
+        'parameters': {'executive_username': 'Optional: filter by executive username'},
+    },
+}
+
+
+def _get_tools_for_user(user):
+    """Return the tool registry appropriate for the user's role."""
+    if user.role in ('admin', 'manager'):
+        return {**TOOL_REGISTRY, **ADMIN_TOOL_REGISTRY}
+    return TOOL_REGISTRY

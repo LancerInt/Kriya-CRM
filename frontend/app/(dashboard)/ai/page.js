@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
@@ -78,6 +79,8 @@ export default function AIPage() {
   const [sending, setSending] = useState(false);
   const [loadingConvs, setLoadingConvs] = useState(true);
   const messagesEndRef = useRef(null);
+  const { user } = useSelector((state) => state.auth);
+  const isExecutive = user?.role === "executive";
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
@@ -157,14 +160,23 @@ export default function AIPage() {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
-  const suggestedQuestions = [
-    "What are my overdue tasks?",
-    "Show me the pipeline summary",
-    "Summarize recent client communications",
-    "Which invoices are overdue?",
-    "List all active orders",
-    "Show shipments in transit",
-  ];
+  const suggestedQuestions = isExecutive
+    ? [
+        "What are my overdue tasks?",
+        "Show me my pipeline summary",
+        "Summarize my recent client communications",
+        "Which of my invoices are overdue?",
+        "List my active orders",
+        "Show my shipments in transit",
+      ]
+    : [
+        "Show me all executive details and workload",
+        "What are the overdue tasks across all executives?",
+        "Show me the pipeline summary",
+        "Summarize recent client communications",
+        "Which invoices are overdue?",
+        "Show team performance overview",
+      ];
 
   return (
     <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4">

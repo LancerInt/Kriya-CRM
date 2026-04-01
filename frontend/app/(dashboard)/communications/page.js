@@ -85,7 +85,7 @@ export default function CommunicationsPage() {
       if (filterTab !== "all") filtered = filtered.filter((item) => item.comm_type === filterTab);
     }
     if (filterClient) filtered = filtered.filter((item) => item.client === filterClient);
-    if (filterExec) filtered = filtered.filter((item) => item.assigned_executive === filterExec);
+    if (filterExec) filtered = filtered.filter((item) => item.assigned_executive_id === filterExec);
     return filtered;
   }, [list, filterTab, filterClient, filterExec, unmatchedCategory]);
 
@@ -343,7 +343,7 @@ export default function CommunicationsPage() {
             <SearchableSelect
               value={filterExec}
               onChange={(v) => setFilterExec(v)}
-              options={executives.map((u) => ({ value: u.full_name, label: u.full_name }))}
+              options={executives.map((u) => ({ value: u.id, label: u.full_name }))}
               placeholder="All Owners"
               className="w-44"
             />

@@ -1,11 +1,11 @@
 """AI Service — connects to LLM providers and executes CRM tool calls."""
 import json
 import logging
-from .tools import TOOL_REGISTRY
+from .tools import TOOL_REGISTRY, _get_tools_for_user
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are Kriya AI, an intelligent assistant for the Kriya CRM trade management platform.
+SYSTEM_PROMPT_BASE = """You are Kriya AI, an intelligent assistant for the Kriya CRM trade management platform.
 You help users manage their international trade business by providing insights, performing actions, and answering questions.
 
 Your capabilities:
@@ -45,6 +45,32 @@ Example format:
 - Send sample to AgroTech Kenya
 
 Speak as a knowledgeable trade operations assistant."""
+
+
+def _build_system_prompt(user):
+    """Build a role-aware system prompt based on the logged-in user."""
+    prompt = SYSTEM_PROMPT_BASE
+
+    if user.role == 'executive':
+        prompt += f"""
+
+CURRENT USER CONTEXT:
+- You are speaking to **{user.full_name}** who is an **Executive**.
+- This user can ONLY see data related to their own clients, tasks, orders, shipments, and communications.
+- All tool results are already filtered to show only their data.
+- Do NOT mention other executives' data. If they ask about something outside their scope, politely let them know they only have access to their own portfolio.
+- Focus on helping them manage their assigned clients and tasks effectively."""
+    else:
+        prompt += f"""
+
+CURRENT USER CONTEXT:
+- You are speaking to **{user.full_name}** who is a **{user.get_role_display()}**.
+- This user has FULL access to all CRM data across all executives.
+- You can use the `get_executive_overview` tool to show details about all executives including their email, phone, region, assigned clients, open tasks, and performance.
+- When asked about team performance, executive workload, or "show me everything about executives", use the `get_executive_overview` tool.
+- Proactively offer insights about executive performance, client distribution, and team workload when relevant."""
+
+    return prompt
 
 
 def _build_gemini_tools():
@@ -90,6 +116,8 @@ def _chat_gemini(messages, user, api_key, model_name):
 
     client = genai.Client(api_key=api_key)
     last_message = messages[-1]['content']
+    system_prompt = _build_system_prompt(user)
+    tool_registry = _get_tools_for_user(user)
 
     # First call — may trigger tool use
     tool_calls_made = []
@@ -97,7 +125,7 @@ def _chat_gemini(messages, user, api_key, model_name):
 
     # Build tool descriptions into the prompt
     tool_desc = "\n\nYou have access to these CRM tools. To use them, respond with a JSON block like: ```tool\n{\"tool\": \"tool_name\", \"args\": {\"param\": \"value\"}}\n```\n\nAvailable tools:\n"
-    for name, info in TOOL_REGISTRY.items():
+    for name, info in tool_registry.items():
         params_str = ', '.join(f'{k}: {v}' for k, v in info['parameters'].items())
         tool_desc += f"- **{name}**({params_str}): {info['description']}\n"
 
@@ -106,7 +134,7 @@ def _chat_gemini(messages, user, api_key, model_name):
     enhanced_message = last_message + tool_desc
 
     # Build conversation for Gemini
-    contents = [{'role': 'user', 'parts': [{'text': SYSTEM_PROMPT + '\n\n' + enhanced_message}]}]
+    contents = [{'role': 'user', 'parts': [{'text': system_prompt + '\n\n' + enhanced_message}]}]
     if len(messages) > 1:
         contents = []
         for msg in messages[:-1]:
@@ -117,7 +145,7 @@ def _chat_gemini(messages, user, api_key, model_name):
     response = client.models.generate_content(
         model=model_name or 'gemini-2.0-flash',
         contents=contents,
-        config={'system_instruction': SYSTEM_PROMPT},
+        config={'system_instruction': system_prompt},
     )
     response_text = response.text
 
@@ -136,9 +164,9 @@ def _chat_gemini(messages, user, api_key, model_name):
                 tool_name = call.get('tool', '')
                 args = call.get('args', {})
 
-                if tool_name in TOOL_REGISTRY:
+                if tool_name in tool_registry:
                     logger.info(f'Agent calling tool: {tool_name}({args})')
-                    result = TOOL_REGISTRY[tool_name]['fn'](user=user, **args)
+                    result = tool_registry[tool_name]['fn'](user=user, **args)
                     tool_calls_made.append({'tool': tool_name, 'args': args, 'result': 'success'})
                     tool_results.append(f"Result of {tool_name}: {json.dumps(result, default=str)}")
                 else:
@@ -193,6 +221,8 @@ def _chat_groq(messages, user, api_key, model_name):
     from groq import Groq
 
     client = Groq(api_key=api_key)
+    system_prompt = _build_system_prompt(user)
+    tool_registry = _get_tools_for_user(user)
 
     # Build tool descriptions — instruct to use ```tool blocks
     tool_desc = """
@@ -205,7 +235,7 @@ IMPORTANT: You have CRM database tools. When you need real data, call a tool usi
 
 Available tools:
 """
-    for name, info in TOOL_REGISTRY.items():
+    for name, info in tool_registry.items():
         params_str = ', '.join(f'{k}: {v}' for k, v in info['parameters'].items())
         tool_desc += f"- {name}({params_str}): {info['description']}\n"
     tool_desc += """
@@ -215,7 +245,7 @@ RULES:
 - Do NOT show tool call blocks in your final answer to the user."""
 
     # Build messages
-    groq_messages = [{'role': 'system', 'content': SYSTEM_PROMPT + tool_desc}]
+    groq_messages = [{'role': 'system', 'content': system_prompt + tool_desc}]
     for msg in messages[:-1]:
         groq_messages.append({'role': msg['role'], 'content': msg['content']})
     groq_messages.append({'role': 'user', 'content': messages[-1]['content']})
@@ -240,10 +270,10 @@ RULES:
         for call in calls:
             tool_name = call.get('tool', '')
             args = call.get('args', {})
-            if tool_name in TOOL_REGISTRY:
+            if tool_name in tool_registry:
                 logger.info(f'Agent calling tool: {tool_name}({args})')
                 try:
-                    result = TOOL_REGISTRY[tool_name]['fn'](user=user, **args)
+                    result = tool_registry[tool_name]['fn'](user=user, **args)
                     tool_calls_made.append({'tool': tool_name, 'args': args, 'result': 'success'})
                     tool_results.append(f"[{tool_name}]: {json.dumps(result, default=str)}")
                 except Exception as e:

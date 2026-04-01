@@ -10,6 +10,7 @@ class User(AbstractUser):
         EXECUTIVE = 'executive', 'Executive'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.EXECUTIVE)
     phone = models.CharField(max_length=20, blank=True)
     whatsapp = models.CharField(max_length=20, blank=True)

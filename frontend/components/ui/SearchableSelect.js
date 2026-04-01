@@ -178,7 +178,7 @@ export default function SearchableSelect({
                 const isHighlighted = idx === highlightIdx;
                 return (
                   <div
-                    key={option.value}
+                    key={`${option.value}-${idx}`}
                     onClick={() => handleSelect(option.value)}
                     className={`px-3 py-2 text-sm cursor-pointer flex items-center gap-2 transition-colors ${
                       isSelected
