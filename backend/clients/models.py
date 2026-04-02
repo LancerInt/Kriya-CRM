@@ -7,6 +7,7 @@ class Client(SoftDeleteModel):
         ACTIVE = 'active', 'Active'
         INACTIVE = 'inactive', 'Inactive'
         PROSPECT = 'prospect', 'Prospect'
+        ON_HOLD = 'on_hold', 'On Hold'
 
     company_name = models.CharField(max_length=255, db_index=True)
     tax_number = models.CharField(max_length=100, blank=True, help_text='GSTIN / CNPJ / VAT etc.')

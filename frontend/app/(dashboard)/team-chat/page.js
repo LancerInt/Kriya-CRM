@@ -32,6 +32,7 @@ function getInitials(name) {
 export default function TeamChatPage() {
   const currentUser = useSelector((state) => state.auth.user);
   const [rooms, setRooms] = useState([]);
+  const [dms, setDms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -39,20 +40,32 @@ export default function TeamChatPage() {
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
+  // DM user picker
+  const [showUserPicker, setShowUserPicker] = useState(false);
+  const [allUsers, setAllUsers] = useState([]);
+  const [userSearch, setUserSearch] = useState("");
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const pollRef = useRef(null);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
-  // Load rooms
-  useEffect(() => {
+  // Load rooms — split into channels and DMs
+  const loadRooms = () => {
     api.get("/chat/rooms/").then((r) => {
       const data = r.data.results || r.data;
-      setRooms(data);
-      if (data.length > 0) setActiveRoom(data.find((r) => r.is_general) || data[0]);
+      const channels = data.filter((r) => !r.is_direct);
+      const directMsgs = data.filter((r) => r.is_direct);
+      setRooms(channels);
+      setDms(directMsgs);
+      if (!activeRoom) {
+        const general = channels.find((r) => r.is_general) || channels[0];
+        if (general) setActiveRoom(general);
+      }
     }).finally(() => setLoadingRooms(false));
-  }, []);
+  };
+
+  useEffect(() => { loadRooms(); }, []);
 
   // Load messages when room changes
   useEffect(() => {
@@ -97,6 +110,8 @@ export default function TeamChatPage() {
       setMessages((prev) => [...prev, res.data]);
       setInput("");
       setTimeout(scrollToBottom, 100);
+      // Refresh DM list to update last message preview
+      if (activeRoom.is_direct) loadRooms();
     } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
     finally { setSending(false); }
   };
@@ -163,7 +178,7 @@ export default function TeamChatPage() {
     }
   };
 
-  // Group call via Jitsi Meet
+  // Group call via Jitsi Meet (only for channels, not DMs)
   const [inCall, setInCall] = useState(false);
   const jitsiContainerRef = useRef(null);
   const jitsiApiRef = useRef(null);
@@ -176,7 +191,6 @@ export default function TeamChatPage() {
   const startGroupCall = () => {
     setInCall(true);
     notifyCallStarted();
-    // Post call link in chat
     const callUrl = `https://jitsi.riot.im/${getCallRoomName()}`;
     api.post(`/chat/rooms/${activeRoom.id}/send/`, {
       content: `[JOIN_CALL:${callUrl}] ${currentUser?.first_name || "Someone"} started a group call. Click here to join!`,
@@ -184,9 +198,7 @@ export default function TeamChatPage() {
     }).catch(() => {});
   };
 
-  const joinCall = () => {
-    setInCall(true);
-  };
+  const joinCall = () => { setInCall(true); };
 
   const endGroupCall = () => {
     if (jitsiApiRef.current) {
@@ -194,7 +206,6 @@ export default function TeamChatPage() {
       jitsiApiRef.current = null;
     }
     setInCall(false);
-    // Post call ended message
     if (activeRoom) {
       api.post(`/chat/rooms/${activeRoom.id}/send/`, {
         content: `[CALL_ENDED] ${currentUser?.first_name || "Someone"} ended the call.`,
@@ -205,12 +216,7 @@ export default function TeamChatPage() {
 
   useEffect(() => {
     if (!inCall || !activeRoom || !jitsiContainerRef.current) return;
-
-    // Load Jitsi external API script (free, no account needed)
-    if (window.JitsiMeetExternalAPI) {
-      initJitsi();
-      return;
-    }
+    if (window.JitsiMeetExternalAPI) { initJitsi(); return; }
     const script = document.createElement("script");
     script.src = "https://jitsi.riot.im/external_api.js";
     script.async = true;
@@ -220,28 +226,19 @@ export default function TeamChatPage() {
     function initJitsi() {
       if (!jitsiContainerRef.current) return;
       const roomName = getCallRoomName();
-      // Using jitsi.riot.im — free, no login required
       const jitsiApi = new window.JitsiMeetExternalAPI("jitsi.riot.im", {
         roomName,
         parentNode: jitsiContainerRef.current,
         width: "100%",
         height: "100%",
         configOverwrite: {
-          startWithAudioMuted: true,
-          startWithVideoMuted: true,
-          prejoinPageEnabled: false,
-          disableModeratorIndicator: true,
-          enableLobbyChat: false,
-          hideLobbyButton: true,
+          startWithAudioMuted: true, startWithVideoMuted: true,
+          prejoinPageEnabled: false, disableModeratorIndicator: true,
+          enableLobbyChat: false, hideLobbyButton: true,
         },
         interfaceConfigOverwrite: {
-          TOOLBAR_BUTTONS: [
-            "microphone", "camera", "desktop", "chat",
-            "raisehand", "participants-pane", "tileview",
-            "hangup", "fullscreen",
-          ],
-          SHOW_JITSI_WATERMARK: false,
-          SHOW_BRAND_WATERMARK: false,
+          TOOLBAR_BUTTONS: ["microphone", "camera", "desktop", "chat", "raisehand", "participants-pane", "tileview", "hangup", "fullscreen"],
+          SHOW_JITSI_WATERMARK: false, SHOW_BRAND_WATERMARK: false,
           DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
         },
         userInfo: {
@@ -249,17 +246,10 @@ export default function TeamChatPage() {
           email: currentUser?.email || "",
         },
       });
-
       jitsiApi.addEventListener("readyToClose", endGroupCall);
       jitsiApiRef.current = jitsiApi;
     }
-
-    return () => {
-      if (jitsiApiRef.current) {
-        jitsiApiRef.current.dispose();
-        jitsiApiRef.current = null;
-      }
-    };
+    return () => { if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; } };
   }, [inCall, activeRoom?.id]);
 
   const handleCreateRoom = async () => {
@@ -271,6 +261,32 @@ export default function TeamChatPage() {
       setShowNewRoom(false);
       setNewRoomName("");
     } catch (err) { toast.error(getErrorMessage(err, "Failed to create room")); }
+  };
+
+  // DM: open user picker
+  const handleOpenUserPicker = async () => {
+    setShowUserPicker(true);
+    setUserSearch("");
+    try {
+      const res = await api.get("/chat/rooms/users/");
+      setAllUsers(res.data);
+    } catch (err) { toast.error("Failed to load users"); }
+  };
+
+  // DM: start or open DM with a user
+  const handleStartDM = async (userId) => {
+    setShowUserPicker(false);
+    try {
+      const res = await api.post("/chat/rooms/direct/", { user_id: userId });
+      const dmRoom = res.data;
+      // Add to DMs list if not already there
+      setDms((prev) => {
+        if (prev.find((d) => d.id === dmRoom.id)) return prev;
+        return [...prev, dmRoom];
+      });
+      setActiveRoom(dmRoom);
+      setMessages([]);
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to open DM")); }
   };
 
   const isOwnMessage = (msg) => msg.user === currentUser?.id;
@@ -308,29 +324,20 @@ export default function TeamChatPage() {
       toast.success("Room deleted");
     } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
+
   const [editingMsg, setEditingMsg] = useState(null);
   const [editText, setEditText] = useState("");
-  const [contextMenu, setContextMenu] = useState(null); // { msgId, x, y }
+  const [contextMenu, setContextMenu] = useState(null);
 
-  const handleCopyMsg = (content) => {
-    navigator.clipboard.writeText(content);
-    toast.success("Copied!");
-    setContextMenu(null);
-  };
-
-  const handleEditMsg = (msg) => {
-    setEditingMsg(msg.id);
-    setEditText(msg.content);
-    setContextMenu(null);
-  };
+  const handleCopyMsg = (content) => { navigator.clipboard.writeText(content); toast.success("Copied!"); setContextMenu(null); };
+  const handleEditMsg = (msg) => { setEditingMsg(msg.id); setEditText(msg.content); setContextMenu(null); };
 
   const handleSaveEdit = async () => {
     if (!editText.trim() || !editingMsg) return;
     try {
       await api.patch(`/chat/messages/${editingMsg}/`, { content: editText.trim() });
       setMessages((prev) => prev.map((m) => m.id === editingMsg ? { ...m, content: editText.trim(), is_edited: true } : m));
-      setEditingMsg(null);
-      setEditText("");
+      setEditingMsg(null); setEditText("");
     } catch (err) { toast.error(getErrorMessage(err, "Failed to edit")); }
   };
 
@@ -344,7 +351,6 @@ export default function TeamChatPage() {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
-  // Close context menu on click outside
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
@@ -352,7 +358,6 @@ export default function TeamChatPage() {
     return () => window.removeEventListener("click", close);
   }, [contextMenu]);
 
-  // Broadcast call notification to all team members
   const notifyCallStarted = async () => {
     try {
       await api.post("/notifications/broadcast/", {
@@ -364,9 +369,27 @@ export default function TeamChatPage() {
     } catch {}
   };
 
+  // Close user picker on outside click
+  useEffect(() => {
+    if (!showUserPicker) return;
+    const close = (e) => {
+      if (!e.target.closest("[data-user-picker]")) setShowUserPicker(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [showUserPicker]);
+
+  const filteredUsers = allUsers.filter((u) =>
+    u.full_name.toLowerCase().includes(userSearch.toLowerCase())
+  );
+
+  // Header info for active room
+  const isDMRoom = activeRoom?.is_direct;
+  const dmOtherUser = activeRoom?.other_user;
+
   return (
     <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4">
-      {/* Rooms Sidebar */}
+      {/* Sidebar */}
       <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
           <h3 className="font-semibold text-sm">Team Chat</h3>
@@ -378,12 +401,17 @@ export default function TeamChatPage() {
             <button onClick={handleCreateRoom} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded">Add</button>
           </div>
         )}
+
         <div className="flex-1 overflow-y-auto">
+          {/* Channels section */}
+          <div className="px-3 pt-3 pb-1">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Channels</p>
+          </div>
           {rooms.map((room) => (
             <div
               key={room.id}
               onClick={() => setActiveRoom(room)}
-              className={`group w-full text-left px-3 py-3 border-b border-gray-100 transition-colors cursor-pointer ${
+              className={`group w-full text-left px-3 py-2.5 border-b border-gray-100 transition-colors cursor-pointer ${
                 activeRoom?.id === room.id ? "bg-indigo-50" : "hover:bg-gray-100"
               }`}
             >
@@ -394,14 +422,13 @@ export default function TeamChatPage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-lg shrink-0">#</span>
+                  <span className="text-sm text-gray-400 shrink-0">#</span>
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm font-medium truncate ${activeRoom?.id === room.id ? "text-indigo-700" : "text-gray-800"}`}>{room.name}</p>
                     {room.last_message && (
                       <p className="text-xs text-gray-400 truncate">{room.last_message.user_name}: {room.last_message.content}</p>
                     )}
                   </div>
-                  {/* Edit/Delete on hover */}
                   <div className="opacity-0 group-hover:opacity-100 flex gap-1 shrink-0">
                     <button onClick={(e) => handleEditRoom(room, e)} className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" title="Rename">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -416,18 +443,111 @@ export default function TeamChatPage() {
               )}
             </div>
           ))}
+
+          {/* Direct Messages section */}
+          <div className="px-3 pt-4 pb-1 flex items-center justify-between">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Direct Messages</p>
+            <div className="relative" data-user-picker>
+              <button
+                onClick={handleOpenUserPicker}
+                className="text-gray-400 hover:text-indigo-600 p-0.5 rounded"
+                title="New direct message"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              </button>
+              {/* User picker dropdown */}
+              {showUserPicker && (
+                <div data-user-picker className="absolute right-0 top-6 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                  <div className="p-2 border-b border-gray-100">
+                    <input
+                      autoFocus
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search people..."
+                      className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {filteredUsers.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-4">No users found</p>
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <button
+                          key={u.id}
+                          onClick={() => handleStartDM(u.id)}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-indigo-50 transition-colors"
+                        >
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarColors[u.role] || "bg-gray-100 text-gray-700"}`}>
+                            {getInitials(u.full_name)}
+                          </div>
+                          <div className="text-left min-w-0">
+                            <p className="text-xs font-medium text-gray-800 truncate">{u.full_name}</p>
+                            <p className={`text-[10px] font-medium ${roleColors[u.role]?.split(" ")[0] || "text-gray-400"}`}>{u.role}</p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {dms.length === 0 && (
+            <p className="text-xs text-gray-400 px-3 py-2">No direct messages yet</p>
+          )}
+          {dms.map((dm) => {
+            const other = dm.other_user;
+            return (
+              <div
+                key={dm.id}
+                onClick={() => setActiveRoom(dm)}
+                className={`w-full text-left px-3 py-2.5 border-b border-gray-100 transition-colors cursor-pointer ${
+                  activeRoom?.id === dm.id ? "bg-indigo-50" : "hover:bg-gray-100"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColors[other?.role] || "bg-gray-100 text-gray-700"}`}>
+                    {getInitials(other?.full_name)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium truncate ${activeRoom?.id === dm.id ? "text-indigo-700" : "text-gray-800"}`}>
+                      {other?.full_name || "Unknown"}
+                    </p>
+                    {dm.last_message ? (
+                      <p className="text-xs text-gray-400 truncate">{dm.last_message.content}</p>
+                    ) : (
+                      <p className="text-xs text-gray-300 italic">No messages yet</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* Chat Area */}
       <div className="flex-1 flex flex-col bg-white">
-        {/* Room Header */}
+        {/* Header */}
         {activeRoom && (
           <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold"># {activeRoom.name}</h2>
-              {activeRoom.description && <p className="text-xs text-gray-500">{activeRoom.description}</p>}
-            </div>
+            {isDMRoom ? (
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColors[dmOtherUser?.role] || "bg-gray-100 text-gray-700"}`}>
+                  {getInitials(dmOtherUser?.full_name)}
+                </div>
+                <div>
+                  <h2 className="font-semibold text-gray-900">{dmOtherUser?.full_name || "Direct Message"}</h2>
+                  <p className={`text-xs font-medium capitalize ${roleColors[dmOtherUser?.role]?.split(" ")[0] || "text-gray-400"}`}>{dmOtherUser?.role}</p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <h2 className="font-semibold"># {activeRoom.name}</h2>
+                {activeRoom.description && <p className="text-xs text-gray-500">{activeRoom.description}</p>}
+              </div>
+            )}
             <div className="flex items-center gap-2">
               {inCall ? (
                 <button onClick={endGroupCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700">
@@ -486,7 +606,6 @@ export default function TeamChatPage() {
                       </div>
                     )}
 
-                    {/* Edit mode */}
                     {editingMsg === msg.id ? (
                       <div className="flex items-center gap-1">
                         <input value={editText} onChange={(e) => setEditText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSaveEdit(); if (e.key === "Escape") setEditingMsg(null); }} autoFocus className="flex-1 px-3 py-2 text-sm border border-indigo-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -498,36 +617,29 @@ export default function TeamChatPage() {
                         className={`rounded-2xl px-3 py-2 text-sm relative ${own ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-800"}`}
                         onContextMenu={(e) => { e.preventDefault(); setContextMenu({ msgId: msg.id, x: e.clientX, y: e.clientY }); }}
                       >
-                        {/* Image */}
                         {msg.message_type === "image" && msg.file && (
                           <img src={fileUrl(msg.file)} alt={msg.filename} className="max-w-xs rounded-lg mb-1 cursor-pointer" onClick={() => window.open(fileUrl(msg.file), "_blank")} />
                         )}
-                        {/* Video */}
                         {msg.message_type === "video" && msg.file && (
                           <video src={fileUrl(msg.file)} controls className="max-w-xs rounded-lg mb-1" />
                         )}
-                        {/* Audio / Voice */}
                         {msg.message_type === "audio" && msg.file && (
                           <div className="flex items-center gap-2">
                             <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                             <audio src={fileUrl(msg.file)} controls className="h-8" />
                           </div>
                         )}
-                        {/* File */}
                         {msg.message_type === "file" && msg.file && (
                           <a href={fileUrl(msg.file)} target="_blank" rel="noreferrer" className={`flex items-center gap-2 py-1 ${own ? "text-indigo-100" : "text-indigo-600"} text-xs font-medium`}>
                             <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             {msg.filename || "Download file"}
                           </a>
                         )}
-                        {/* Text — with call/ended detection */}
                         {msg.content && msg.message_type === "text" && (() => {
                           if (msg.content.includes("[JOIN_CALL:")) {
-                            // Check if any CALL_ENDED message exists after this message
                             const msgTime = new Date(msg.created_at).getTime();
                             const callEnded = messages.some((m) => m.content?.includes("[CALL_ENDED]") && new Date(m.created_at).getTime() > msgTime);
-                            const msgAge = (Date.now() - msgTime) / 60000;
-                            const isExpired = callEnded || msgAge > 60;
+                            const isExpired = callEnded || (Date.now() - msgTime) / 60000 > 60;
                             const displayText = msg.content.replace(/\[JOIN_CALL:[^\]]+\]\s*/, "");
                             return (
                               <div>
@@ -538,10 +650,7 @@ export default function TeamChatPage() {
                                     Call ended
                                   </span>
                                 ) : (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); joinCall(); }}
-                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${own ? "bg-white/20 text-white hover:bg-white/30" : "bg-green-600 text-white hover:bg-green-700"}`}
-                                  >
+                                  <button onClick={(e) => { e.stopPropagation(); joinCall(); }} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${own ? "bg-white/20 text-white hover:bg-white/30" : "bg-green-600 text-white hover:bg-green-700"}`}>
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                                     Join Call
                                   </button>
@@ -550,18 +659,13 @@ export default function TeamChatPage() {
                             );
                           }
                           if (msg.content.includes("[CALL_ENDED]")) {
-                            return (
-                              <p className="text-xs italic text-gray-400">
-                                {msg.content.replace("[CALL_ENDED] ", "")}
-                              </p>
-                            );
+                            return <p className="text-xs italic text-gray-400">{msg.content.replace("[CALL_ENDED] ", "")}</p>;
                           }
                           return <p className="whitespace-pre-wrap">{msg.content}</p>;
                         })()}
                       </div>
                     )}
 
-                    {/* Hover action buttons */}
                     {editingMsg !== msg.id && (
                       <div className={`flex gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${own ? "justify-end" : "justify-start"}`}>
                         <button onClick={() => handleCopyMsg(msg.content)} className="p-0.5 text-gray-400 hover:text-gray-600" title="Copy">
@@ -591,19 +695,12 @@ export default function TeamChatPage() {
         {activeRoom && (
           <div className="border-t border-gray-200 p-3 bg-white">
             <form onSubmit={handleSend} className="flex items-center gap-2">
-              {/* Attach file */}
               <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Attach file/image/video">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
               <input type="file" ref={fileInputRef} onChange={handleSendFile} className="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" />
 
-              {/* Voice record */}
-              <button
-                type="button"
-                onClick={recording ? stopRecording : startRecording}
-                className={`p-2 rounded-lg transition-colors ${recording ? "text-red-600 bg-red-50 animate-pulse" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`}
-                title={recording ? "Stop recording" : "Record voice message"}
-              >
+              <button type="button" onClick={recording ? stopRecording : startRecording} className={`p-2 rounded-lg transition-colors ${recording ? "text-red-600 bg-red-50 animate-pulse" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`} title={recording ? "Stop recording" : "Record voice message"}>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
               </button>
 
@@ -616,7 +713,7 @@ export default function TeamChatPage() {
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={`Message #${activeRoom.name}...`}
+                  placeholder={isDMRoom ? `Message ${dmOtherUser?.full_name || ""}...` : `Message #${activeRoom.name}...`}
                   disabled={sending}
                   className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:opacity-50 text-sm"
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}

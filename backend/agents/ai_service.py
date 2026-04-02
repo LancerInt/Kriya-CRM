@@ -1,203 +1,169 @@
 """AI Service — connects to LLM providers and executes CRM tool calls."""
 import json
+import re
 import logging
-from .tools import TOOL_REGISTRY, _get_tools_for_user
+from .tools import _get_tools_for_user
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_BASE = """You are Kriya AI, an intelligent assistant for the Kriya CRM trade management platform.
-You help users manage their international trade business by providing insights, performing actions, and answering questions.
+# ---------------------------------------------------------------------------
+# System prompt
+# ---------------------------------------------------------------------------
+SYSTEM_PROMPT_BASE = """You are Kriya, the smart assistant built into Kriya CRM. Speak like a knowledgeable colleague — warm, direct, and professional.
 
-Your capabilities:
-- Search and analyze client data
-- View and create tasks
-- Check orders, shipments, and invoices
-- Analyze sales pipeline
-- Summarize communications
-- Provide business insights and recommendations
+RESPONSE RULES:
+- Lead with the answer immediately. Don't restate the question.
+- Use **bold** for key numbers, names, and statuses.
+- Use bullet points for 3+ items. Use ## headings only for multi-section responses.
+- End with 1–2 specific next steps under ### Next Steps when helpful.
+- Be concise. No filler like "Certainly!" or "Great question!".
+- If data is empty, say so plainly and suggest an action.
 
-When users ask questions, use the available tools to fetch real data from the CRM before answering.
-
-FORMATTING RULES (VERY IMPORTANT):
-- Use ## for main section headings (e.g. ## Overview, ## Key Metrics)
-- Use ### for sub-sections (e.g. ### Top Accounts, ### Pending Actions)
-- Use bullet points (- ) for lists
-- Use **bold** for important numbers, names, statuses
-- Separate each section with a blank line
-- Each section should cover ONE topic — do not mix topics
-- Keep each section 2-4 bullet points max
-- End with a ### Recommended Actions section with specific next steps
-- Be concise but thorough — cover all relevant data points
-
-Example format:
-## Pipeline Summary
-
-### Active Leads
-- **5** leads in qualification stage
-- **3** leads in negotiation
-
-### Top Accounts
-- **EuroFarm GmbH** — $25,000 potential
-- **AgroTech Kenya** — $15,000 potential
-
-### Recommended Actions
-- Follow up with EuroFarm on pending quotation
-- Send sample to AgroTech Kenya
-
-Speak as a knowledgeable trade operations assistant."""
+TOOL RULES:
+- Most data is already pre-loaded below — use it directly, no tool call needed.
+- Only call a tool for something NOT in the pre-loaded data (e.g. a specific client by name, a product lookup).
+- NEVER ask the user for IDs. Use names as-is.
+- NEVER invent numbers."""
 
 
-def _build_system_prompt(user):
-    """Build a role-aware system prompt based on the logged-in user."""
-    prompt = SYSTEM_PROMPT_BASE
-
+def _build_system_prompt(user, prefetched: str) -> str:
     if user.role == 'executive':
-        prompt += f"""
-
-CURRENT USER CONTEXT:
-- You are speaking to **{user.full_name}** who is an **Executive**.
-- This user can ONLY see data related to their own clients, tasks, orders, shipments, and communications.
-- All tool results are already filtered to show only their data.
-- Do NOT mention other executives' data. If they ask about something outside their scope, politely let them know they only have access to their own portfolio.
-- Focus on helping them manage their assigned clients and tasks effectively."""
+        role_ctx = (
+            f"\nCONTEXT: Speaking with **{user.full_name}** (Executive). "
+            "All data is filtered to their portfolio only. Never reference other executives."
+        )
     else:
-        prompt += f"""
-
-CURRENT USER CONTEXT:
-- You are speaking to **{user.full_name}** who is a **{user.get_role_display()}**.
-- This user has FULL access to all CRM data across all executives.
-- You can use the `get_executive_overview` tool to show details about all executives including their email, phone, region, assigned clients, open tasks, and performance.
-- When asked about team performance, executive workload, or "show me everything about executives", use the `get_executive_overview` tool.
-- Proactively offer insights about executive performance, client distribution, and team workload when relevant."""
-
-    return prompt
+        role_ctx = (
+            f"\nCONTEXT: Speaking with **{user.full_name}** ({user.get_role_display()}). "
+            "Full access to all CRM data. Use get_executive_overview for team performance."
+        )
+    data_ctx = f"\n\nPRE-LOADED DATA:\n{prefetched}" if prefetched else ""
+    return SYSTEM_PROMPT_BASE + role_ctx + data_ctx
 
 
-def _build_gemini_tools():
-    """Convert our tool registry into Gemini function declarations."""
-    tools = []
-    for name, info in TOOL_REGISTRY.items():
-        params = {}
-        for pname, pdesc in info['parameters'].items():
-            params[pname] = {'type': 'string', 'description': pdesc}
+# ---------------------------------------------------------------------------
+# Pre-fetcher — compact summaries, not raw JSON dumps
+# ---------------------------------------------------------------------------
+def _prefetch_context(user, message: str) -> str:
+    from .tools import (
+        get_dashboard_stats, get_tasks, get_pipeline_summary,
+        get_overdue_invoices, get_recent_communications,
+        get_orders, get_shipments, get_executive_overview,
+    )
+    msg = message.lower()
+    parts = {}
 
-        tools.append({
-            'name': name,
-            'description': info['description'],
-            'parameters': {
-                'type': 'object',
-                'properties': params,
-            } if params else {'type': 'object', 'properties': {}},
-        })
-    return tools
+    try:
+        parts['stats'] = get_dashboard_stats(user)
+    except Exception:
+        pass
+
+    if any(w in msg for w in ['task', 'overdue', 'todo', 'pending', 'due', 'assign']):
+        try:
+            parts['tasks'] = get_tasks(user, limit='15')
+        except Exception:
+            pass
+
+    if any(w in msg for w in ['pipeline', 'lead', 'inquiry', 'stage', 'deal', 'prospect']):
+        try:
+            parts['pipeline'] = get_pipeline_summary(user)
+        except Exception:
+            pass
+
+    if any(w in msg for w in ['order', 'sale', 'revenue']):
+        try:
+            parts['orders'] = get_orders(user, limit='10')
+        except Exception:
+            pass
+
+    if any(w in msg for w in ['invoice', 'payment', 'bill', 'finance', 'outstanding']):
+        try:
+            parts['invoices'] = get_overdue_invoices(user)
+        except Exception:
+            pass
+
+    if any(w in msg for w in ['email', 'communication', 'message', 'whatsapp', 'call', 'conversation']):
+        try:
+            parts['communications'] = get_recent_communications(user, limit='8')
+        except Exception:
+            pass
+
+    if any(w in msg for w in ['shipment', 'shipping', 'transit', 'delivery', 'dispatch', 'container']):
+        try:
+            parts['shipments'] = get_shipments(user, limit='8')
+        except Exception:
+            pass
+
+    if user.role in ('admin', 'manager') and any(w in msg for w in ['executive', 'team', 'overview', 'workload', 'performance', 'staff']):
+        try:
+            parts['executives'] = get_executive_overview(user)
+        except Exception:
+            pass
+
+    if not parts:
+        return ""
+    return json.dumps(parts, default=str, separators=(',', ':'))
 
 
-def chat_with_agent(messages, user, config):
-    """Send messages to LLM and handle tool calls. Returns assistant response."""
+# ---------------------------------------------------------------------------
+# Compact tool description
+# ---------------------------------------------------------------------------
+def _build_tool_desc(tool_registry: dict) -> str:
+    lines = [
+        "\n\nTOOLS (only call when data is NOT in pre-loaded context above):",
+        'Format: ```tool\n{"tool":"name","args":{"key":"value"}}\n```',
+    ]
+    for name, info in tool_registry.items():
+        params = ', '.join(info['parameters'].keys())
+        lines.append(f"- {name}({params}): {info['description']}")
+    lines.append("Use names not IDs. No tool blocks in final answer.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Streaming entry point
+# ---------------------------------------------------------------------------
+def stream_chat_with_agent(messages, user, config):
+    """
+    Generator that yields dicts:
+      {'type': 'chunk', 'content': str}   — text delta
+      {'type': 'tool_calls', 'data': list} — tool metadata
+      {'type': 'error', 'content': str}   — error message
+    """
     from common.encryption import decrypt_value
     api_key = decrypt_value(config.api_key)
+    last_message = messages[-1]['content'] if messages else ''
+    prefetched = _prefetch_context(user, last_message)
+
     provider = config.provider
-
     if provider == 'groq':
-        return _chat_groq(messages, user, api_key, config.model_name)
+        yield from _stream_groq(messages, user, api_key, config.model_name, prefetched)
     elif provider == 'gemini':
-        return _chat_gemini(messages, user, api_key, config.model_name)
-    elif provider == 'openai':
-        return _chat_openai(messages, user, api_key, config.model_name)
-    elif provider == 'claude':
-        return _chat_claude(messages, user, api_key, config.model_name)
+        yield from _stream_gemini(messages, user, api_key, config.model_name, prefetched)
     else:
-        return {'content': 'Unsupported AI provider', 'tool_calls': []}
+        yield {'type': 'chunk', 'content': 'This AI provider does not support streaming yet.'}
+        yield {'type': 'tool_calls', 'data': []}
 
 
-def _chat_gemini(messages, user, api_key, model_name):
-    """Chat using Google Gemini (new SDK)."""
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
-    last_message = messages[-1]['content']
-    system_prompt = _build_system_prompt(user)
-    tool_registry = _get_tools_for_user(user)
-
-    # First call — may trigger tool use
-    tool_calls_made = []
-    max_iterations = 5
-
-    # Build tool descriptions into the prompt
-    tool_desc = "\n\nYou have access to these CRM tools. To use them, respond with a JSON block like: ```tool\n{\"tool\": \"tool_name\", \"args\": {\"param\": \"value\"}}\n```\n\nAvailable tools:\n"
-    for name, info in tool_registry.items():
-        params_str = ', '.join(f'{k}: {v}' for k, v in info['parameters'].items())
-        tool_desc += f"- **{name}**({params_str}): {info['description']}\n"
-
-    tool_desc += "\nYou can call multiple tools. After getting tool results, synthesize them into a helpful response. Always call tools when you need real data — never make up numbers."
-
-    enhanced_message = last_message + tool_desc
-
-    # Build conversation for Gemini
-    contents = [{'role': 'user', 'parts': [{'text': system_prompt + '\n\n' + enhanced_message}]}]
-    if len(messages) > 1:
-        contents = []
-        for msg in messages[:-1]:
-            role = 'user' if msg['role'] == 'user' else 'model'
-            contents.append({'role': role, 'parts': [{'text': msg['content']}]})
-        contents.append({'role': 'user', 'parts': [{'text': enhanced_message}]})
-
-    response = client.models.generate_content(
-        model=model_name or 'gemini-2.0-flash',
-        contents=contents,
-        config={'system_instruction': system_prompt},
-    )
-    response_text = response.text
-
-    # Check for tool calls in response
-    for iteration in range(max_iterations):
-        if '```tool' not in response_text:
-            break
-
-        import re
-        tool_blocks = re.findall(r'```tool\s*\n(.*?)\n```', response_text, re.DOTALL)
-
-        tool_results = []
-        for block in tool_blocks:
-            try:
-                call = json.loads(block)
-                tool_name = call.get('tool', '')
-                args = call.get('args', {})
-
-                if tool_name in tool_registry:
-                    logger.info(f'Agent calling tool: {tool_name}({args})')
-                    result = tool_registry[tool_name]['fn'](user=user, **args)
-                    tool_calls_made.append({'tool': tool_name, 'args': args, 'result': 'success'})
-                    tool_results.append(f"Result of {tool_name}: {json.dumps(result, default=str)}")
-                else:
-                    tool_results.append(f"Error: Unknown tool '{tool_name}'")
-            except (json.JSONDecodeError, Exception) as e:
-                tool_results.append(f"Error executing tool: {str(e)}")
-
-        if tool_results:
-            results_message = "Here are the tool results:\n\n" + "\n\n".join(tool_results) + "\n\nNow provide a helpful response to the user based on this data. Do NOT include tool call blocks in your final response."
-            contents.append({'role': 'model', 'parts': [{'text': response_text}]})
-            contents.append({'role': 'user', 'parts': [{'text': results_message}]})
-            response = client.models.generate_content(
-                model=model_name or 'gemini-2.0-flash',
-                contents=contents,
-            )
-            response_text = response.text
-
-    import re
-    response_text = re.sub(r'```tool\s*\n.*?\n```', '', response_text, flags=re.DOTALL).strip()
-
-    return {
-        'content': response_text,
-        'tool_calls': tool_calls_made,
-        'tokens_used': 0,
-    }
+# ---------------------------------------------------------------------------
+# Non-streaming fallback (kept for quick-chat)
+# ---------------------------------------------------------------------------
+def chat_with_agent(messages, user, config):
+    """Blocking chat — collects all streaming chunks and returns full response."""
+    content = ''
+    tool_calls = []
+    for event in stream_chat_with_agent(messages, user, config):
+        if event['type'] == 'chunk':
+            content += event['content']
+        elif event['type'] == 'tool_calls':
+            tool_calls = event.get('data', [])
+    return {'content': content.strip(), 'tool_calls': tool_calls, 'tokens_used': 0}
 
 
+# ---------------------------------------------------------------------------
+# Groq streaming
+# ---------------------------------------------------------------------------
 def _extract_tool_calls(text):
-    """Extract tool call JSON from any code block format (```tool, ```json, or raw JSON)."""
-    import re
-    # Match ```tool, ```json, or ``` blocks containing tool calls
     blocks = re.findall(r'```(?:tool|json)?\s*\n(.*?)\n```', text, re.DOTALL)
     calls = []
     for block in blocks:
@@ -210,103 +176,132 @@ def _extract_tool_calls(text):
     return calls
 
 
-def _clean_tool_blocks(text):
-    """Remove all code blocks that contain tool calls from response."""
-    import re
-    return re.sub(r'```(?:tool|json)?\s*\n\s*\{[^`]*?"tool"[^`]*?\}\s*\n```', '', text, flags=re.DOTALL).strip()
-
-
-def _chat_groq(messages, user, api_key, model_name):
-    """Chat using Groq (free Llama models)."""
+def _stream_groq(messages, user, api_key, model_name, prefetched=''):
     from groq import Groq
-
     client = Groq(api_key=api_key)
-    system_prompt = _build_system_prompt(user)
     tool_registry = _get_tools_for_user(user)
+    system_prompt = _build_system_prompt(user, prefetched)
+    tool_desc = _build_tool_desc(tool_registry)
 
-    # Build tool descriptions — instruct to use ```tool blocks
-    tool_desc = """
-
-IMPORTANT: You have CRM database tools. When you need real data, call a tool using EXACTLY this format (use ```tool NOT ```json):
-
-```tool
-{"tool": "tool_name", "args": {"param": "value"}}
-```
-
-Available tools:
-"""
-    for name, info in tool_registry.items():
-        params_str = ', '.join(f'{k}: {v}' for k, v in info['parameters'].items())
-        tool_desc += f"- {name}({params_str}): {info['description']}\n"
-    tool_desc += """
-RULES:
-- ALWAYS call a tool when you need data. Never guess or make up numbers.
-- After you call a tool, I will give you the results, then you provide the final answer.
-- Do NOT show tool call blocks in your final answer to the user."""
-
-    # Build messages
     groq_messages = [{'role': 'system', 'content': system_prompt + tool_desc}]
     for msg in messages[:-1]:
         groq_messages.append({'role': msg['role'], 'content': msg['content']})
     groq_messages.append({'role': 'user', 'content': messages[-1]['content']})
 
+    model = model_name or 'llama-3.1-8b-instant'
     tool_calls_made = []
 
-    response = client.chat.completions.create(
-        model=model_name or 'llama-3.3-70b-versatile',
-        messages=groq_messages,
-        temperature=0.3,
-        max_tokens=4096,
+    # Quick non-streaming probe (max 200 tokens) to detect if tool calls are needed.
+    # With pre-fetch this is rare, but handles specific lookups like "tell me about Acme Corp".
+    probe = client.chat.completions.create(
+        model=model, messages=groq_messages,
+        temperature=0.2, max_tokens=200,
     )
-    response_text = response.choices[0].message.content or ''
+    probe_text = probe.choices[0].message.content or ''
+    calls = _extract_tool_calls(probe_text)
 
-    # Handle tool calls (up to 3 rounds)
-    for iteration in range(3):
-        calls = _extract_tool_calls(response_text)
-        if not calls:
-            break
-
+    if calls:
+        # Execute tool calls, then stream the final answer
         tool_results = []
         for call in calls:
             tool_name = call.get('tool', '')
             args = call.get('args', {})
             if tool_name in tool_registry:
-                logger.info(f'Agent calling tool: {tool_name}({args})')
                 try:
                     result = tool_registry[tool_name]['fn'](user=user, **args)
                     tool_calls_made.append({'tool': tool_name, 'args': args, 'result': 'success'})
-                    tool_results.append(f"[{tool_name}]: {json.dumps(result, default=str)}")
+                    tool_results.append(f"{tool_name}: {json.dumps(result, default=str, separators=(',', ':'))}")
                 except Exception as e:
-                    tool_results.append(f"[{tool_name}]: Error - {str(e)}")
-            else:
-                tool_results.append(f"[{tool_name}]: Unknown tool")
+                    tool_results.append(f"{tool_name}: error - {e}")
 
-        groq_messages.append({'role': 'assistant', 'content': response_text})
-        groq_messages.append({'role': 'user', 'content': "Here are the tool results:\n\n" + "\n\n".join(tool_results) + "\n\nNow give the user a clear, well-formatted answer based on this real data. Use markdown tables/bullets. Do NOT include any tool call blocks."})
+        groq_messages.append({'role': 'assistant', 'content': probe_text})
+        groq_messages.append({'role': 'user', 'content': (
+            "Tool results:\n" + "\n".join(tool_results) +
+            "\n\nNow give the user a clear, natural answer. No tool blocks."
+        )})
+    elif probe_text.strip() and '```tool' not in probe_text:
+        # Probe already gave a good answer — stream it character by character
+        clean = re.sub(r'```(?:tool|json)?\s*\n.*?\n```', '', probe_text, flags=re.DOTALL).strip()
+        for char in clean:
+            yield {'type': 'chunk', 'content': char}
+        yield {'type': 'tool_calls', 'data': tool_calls_made}
+        return
 
-        response = client.chat.completions.create(
-            model=model_name or 'llama-3.3-70b-versatile',
-            messages=groq_messages,
-            temperature=0.3,
-            max_tokens=4096,
+    # Stream the final LLM response
+    try:
+        stream = client.chat.completions.create(
+            model=model, messages=groq_messages,
+            temperature=0.4, max_tokens=1200, stream=True,
         )
-        response_text = response.choices[0].message.content or ''
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content or ''
+            if delta:
+                yield {'type': 'chunk', 'content': delta}
+    except Exception as e:
+        yield {'type': 'error', 'content': str(e)}
 
-    # Clean any remaining tool blocks
-    response_text = _clean_tool_blocks(response_text)
-
-    return {
-        'content': response_text,
-        'tool_calls': tool_calls_made,
-        'tokens_used': response.usage.total_tokens if response.usage else 0,
-    }
+    yield {'type': 'tool_calls', 'data': tool_calls_made}
 
 
-def _chat_openai(messages, user, api_key, model_name):
-    """Placeholder for OpenAI."""
-    return {'content': 'OpenAI integration coming soon.', 'tool_calls': []}
+# ---------------------------------------------------------------------------
+# Gemini streaming
+# ---------------------------------------------------------------------------
+def _stream_gemini(messages, user, api_key, model_name, prefetched=''):
+    from google import genai
+    client = genai.Client(api_key=api_key)
+    tool_registry = _get_tools_for_user(user)
+    system_prompt = _build_system_prompt(user, prefetched)
+    tool_desc = _build_tool_desc(tool_registry)
 
+    contents = []
+    for msg in messages[:-1]:
+        role = 'user' if msg['role'] == 'user' else 'model'
+        contents.append({'role': role, 'parts': [{'text': msg['content']}]})
+    contents.append({'role': 'user', 'parts': [{'text': messages[-1]['content'] + tool_desc}]})
 
-def _chat_claude(messages, user, api_key, model_name):
-    """Placeholder for Claude."""
-    return {'content': 'Claude integration coming soon.', 'tool_calls': []}
+    model = model_name or 'gemini-2.0-flash'
+    cfg = {'system_instruction': system_prompt, 'max_output_tokens': 1200, 'temperature': 0.4}
+    tool_calls_made = []
+
+    try:
+        # Probe for tool calls (non-streaming, fast)
+        probe_cfg = {**cfg, 'max_output_tokens': 200}
+        probe = client.models.generate_content(model=model, contents=contents, config=probe_cfg)
+        probe_text = probe.text or ''
+        calls = _extract_tool_calls(probe_text)
+
+        if calls:
+            tool_results = []
+            for call in calls:
+                tool_name = call.get('tool', '')
+                args = call.get('args', {})
+                if tool_name in tool_registry:
+                    try:
+                        result = tool_registry[tool_name]['fn'](user=user, **args)
+                        tool_calls_made.append({'tool': tool_name, 'args': args, 'result': 'success'})
+                        tool_results.append(f"{tool_name}: {json.dumps(result, default=str, separators=(',', ':'))}")
+                    except Exception as e:
+                        tool_results.append(f"{tool_name}: error - {e}")
+
+            contents.append({'role': 'model', 'parts': [{'text': probe_text}]})
+            contents.append({'role': 'user', 'parts': [{'text': (
+                "Tool results:\n" + "\n".join(tool_results) +
+                "\n\nNow give the user a clear, natural answer. No tool blocks."
+            )}]})
+        elif probe_text.strip() and '```tool' not in probe_text:
+            clean = re.sub(r'```tool\s*\n.*?\n```', '', probe_text, flags=re.DOTALL).strip()
+            for char in clean:
+                yield {'type': 'chunk', 'content': char}
+            yield {'type': 'tool_calls', 'data': []}
+            return
+
+        # Stream final response
+        for chunk in client.models.generate_content_stream(model=model, contents=contents, config=cfg):
+            text = chunk.text or ''
+            if text:
+                yield {'type': 'chunk', 'content': text}
+
+    except Exception as e:
+        yield {'type': 'error', 'content': str(e)}
+
+    yield {'type': 'tool_calls', 'data': tool_calls_made}

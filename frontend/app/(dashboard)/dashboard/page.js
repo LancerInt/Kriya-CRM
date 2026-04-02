@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import StatsCard from "@/components/ui/StatsCard";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
@@ -10,11 +11,70 @@ import {
   HiOutlineShoppingCart,
   HiOutlineBanknotes,
   HiOutlineClock,
+  HiOutlineXMark,
+  HiOutlineUserGroup,
 } from "react-icons/hi2";
+
+function ShadowClientsPopup({ clients, onClose }) {
+  if (!clients || clients.length === 0) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <HiOutlineUserGroup className="w-5 h-5 text-amber-500" />
+            Shared Accounts
+          </h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100">
+            <HiOutlineXMark className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          You are the shadow executive for these accounts.
+        </p>
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {clients.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center justify-between px-3 py-2 rounded-lg bg-amber-50 border border-amber-100"
+            >
+              <span className="text-sm font-medium text-gray-800">{c.company_name}</span>
+              <div className="flex items-center gap-2">
+                {c.country && (
+                  <span className="text-xs text-gray-500">{c.country}</span>
+                )}
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    c.status === "active"
+                      ? "bg-green-100 text-green-700"
+                      : c.status === "prospect"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {c.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={onClose}
+          className="mt-4 w-full py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showShadow, setShowShadow] = useState(false);
+  const user = useSelector((state) => state.auth.user);
+  const isExecutive = user?.role === "executive";
 
   useEffect(() => {
     api.get("/analytics/dashboard/")
@@ -25,12 +85,29 @@ export default function DashboardPage() {
 
   if (loading) return <LoadingSpinner size="lg" />;
 
+  const shadowClients = stats?.shadow_clients || [];
+
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        {isExecutive && shadowClients.length > 0 && (
+          <button
+            onClick={() => setShowShadow(true)}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100"
+          >
+            <HiOutlineUserGroup className="w-4 h-4" />
+            Shared Accounts
+            <span className="ml-1 bg-amber-200 text-amber-800 text-xs font-bold px-1.5 py-0.5 rounded-full">
+              {shadowClients.length}
+            </span>
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
         <StatsCard
-          title="Total Accounts"
+          title={isExecutive ? "My Accounts" : "Total Accounts"}
           value={stats?.clients?.total || 0}
           icon={HiOutlineUsers}
           color="indigo"
@@ -45,7 +122,7 @@ export default function DashboardPage() {
         />
         <StatsCard
           title="Active Leads"
-          value={stats?.pipeline?.total || 0}
+          value={stats?.pipeline?.active_inquiries || 0}
           icon={HiOutlineFunnel}
           color="purple"
         />
@@ -57,15 +134,15 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Recent Activity */}
+      {/* Quick Overview */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h2 className="text-lg font-semibold mb-4">Quick Overview</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h3 className="text-sm font-medium text-gray-500 mb-3">Leads by Stage</h3>
-            {stats?.pipeline?.by_stage ? (
+            {stats?.pipeline_by_stage && stats.pipeline_by_stage.length > 0 ? (
               <div className="space-y-2">
-                {Object.entries(stats.pipeline.by_stage).map(([stage, count]) => (
+                {stats.pipeline_by_stage.map(({ stage, count }) => (
                   <div key={stage} className="flex items-center justify-between">
                     <span className="text-sm capitalize text-gray-700">{stage.replace(/_/g, " ")}</span>
                     <span className="text-sm font-medium bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">{count}</span>
@@ -99,6 +176,10 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {showShadow && (
+        <ShadowClientsPopup clients={shadowClients} onClose={() => setShowShadow(false)} />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import StatsCard from "@/components/ui/StatsCard";
@@ -15,6 +16,7 @@ import {
   HiOutlineFunnel,
   HiOutlineCheckCircle,
   HiOutlineArrowPath,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 
 const stageColors = [
@@ -41,9 +43,69 @@ const countryBarColors = [
   "bg-purple-500",
 ];
 
+function ShadowClientsPopup({ clients, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <HiOutlineUserGroup className="w-5 h-5 text-amber-500" />
+            Shared Accounts
+          </h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100">
+            <HiOutlineXMark className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          You are the shadow executive for these accounts. Their data is included in your analytics.
+        </p>
+        {clients.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">No shared accounts</p>
+        ) : (
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {clients.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-amber-50 border border-amber-100"
+              >
+                <span className="text-sm font-medium text-gray-800">{c.company_name}</span>
+                <div className="flex items-center gap-2">
+                  {c.country && (
+                    <span className="text-xs text-gray-500">{c.country}</span>
+                  )}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      c.status === "active"
+                        ? "bg-green-100 text-green-700"
+                        : c.status === "prospect"
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-gray-100 text-gray-500"
+                    }`}
+                  >
+                    {c.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={onClose}
+          className="mt-4 w-full py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AnalyticsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showShadow, setShowShadow] = useState(false);
+  const user = useSelector((state) => state.auth.user);
+  const isExecutive = user?.role === "executive";
 
   const fetchData = () => {
     setLoading(true);
@@ -65,26 +127,42 @@ export default function AnalyticsPage() {
   const clientsByCountry = (data?.clients_by_country || []).slice(0, 10);
   const maxCountryCount = Math.max(...clientsByCountry.map((c) => c.count), 1);
 
+  const shadowClients = data?.shadow_clients || [];
+
   return (
     <div>
       <PageHeader
         title="Analytics"
-        subtitle="Business intelligence and reports"
+        subtitle={isExecutive ? "Your portfolio performance" : "Business intelligence and reports"}
         action={
-          <button
-            onClick={fetchData}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
-          >
-            <HiOutlineArrowPath className="w-4 h-4" />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {isExecutive && shadowClients.length > 0 && (
+              <button
+                onClick={() => setShowShadow(true)}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100"
+              >
+                <HiOutlineUserGroup className="w-4 h-4" />
+                Shared Accounts
+                <span className="ml-1 bg-amber-200 text-amber-800 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                  {shadowClients.length}
+                </span>
+              </button>
+            )}
+            <button
+              onClick={fetchData}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
+            >
+              <HiOutlineArrowPath className="w-4 h-4" />
+              Refresh
+            </button>
+          </div>
         }
       />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatsCard
-          title="Total Clients"
+          title={isExecutive ? "My Accounts" : "Total Clients"}
           value={data?.clients?.total || 0}
           icon={HiOutlineUsers}
           color="indigo"
@@ -156,7 +234,9 @@ export default function AnalyticsPage() {
 
         {/* Clients by Country */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Clients by Country</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            {isExecutive ? "My Accounts by Country" : "Clients by Country"}
+          </h2>
           {clientsByCountry.length > 0 ? (
             <div className="space-y-3">
               {clientsByCountry.map((item, idx) => (
@@ -227,6 +307,10 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {showShadow && (
+        <ShadowClientsPopup clients={shadowClients} onClose={() => setShowShadow(false)} />
+      )}
     </div>
   );
 }

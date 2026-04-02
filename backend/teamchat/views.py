@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,12 +9,25 @@ from .serializers import ChatRoomSerializer, ChatMessageSerializer
 class ChatRoomViewSet(viewsets.ModelViewSet):
     serializer_class = ChatRoomSerializer
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['request'] = self.request
+        return ctx
+
     def get_queryset(self):
-        return ChatRoom.objects.prefetch_related('messages').all()
+        user = self.request.user
+        # Non-direct rooms: visible to everyone
+        # Direct rooms: only visible to members
+        return ChatRoom.objects.prefetch_related('messages', 'members').filter(
+            Q(is_direct=False) | Q(members=user)
+        ).distinct()
 
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
         room = self.get_object()
+        # For direct rooms, only members can read
+        if room.is_direct and not room.members.filter(id=request.user.id).exists():
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
         since = request.query_params.get('since')
         qs = room.messages.select_related('user').all()
         if since:
@@ -30,6 +44,9 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='send')
     def send_message(self, request, pk=None):
         room = self.get_object()
+        # For direct rooms, only members can send
+        if room.is_direct and not room.members.filter(id=request.user.id).exists():
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
         msg_type = request.data.get('message_type', 'text')
         content = request.data.get('content', '')
         file = request.FILES.get('file')
@@ -43,6 +60,46 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
             filename=file.name if file else '',
         )
         return Response(ChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='direct')
+    def get_or_create_direct(self, request):
+        """Get or create a private DM conversation between current user and another user."""
+        other_user_id = request.data.get('user_id')
+        if not other_user_id:
+            return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from accounts.models import User
+        try:
+            other_user = User.objects.get(id=other_user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if other_user == request.user:
+            return Response({'error': 'Cannot DM yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find existing DM room between exactly these two users
+        existing = ChatRoom.objects.filter(
+            is_direct=True, members=request.user
+        ).filter(members=other_user)
+
+        if existing.exists():
+            room = existing.first()
+        else:
+            room = ChatRoom.objects.create(
+                name=f'dm_{min(str(request.user.id), str(other_user.id))}_{max(str(request.user.id), str(other_user.id))}',
+                is_direct=True,
+            )
+            room.members.add(request.user, other_user)
+
+        return Response(ChatRoomSerializer(room, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], url_path='users')
+    def list_users(self, request):
+        """List all active users except self, for DM selection."""
+        from accounts.models import User
+        qs = User.objects.filter(is_active=True).exclude(id=request.user.id).order_by('first_name', 'last_name')
+        data = [{'id': str(u.id), 'full_name': u.full_name, 'role': u.role} for u in qs]
+        return Response(data)
 
 
 class ChatMessageViewSet(viewsets.ModelViewSet):

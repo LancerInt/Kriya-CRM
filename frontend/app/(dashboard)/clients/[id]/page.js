@@ -13,6 +13,7 @@ import ComposeEmailModal from "@/components/communications/ComposeEmailModal";
 import SendWhatsAppModal from "@/components/communications/SendWhatsAppModal";
 import AISummaryButton from "@/components/ai/AISummaryButton";
 import toast from "react-hot-toast";
+import { sendWithUndo } from "@/lib/undoSend";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 
@@ -450,35 +451,50 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const handleSendDraft = async () => {
     setSendingDraft(true);
     try {
-      // Save draft updates first
+      // Save draft edits first (before closing modal)
       await api.patch(`/communications/drafts/${draft.id}/`, draftForm);
 
+      // Build FormData now while file refs are still valid
+      let fd = null;
       if (draftAttachments.length > 0) {
-        // Send via send-email endpoint with attachments
-        const fd = new FormData();
+        fd = new FormData();
         fd.append("to", draft.to_email);
         fd.append("subject", draftForm.subject);
         fd.append("body", draftForm.body.replace(/\n/g, '<br>'));
         if (draftForm.cc) fd.append("cc", draftForm.cc);
-        // Find email account
         const accounts = await api.get("/communications/email-accounts/");
         const account = accounts.data.results?.[0] || accounts.data[0];
         if (account) fd.append("email_account", account.id);
         if (draft.client) fd.append("client", draft.client);
         draftAttachments.forEach(file => fd.append("attachments", file));
-        await api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } });
-        // Mark draft as sent
-        await api.post(`/communications/drafts/${draft.id}/send/`);
-      } else {
-        await api.post(`/communications/drafts/${draft.id}/send/`);
       }
 
-      toast.success("Email sent!");
+      const draftId = draft.id;
+
+      // Close modal immediately
       setShowDraftModal(false);
       setDraftAttachments([]);
-      reload();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
-    finally { setSendingDraft(false); }
+
+      sendWithUndo(
+        async () => {
+          if (fd) {
+            await api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            await api.post(`/communications/drafts/${draftId}/send/`);
+          } else {
+            await api.post(`/communications/drafts/${draftId}/send/`);
+          }
+        },
+        {
+          preview: { to: draft.to_email, cc: draftForm.cc, subject: draftForm.subject, body: draftForm.body },
+          onSent: () => reload(),
+          onError: (err) => toast.error(getErrorMessage(err, "Failed to send")),
+        }
+      );
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to send"));
+    } finally {
+      setSendingDraft(false);
+    }
   };
 
   const handleDiscardDraft = async () => {

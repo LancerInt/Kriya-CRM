@@ -4,12 +4,12 @@ import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { sendWithUndo } from "@/lib/undoSend";
 
 export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, onSent }) {
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState({ email_account: "", to: contactEmail || "", cc: "", subject: "", body: "" });
   const [attachments, setAttachments] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -30,30 +30,33 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    setSubmitting(true);
-    try {
-      const fd = new FormData();
-      fd.append("email_account", form.email_account);
-      fd.append("to", form.to);
-      fd.append("subject", form.subject);
-      fd.append("body", form.body);
-      if (form.cc) fd.append("cc", form.cc);
-      if (clientId) fd.append("client", clientId);
-      attachments.forEach((file) => fd.append("attachments", file));
+    // Build FormData now (before closing the modal) so file references stay valid
+    const fd = new FormData();
+    fd.append("email_account", form.email_account);
+    fd.append("to", form.to);
+    fd.append("subject", form.subject);
+    fd.append("body", form.body);
+    if (form.cc) fd.append("cc", form.cc);
+    if (clientId) fd.append("client", clientId);
+    attachments.forEach((file) => fd.append("attachments", file));
 
-      await api.post("/communications/send-email/", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      toast.success("Email sent successfully");
-      setForm({ email_account: "", to: "", cc: "", subject: "", body: "" });
-      setAttachments([]);
-      onClose();
-      if (onSent) onSent();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to send email")); } finally {
-      setSubmitting(false);
-    }
+    // Close the modal immediately — email will be sent after 10s unless undone
+    onClose();
+
+    sendWithUndo(
+      () => api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } }),
+      {
+        preview: { to: form.to, cc: form.cc, subject: form.subject, body: form.body },
+        onSent: () => {
+          setForm({ email_account: "", to: "", cc: "", subject: "", body: "" });
+          setAttachments([]);
+          if (onSent) onSent();
+        },
+        onError: (err) => toast.error(getErrorMessage(err, "Failed to send email")),
+      }
+    );
   };
 
   const formatSize = (bytes) => {
@@ -165,8 +168,8 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
         </div>
 
         <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
-            {submitting ? "Sending..." : "Send Email"}
+          <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">
+            Send Email
           </button>
           <button type="button" onClick={onClose} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
         </div>

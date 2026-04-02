@@ -3,10 +3,12 @@ from common.models import TimeStampedModel
 
 
 class ChatRoom(TimeStampedModel):
-    """Chat rooms — general or topic-specific."""
+    """Chat rooms — general, topic-specific, or private direct messages."""
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     is_general = models.BooleanField(default=False)
+    is_direct = models.BooleanField(default=False)
+    members = models.ManyToManyField('accounts.User', blank=True, related_name='direct_rooms')
 
     class Meta:
         db_table = 'chat_rooms'

@@ -8,5 +8,6 @@ router.register('conversations', views.AgentConversationViewSet, basename='conve
 
 urlpatterns = [
     path('quick-chat/', views.quick_chat, name='quick-chat'),
+    path('messages/<uuid:pk>/', views.delete_message, name='delete-message'),
     path('', include(router.urls)),
 ]

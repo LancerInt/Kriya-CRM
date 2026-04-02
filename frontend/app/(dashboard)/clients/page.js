@@ -61,10 +61,11 @@ export default function ClientsPage() {
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => handleStatusChange(row.id, e.target.value, e)}
         className="text-xs font-medium px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-transparent"
-        style={{ color: row.status === "active" ? "#059669" : row.status === "prospect" ? "#d97706" : "#6b7280" }}
+        style={{ color: row.status === "active" ? "#059669" : row.status === "prospect" ? "#d97706" : row.status === "on_hold" ? "#7c3aed" : "#6b7280" }}
       >
         <option value="active">Active</option>
         <option value="prospect">Prospect</option>
+        <option value="on_hold">On Hold</option>
         <option value="inactive">Inactive</option>
       </select>
     )},
