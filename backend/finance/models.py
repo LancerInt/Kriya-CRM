@@ -114,6 +114,7 @@ class ProformaInvoice(TimeStampedModel):
 
     order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='proforma_invoices')
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='proforma_invoices')
+    source_communication = models.ForeignKey('communications.Communication', on_delete=models.SET_NULL, null=True, blank=True, help_text='The communication that triggered this PI request')
     invoice_number = models.CharField(max_length=50, unique=True)
     invoice_date = models.DateField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)

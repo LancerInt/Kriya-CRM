@@ -109,8 +109,10 @@ def generate_pi_pdf(pi):
     from django.conf import settings
 
     buffer = io.BytesIO()
+    pdf_title = f'PI {pi.invoice_number} - {pi.client_company_name}'
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=12*mm, bottomMargin=10*mm,
-                            leftMargin=10*mm, rightMargin=10*mm)
+                            leftMargin=10*mm, rightMargin=10*mm,
+                            title=pdf_title, author='Kriya Biosys Private Limited')
     styles = getSampleStyleSheet()
     el = []
 
@@ -317,7 +319,7 @@ def generate_pi_pdf(pi):
     data = [hdr]
     for item in pi.items.all():
         data.append([item.product_name, item.packages_description, item.description_of_goods,
-                     f'{item.quantity:,.0f}', f'{item.unit_price:,.2f}', f'{item.total_price:,.2f}'])
+                     f'{item.quantity:,.0f} {item.unit}'.strip(), f'{item.unit_price:,.2f}', f'{item.total_price:,.2f}'])
 
     it = Table(data, colWidths=CW)
     it.setStyle(TableStyle([
@@ -469,9 +471,12 @@ def send_pi_email(pi, user):
     from communications.services import EmailService
     from django.core.files.base import ContentFile
 
-    # Get contact email
-    contact = pi.client.contacts.filter(is_deleted=False).order_by('-is_primary').first()
-    if not contact or not contact.email:
+    # Get contact email — reply to the requester if PI was auto-created from an email
+    from communications.services import get_client_email_recipients
+    contact_email, contact, cc_string = get_client_email_recipients(
+        pi.client, source_communication=pi.source_communication
+    )
+    if not contact_email:
         raise ValueError(f'No email for {pi.client_company_name}')
 
     email_account = EmailAccount.objects.filter(is_active=True).first()
@@ -508,9 +513,10 @@ def send_pi_email(pi, user):
     pdf_file.name = f'PI_{pi.invoice_number.replace("/", "-")}.pdf'
 
     EmailService.send_email(
-        email_account=email_account, to=contact.email,
+        email_account=email_account, to=contact_email,
         subject=subject, body_html=body_html,
         attachments=[pdf_file],
+        cc=cc_string or None,
     )
 
     # Update status
@@ -522,10 +528,11 @@ def send_pi_email(pi, user):
         client=pi.client, contact=contact, user=user,
         comm_type='email', direction='outbound',
         subject=subject, body=body_html, status='sent',
-        email_account=email_account, external_email=contact.email,
+        email_account=email_account, external_email=contact_email,
+        email_cc=cc_string,
     )
 
-    return contact.email
+    return contact_email
 
 
 def _number_to_words(num, currency='USD'):

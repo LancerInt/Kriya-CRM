@@ -5,7 +5,7 @@ from .models import Client, Contact, ClientPort, ClientAssignment
 class ContactSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contact
-        fields = ['id', 'name', 'email', 'phone', 'whatsapp', 'designation', 'is_primary', 'created_at']
+        fields = ['id', 'client', 'name', 'email', 'phone', 'whatsapp', 'designation', 'is_primary', 'created_at']
         read_only_fields = ['id']
 
 

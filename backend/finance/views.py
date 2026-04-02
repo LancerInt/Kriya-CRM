@@ -7,6 +7,7 @@ from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, Co
 from .serializers import (InvoiceSerializer, PaymentSerializer, FIRCRecordSerializer,
                           GSTRecordSerializer, ProformaInvoiceSerializer,
                           CommercialInvoiceSerializer)
+from notifications.helpers import notify
 
 
 class InvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
@@ -43,6 +44,15 @@ class PaymentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(client__in=client_ids)
         return qs
+
+    def perform_create(self, serializer):
+        payment = serializer.save()
+        notify(
+            title=f'Payment received: {payment.currency} {payment.amount:,.2f}',
+            message=f'{self.request.user.full_name} recorded payment from {payment.client.company_name}.',
+            notification_type='alert', link='/finance',
+            actor=self.request.user, client=payment.client,
+        )
 
 class FIRCRecordViewSet(viewsets.ModelViewSet):
     queryset = FIRCRecord.objects.all()
@@ -151,6 +161,12 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .pi_service import send_pi_email
         try:
             sent_to = send_pi_email(pi, request.user)
+            notify(
+                title=f'PI {pi.invoice_number} sent to {pi.client.company_name}',
+                message=f'{request.user.full_name} sent PI to {sent_to}.',
+                notification_type='system', link='/proforma-invoices',
+                actor=request.user, client=pi.client,
+            )
             return Response({'status': 'sent', 'sent_to': sent_to})
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -195,6 +211,13 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         # Link PI to order
         pi.order = order
         pi.save(update_fields=['order'])
+
+        notify(
+            title=f'Order created from PI {pi.invoice_number}',
+            message=f'{request.user.full_name} converted PI to order {order.order_number}.',
+            notification_type='system', link='/sales-orders',
+            actor=request.user, client=pi.client,
+        )
 
         from orders.serializers import OrderSerializer
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
@@ -354,6 +377,12 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .ci_service import send_ci_email
         try:
             sent_to = send_ci_email(ci, request.user)
+            notify(
+                title=f'CI {ci.invoice_number} sent to {ci.client.company_name}',
+                message=f'{request.user.full_name} sent commercial invoice to {sent_to}.',
+                notification_type='system', link='/finance',
+                actor=request.user, client=ci.client,
+            )
             return Response({'status': 'sent', 'sent_to': sent_to})
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -112,7 +112,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
         await api.patch(`/clients/contacts/${editingContact}/`, contactForm);
         toast.success("Contact updated");
       } else {
-        await api.post(`/clients/${client.id}/add-contact/`, contactForm);
+        await api.post(`/clients/contacts/`, { ...contactForm, client: client.id });
         toast.success("Contact added");
       }
       setShowContactModal(false);
@@ -415,6 +415,20 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const primaryContact = client?.contacts?.find((c) => c.is_primary) || client?.contacts?.[0];
   const contactEmail = primaryContact?.email || "";
   const contactPhone = primaryContact?.phone || "";
+  const [replyToEmail, setReplyToEmail] = useState(null);
+
+  // Get all contact emails for this client
+  const allContactEmails = (client?.contacts || []).map(c => c.email).filter(Boolean);
+
+  // When replying to an inbound email: to = sender, cc = other contacts
+  // When composing fresh: to = primary contact, cc = other contacts
+  const composeToEmail = replyToEmail || contactEmail;
+  const composeCcEmails = allContactEmails.filter(e => e !== composeToEmail).join(", ");
+
+  const handleReply = (comm) => {
+    setReplyToEmail(comm.external_email || contactEmail);
+    setShowEmailModal(true);
+  };
 
   // Fetch admin/manager emails for auto CC
   useEffect(() => {
@@ -610,7 +624,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         {row.attachments.length}
       </span>
     )},
-    { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
+    { key: "created_at", label: "Date & Time", render: (row) => fmtDateTime(row.created_at) },
     { key: "actions", label: "", render: (row) => (
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {/* AI Draft badge for inbound emails */}
@@ -622,6 +636,11 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         )}
         {row.direction === "inbound" && row.draft_id && row.draft_status === "sent" && (
           <span className="text-[10px] text-green-600 font-medium">Replied</span>
+        )}
+        {row.direction === "inbound" && row.comm_type === "email" && (
+          <button onClick={() => handleReply(row)} className="px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100">
+            Reply
+          </button>
         )}
         <button onClick={() => setSelectedComm(row)} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">
           Snapshot
@@ -657,7 +676,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         }
         return true;
       })} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
-      <ComposeEmailModal open={showEmailModal} onClose={() => setShowEmailModal(false)} clientId={clientId} contactEmail={contactEmail} onSent={reload} />
+      <ComposeEmailModal open={showEmailModal} onClose={() => { setShowEmailModal(false); setReplyToEmail(null); }} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} onSent={reload} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} clientId={clientId} contactPhone={contactPhone} onSent={reload} />
 
       {/* Communication Detail Modal */}

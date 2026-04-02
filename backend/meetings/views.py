@@ -17,12 +17,24 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 GOOGLE_REDIRECT_URI = 'http://localhost:8000/api/meetings/google-oauth-callback/'
 
 
+from notifications.helpers import notify
+
+
 class CallLogViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = CallLogSerializer
     filterset_fields = ['client', 'user', 'status']
 
     def get_queryset(self):
         return CallLog.objects.select_related('client', 'user', 'contact').all()
+
+    def perform_create(self, serializer):
+        meeting = serializer.save(user=self.request.user)
+        notify(
+            title=f'Meeting scheduled: {meeting.agenda or meeting.client.company_name}',
+            message=f'{self.request.user.full_name} scheduled a meeting with {meeting.client.company_name}.',
+            notification_type='task', link='/meetings',
+            actor=self.request.user, client=meeting.client,
+        )
 
     @action(detail=True, methods=['post'], url_path='generate-link')
     def generate_link(self, request, pk=None):

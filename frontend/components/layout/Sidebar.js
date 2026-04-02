@@ -48,7 +48,6 @@ const navItems = [
   { name: "Reports", href: "/analytics", icon: HiOutlineChartBar },
   { name: "Team Chat", href: "/team-chat", icon: HiOutlineUserGroup },
   { name: "Kriya AI", href: "/ai", icon: HiOutlineSparkles },
-  { name: "Notifications", href: "/notifications", icon: HiOutlineBell },
   { name: "Archive", href: "/recycle-bin", icon: HiOutlineTrash },
   { name: "Settings", href: "/settings", icon: HiOutlineCog6Tooth },
 ];

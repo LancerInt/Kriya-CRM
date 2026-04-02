@@ -189,8 +189,10 @@ export default function OrderDetailPage() {
     await handleSavePI();
     try {
       const res = await api.get(`/finance/pi/${pi.id}/generate-pdf/`, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      window.open(url, "_blank");
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const title = `PI ${pi.invoice_number} - ${pi.client_company_name || "Client"}`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
     } catch { toast.error("Failed to preview"); }
   };
 
@@ -247,8 +249,10 @@ export default function OrderDetailPage() {
     await handleSaveCI();
     try {
       const res = await api.get(`/finance/ci/${ci.id}/generate-pdf/`, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      window.open(url, "_blank");
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const title = `CI ${ci.invoice_number} - ${ci.client_company_name || "Client"}`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
     } catch { toast.error("Failed to preview"); }
   };
 
@@ -305,8 +309,10 @@ export default function OrderDetailPage() {
     await handleSaveQt();
     try {
       const res = await api.get(`/quotations/quotations/${qt.id}/generate-pdf/`, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      window.open(url, "_blank");
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const title = `Quotation ${qt.quotation_number} - ${order?.client_name || "Client"}`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
     } catch { toast.error("Failed to preview"); }
   };
 

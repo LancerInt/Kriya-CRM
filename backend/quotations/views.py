@@ -9,6 +9,7 @@ from .models import Inquiry, Quotation, QuotationItem
 from .serializers import InquirySerializer, QuotationSerializer, QuotationCreateSerializer
 from orders.models import Order, OrderItem
 from finance.models import Invoice
+from notifications.helpers import notify
 
 class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = InquirySerializer
@@ -36,13 +37,12 @@ class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             created_by=self.request.user, priority='high', is_auto_generated=True,
             linked_type='inquiry', linked_id=inquiry.id
         )
-        # Notify the assigned executive about the new inquiry
-        Notification.objects.create(
-            user=assigned_user,
-            notification_type='task',
-            title=f'New inquiry assigned: {inquiry.client.company_name}',
-            message=f'A new inquiry from {inquiry.client.company_name} for {inquiry.product_name or "N/A"} has been assigned to you. A follow-up task has been created.',
-            link=f'/quotations/inquiries/{inquiry.id}',
+        notify(
+            title=f'New inquiry: {inquiry.client.company_name}',
+            message=f'New inquiry from {inquiry.client.company_name} for {inquiry.product_name or "N/A"}. A follow-up task has been created.',
+            notification_type='task', link='/inquiries',
+            actor=self.request.user, client=inquiry.client,
+            extra_users=[assigned_user],
         )
 
     @action(detail=True, methods=['post'])
@@ -112,15 +112,13 @@ class InquiryViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 priority='urgent',
             )
 
-        # Notify assigned executive
-        if assigned and assigned != request.user:
-            Notification.objects.create(
-                user=assigned,
-                notification_type='task',
-                title=f'Pipeline: {client_name} → {new_stage.replace("_", " ").title()}',
-                message=f'Inquiry for {client_name} moved from "{old_stage}" to "{new_stage.replace("_", " ")}". Check your tasks.',
-                link='/pipeline',
-            )
+        notify(
+            title=f'Pipeline: {client_name} → {new_stage.replace("_", " ").title()}',
+            message=f'Inquiry moved from "{old_stage}" to "{new_stage.replace("_", " ")}" by {request.user.full_name}.',
+            notification_type='task', link='/inquiries',
+            actor=request.user, client=inquiry.client,
+            extra_users=[assigned] if assigned else [],
+        )
 
         return Response(InquirySerializer(inquiry).data)
 
@@ -171,6 +169,12 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             unit='KG',
             unit_price=0,
             total_price=0,
+        )
+        notify(
+            title=f'Quotation created: {q.quotation_number}',
+            message=f'{request.user.full_name} created a quotation for {client.company_name}.',
+            notification_type='system', link='/quotations',
+            actor=request.user, client=client,
         )
         return Response(QuotationSerializer(q).data, status=status.HTTP_201_CREATED)
 
@@ -223,6 +227,12 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q = self.get_object()
         q.status = 'pending_approval'
         q.save()
+        notify(
+            title=f'Quotation {q.quotation_number} pending approval',
+            message=f'{request.user.full_name} submitted quotation {q.quotation_number} for {q.client.company_name} for approval.',
+            notification_type='approval', link='/quotations',
+            actor=request.user, client=q.client,
+        )
         return Response(QuotationSerializer(q).data)
 
     @action(detail=True, methods=['post'])
@@ -234,16 +244,13 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q.approved_by = request.user
         q.approved_at = timezone.now()
         q.save()
-        # Notify the quotation creator that their quote has been approved
-        from notifications.models import Notification
-        if q.created_by and q.created_by != request.user:
-            Notification.objects.create(
-                user=q.created_by,
-                notification_type='approval',
-                title=f'Quotation {q.quotation_number} approved',
-                message=f'Your quotation {q.quotation_number} for {q.client.company_name} has been approved by {request.user.full_name}.',
-                link=f'/quotations/{q.id}',
-            )
+        notify(
+            title=f'Quotation {q.quotation_number} approved',
+            message=f'Quotation {q.quotation_number} for {q.client.company_name} approved by {request.user.full_name}.',
+            notification_type='approval', link='/quotations',
+            actor=request.user, client=q.client,
+            extra_users=[q.created_by] if q.created_by else [],
+        )
         return Response(QuotationSerializer(q).data)
 
     @action(detail=True, methods=['post'])
@@ -251,6 +258,13 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q = self.get_object()
         q.status = 'rejected'
         q.save()
+        notify(
+            title=f'Quotation {q.quotation_number} rejected',
+            message=f'Quotation {q.quotation_number} for {q.client.company_name} was rejected by {request.user.full_name}.',
+            notification_type='alert', link='/quotations',
+            actor=request.user, client=q.client,
+            extra_users=[q.created_by] if q.created_by else [],
+        )
         return Response(QuotationSerializer(q).data)
 
     @action(detail=False, methods=['post'], url_path='create-from-order')
@@ -358,15 +372,13 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q.status = 'sent'
         q.save()
 
-        from notifications.models import Notification
-        if q.created_by:
-            Notification.objects.create(
-                user=q.created_by,
-                notification_type='system',
-                title=f'Proforma Invoice {pi.invoice_number} generated',
-                message=f'PI {pi.invoice_number} has been generated from quotation {q.quotation_number} for {q.client.company_name}.',
-                link=f'/finance/invoices/{pi.id}',
-            )
+        notify(
+            title=f'PI {pi.invoice_number} generated',
+            message=f'Proforma Invoice generated from quotation {q.quotation_number} for {q.client.company_name}.',
+            notification_type='system', link='/proforma-invoices',
+            actor=request.user, client=q.client,
+            extra_users=[q.created_by] if q.created_by else [],
+        )
 
         from finance.serializers import InvoiceSerializer
         return Response(InvoiceSerializer(pi).data, status=status.HTTP_201_CREATED)
@@ -415,16 +427,13 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             file_size=0,
             uploaded_by=request.user,
         )
-        # Notify the quotation creator about the order conversion
-        from notifications.models import Notification
-        if q.created_by:
-            Notification.objects.create(
-                user=q.created_by,
-                notification_type='system',
-                title=f'Order {order.order_number} created from {q.quotation_number}',
-                message=f'Quotation {q.quotation_number} has been converted to order {order.order_number}. Proforma Invoice {pi.invoice_number} has been generated.',
-                link=f'/orders/{order.id}',
-            )
+        notify(
+            title=f'Order {order.order_number} created from {q.quotation_number}',
+            message=f'Quotation converted to order by {request.user.full_name}. PI {pi.invoice_number} generated.',
+            notification_type='system', link=f'/sales-orders',
+            actor=request.user, client=q.client,
+            extra_users=[q.created_by] if q.created_by else [],
+        )
         return Response({'order_id': str(order.id), 'order_number': order.order_number}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='send-to-client')
@@ -437,15 +446,12 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         if q.status not in ['approved', 'sent', 'pending_approval', 'draft']:
             return Response({'error': 'Quotation cannot be sent in this status'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get client's primary contact
-        contact = q.client.contacts.filter(is_deleted=False).order_by('-is_primary', 'name').first()
-        if not contact:
-            return Response({'error': 'Client has no contacts. Add a contact first.'}, status=status.HTTP_400_BAD_REQUEST)
-
         if send_via == 'email':
-            contact_email = contact.email
+            # Determine recipient: use quote requester's email if available, else primary contact
+            from communications.services import get_client_email_recipients
+            contact_email, contact, cc_string = get_client_email_recipients(q.client, source_quotation=q)
             if not contact_email:
-                return Response({'error': f'Contact {contact.name} has no email address.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': 'Client has no contacts with email. Add a contact first.'}, status=status.HTTP_400_BAD_REQUEST)
 
             from communications.models import EmailAccount
             email_account = EmailAccount.objects.filter(user=request.user, is_active=True).first()
@@ -502,6 +508,7 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                     subject=f'Quotation {q.quotation_number} - Kriya Biosys',
                     body_html=body_html,
                     attachments=[pdf_file],
+                    cc=cc_string or None,
                 )
             except Exception as e:
                 return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -513,6 +520,7 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 comm_type='email', direction='outbound',
                 subject=f'Quotation {q.quotation_number}', body=body_html,
                 status='sent', email_account=email_account, external_email=contact_email,
+                email_cc=cc_string,
             )
 
         q.sent_via = send_via
@@ -520,5 +528,13 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         if q.status in ['approved', 'draft', 'pending_approval']:
             q.status = 'sent'
         q.save()
+
+        notify(
+            title=f'Quotation {q.quotation_number} sent to {q.client.company_name}',
+            message=f'{request.user.full_name} sent quotation via {send_via}.',
+            notification_type='system', link='/quotations',
+            actor=request.user, client=q.client,
+            extra_users=[q.created_by] if q.created_by else [],
+        )
 
         return Response({'status': 'sent', 'sent_via': send_via})

@@ -10,11 +10,15 @@ logger = logging.getLogger(__name__)
 # Patterns that indicate client is asking for a Proforma Invoice
 # Includes common misspellings: performa, profoma, profrma, perfoma
 PI_INTENT_PATTERNS = [
-    r'\bpro?f?o?r?ma\s*invoice\b',          # proforma invoice, performa invoice, profoma invoice
-    r'\bproforma\b',
-    r'\bperforma\b',                          # common misspelling
-    r'\bprofoma\b',                           # another misspelling
-    r'\bperfoma\b',                           # another misspelling
+    r'\bproforma\s*invoice\b',                # proforma invoice
+    r'\bperforma\s*invoice\b',                # performa invoice (misspelling)
+    r'\bprofoma\s*invoice\b',                 # profoma invoice (misspelling)
+    r'\bperfoma\s*invoice\b',                 # perfoma invoice (misspelling)
+    r'\bproforma\b',                          # standalone "proforma"
+    r'\bperforma\b',                          # standalone "performa"
+    r'\bprofoma\b',                           # standalone "profoma"
+    r'\bperfoma\b',                           # standalone "perfoma"
+    r'\bPI\b',                                # standalone "PI" (case-sensitive checked below)
     r'\bPI\s+(for|of|please|send|need|require)\b',
     r'\bsend\s+(me\s+)?(a\s+)?(the\s+)?PI\b',
     r'\bneed\s+(a\s+)?(the\s+)?PI\b',
@@ -70,7 +74,11 @@ def detect_pi_intent(text):
 
     matches = 0
     for pattern in PI_INTENT_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
+        # "PI" patterns need case-sensitive match to avoid false positives
+        if pattern == r'\bPI\b':
+            if re.search(pattern, text):
+                matches += 1
+        elif re.search(pattern, text, re.IGNORECASE):
             matches += 1
 
     if matches == 0:
@@ -99,7 +107,7 @@ def process_communication_for_pi(communication):
     text = re.sub(r'<[^>]+>', ' ', body)
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # Extract latest reply from thread to avoid matching old messages
+    # Extract latest reply from thread to avoid matching quoted old messages
     latest_reply = _extract_latest_reply(text)
     # Use latest reply for detection, but fall back to full text if reply is too short
     check_text = latest_reply if len(latest_reply) >= 5 else text
@@ -109,25 +117,32 @@ def process_communication_for_pi(communication):
     if not check_text or len(check_text.strip()) < 5:
         return None
 
-    # Detect PI intent
+    # Detect PI intent — must be in the latest reply or subject, not in quoted thread
     is_pi, confidence = detect_pi_intent(check_text)
     if not is_pi:
         return None
 
-    # Check if a draft PI already exists for this client
+    # Double-check: if the latest reply alone has no PI keywords and the subject
+    # is a Re:/Fwd: thread, then PI keyword is likely from quoted content — skip
+    if latest_reply and len(latest_reply) >= 5:
+        subject = communication.subject or ''
+        is_reply_thread = bool(re.match(r'^(Re|Fwd|Fw)\s*:', subject, re.IGNORECASE))
+        reply_has_pi, _ = detect_pi_intent(latest_reply)
+        subject_has_pi, _ = detect_pi_intent(subject)
+        if is_reply_thread and not reply_has_pi and not subject_has_pi:
+            logger.debug(f'PI keyword only in quoted thread for comm {communication.id}, skipping')
+            return None
+
+    # Check if this exact communication already produced a PI (avoid re-processing)
     existing = ProformaInvoice.objects.filter(
         client=communication.client,
         status='draft',
         is_deleted=False,
+        created_at__gte=communication.created_at,
     ).first()
-    if existing:
-        # If existing draft has empty items, fill them with extracted product info
-        empty_items = existing.items.filter(product_name='')
-        if empty_items.exists():
-            _fill_pi_items(existing, check_text)
-            logger.info(f'Updated empty items in existing draft PI {existing.invoice_number}')
-        else:
-            logger.info(f'Draft PI already exists for client {communication.client.company_name}, skipping')
+    if existing and existing.items.filter(product_name='').exists():
+        _fill_pi_items(existing, check_text)
+        logger.info(f'Updated empty items in existing draft PI {existing.invoice_number}')
         return existing
 
     logger.info(f'PI intent detected (confidence={confidence}) for comm {communication.id}')
@@ -144,6 +159,7 @@ def process_communication_for_pi(communication):
 
     pi = ProformaInvoice.objects.create(
         client=client,
+        source_communication=communication,
         invoice_number=invoice_number,
         invoice_date=today,
         created_by=communication.user,

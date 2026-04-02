@@ -22,6 +22,9 @@ def get_client_qs_for_user(user, base_qs=None):
     return base_qs
 
 
+from notifications.helpers import notify
+
+
 class ClientViewSet(viewsets.ModelViewSet):
     filterset_fields = ['status', 'country', 'primary_executive']
     search_fields = ['company_name', 'country', 'city', 'business_type']
@@ -56,17 +59,36 @@ class ClientViewSet(viewsets.ModelViewSet):
             return ClientCreateSerializer
         return ClientDetailSerializer
 
+    def perform_create(self, serializer):
+        client = serializer.save()
+        notify(
+            title=f'New account added: {client.company_name}',
+            message=f'{self.request.user.full_name} added a new account.',
+            notification_type='system', link=f'/clients/{client.id}',
+            actor=self.request.user, client=client,
+        )
+
     def perform_update(self, serializer):
         user = self.request.user
         if user.role == 'executive':
-            # Executives cannot change executive assignments
             for field in ('primary_executive', 'shadow_executive'):
                 if field in serializer.validated_data:
                     serializer.validated_data.pop(field)
-        serializer.save()
+        client = serializer.save()
+        notify(
+            title=f'Account updated: {client.company_name}',
+            message=f'{user.full_name} updated account details.',
+            notification_type='system', link=f'/clients/{client.id}',
+            actor=user, client=client,
+        )
 
     def perform_destroy(self, instance):
         instance.soft_delete()
+        notify(
+            title=f'Account deleted: {instance.company_name}',
+            message=f'{self.request.user.full_name} deleted this account.',
+            notification_type='alert', actor=self.request.user, client=instance,
+        )
 
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):

@@ -12,6 +12,90 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def get_client_email_recipients(client, source_quotation=None, source_communication=None):
+    """
+    Determine the correct 'to' and 'cc' for emailing a client.
+
+    Logic:
+    - If source_communication exists, reply to that sender's email
+    - If quotation has a linked QuoteRequest with sender_email, use that as 'to'
+    - Otherwise use the primary contact's email as 'to'
+    - CC = all other contact emails + admin/manager user emails
+
+    Returns: (to_email, to_contact, cc_string)
+    """
+    from clients.models import Contact
+    from accounts.models import User
+
+    contacts = list(Contact.objects.filter(client=client, is_deleted=False).order_by('-is_primary', 'name'))
+    if not contacts:
+        return None, None, ''
+
+    # Determine the primary recipient
+    to_email = None
+    to_contact = None
+
+    # 1. Check source communication (e.g. PI request email)
+    if source_communication and source_communication.external_email:
+        requester_email = source_communication.external_email
+        for c in contacts:
+            if c.email and c.email.lower() == requester_email.lower():
+                to_email = c.email
+                to_contact = c
+                break
+        if not to_email:
+            to_email = requester_email
+            to_contact = contacts[0]
+
+    # 2. Check if quotation traces back to a quote request with a sender email
+    if not to_email and source_quotation:
+        try:
+            from communications.models import QuoteRequest
+            qr = QuoteRequest.objects.filter(
+                linked_quotation=source_quotation
+            ).select_related('source_communication').first()
+            if qr and qr.sender_email:
+                for c in contacts:
+                    if c.email and c.email.lower() == qr.sender_email.lower():
+                        to_email = c.email
+                        to_contact = c
+                        break
+                if not to_email:
+                    to_email = qr.sender_email
+                    to_contact = contacts[0]
+        except Exception:
+            pass
+
+    # 3. Fallback: primary contact
+    if not to_email:
+        for c in contacts:
+            if c.email:
+                to_contact = c
+                to_email = c.email
+                break
+
+    if not to_email:
+        return None, None, ''
+
+    # Build CC list: other contact emails + admin/manager emails
+    cc_parts = []
+    for c in contacts:
+        if c.email and c.email.lower() != to_email.lower():
+            cc_parts.append(c.email)
+
+    # Add admin/manager emails
+    admin_mgr_emails = list(
+        User.objects.filter(
+            is_active=True, role__in=['admin', 'manager']
+        ).exclude(email='').values_list('email', flat=True)
+    )
+    for em in admin_mgr_emails:
+        if em.lower() != to_email.lower() and em.lower() not in [e.lower() for e in cc_parts]:
+            cc_parts.append(em)
+
+    return to_email, to_contact, ', '.join(cc_parts)
+
+
 class ContactMatcher:
     @staticmethod
     def match_by_email(email_address):

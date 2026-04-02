@@ -154,9 +154,16 @@ def _match_or_create_client(communication):
         sender = communication.external_email or communication.external_phone or 'Unknown'
         # Extract company name from email domain
         company_name = sender
+        free_providers = ('gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+                          'live.com', 'aol.com', 'icloud.com', 'mail.com')
         if '@' in sender:
-            domain = sender.split('@')[1]
-            company_name = domain.split('.')[0].title() + ' (Auto-created)'
+            domain = sender.split('@')[1].lower()
+            if domain in free_providers:
+                # Use the local part as name for free email providers
+                local = sender.split('@')[0]
+                company_name = local.replace('.', ' ').replace('_', ' ').replace('-', ' ').title()
+            else:
+                company_name = domain.split('.')[0].title() + ' (Auto-created)'
 
         client = Client.objects.create(
             company_name=company_name,
@@ -169,9 +176,13 @@ def _match_or_create_client(communication):
         # Create contact if we have details
         if communication.external_email or communication.external_phone:
             from clients.models import Contact
+            contact_name = company_name
+            if '@' in sender:
+                local = sender.split('@')[0]
+                contact_name = local.replace('.', ' ').replace('_', ' ').replace('-', ' ').title()
             contact = Contact.objects.create(
                 client=client,
-                name=company_name.replace(' (Auto-created)', ''),
+                name=contact_name,
                 email=communication.external_email or '',
                 phone=communication.external_phone or '',
                 is_primary=True,

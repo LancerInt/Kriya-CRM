@@ -6,9 +6,9 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { sendWithUndo } from "@/lib/undoSend";
 
-export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, onSent }) {
+export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, ccEmails, onSent }) {
   const [accounts, setAccounts] = useState([]);
-  const [form, setForm] = useState({ email_account: "", to: contactEmail || "", cc: "", subject: "", body: "" });
+  const [form, setForm] = useState({ email_account: "", to: contactEmail || "", cc: ccEmails || "", subject: "", body: "" });
   const [attachments, setAttachments] = useState([]);
 
   useEffect(() => {
@@ -16,9 +16,9 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
       api.get("/communications/email-accounts/")
         .then((r) => setAccounts(r.data.results || r.data))
         .catch(() => toast.error("Failed to load email accounts"));
-      setForm((f) => ({ ...f, to: contactEmail || f.to }));
+      setForm((f) => ({ ...f, to: contactEmail || f.to, cc: ccEmails || f.cc }));
     }
-  }, [open, contactEmail]);
+  }, [open, contactEmail, ccEmails]);
 
   const handleAddFiles = (e) => {
     const files = Array.from(e.target.files);

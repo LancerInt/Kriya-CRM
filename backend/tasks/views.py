@@ -8,6 +8,9 @@ from .models import Task
 from .serializers import TaskSerializer
 
 
+from notifications.helpers import notify
+
+
 class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     filterset_fields = ['status', 'priority', 'client', 'owner']
@@ -22,6 +25,16 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(Q(owner=user) | Q(created_by=user) | Q(client__in=client_ids))
         return qs
+
+    def perform_create(self, serializer):
+        task = serializer.save(created_by=self.request.user)
+        extra = [task.owner] if task.owner else []
+        notify(
+            title=f'New task: {task.title}',
+            message=f'{self.request.user.full_name} created a task{" for " + task.client.company_name if task.client else ""}.',
+            notification_type='task', link='/tasks',
+            actor=self.request.user, client=task.client, extra_users=extra,
+        )
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -42,24 +55,14 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         task.completed_at = timezone.now()
         task.save()
 
-        # Notify the task creator that it's completed
-        from notifications.models import Notification
-        if task.created_by and task.created_by != request.user:
-            Notification.objects.create(
-                user=task.created_by,
-                notification_type='task',
-                title='Task Completed',
-                message=f'"{task.title}" has been completed by {request.user.full_name}.',
-                link=f'/tasks',
-            )
-        # Also notify the main executive of the client
-        if task.client and task.client.primary_executive and task.client.primary_executive != request.user:
-            Notification.objects.create(
-                user=task.client.primary_executive,
-                notification_type='task',
-                title='Task Completed',
-                message=f'"{task.title}" for {task.client.company_name} has been completed by {request.user.full_name}.',
-                link=f'/clients/{task.client.id}',
-            )
+        extra = [task.created_by] if task.created_by else []
+        if task.owner:
+            extra.append(task.owner)
+        notify(
+            title=f'Task completed: {task.title}',
+            message=f'{request.user.full_name} completed "{task.title}"{" for " + task.client.company_name if task.client else ""}.',
+            notification_type='task', link='/tasks',
+            actor=request.user, client=task.client, extra_users=extra,
+        )
 
         return Response(TaskSerializer(task).data)

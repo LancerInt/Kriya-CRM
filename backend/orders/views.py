@@ -10,6 +10,9 @@ from .serializers import (
 )
 
 
+from notifications.helpers import notify
+
+
 class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     filterset_fields = ['client', 'status']
@@ -23,6 +26,15 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(client__in=client_ids)
         return qs
+
+    def perform_create(self, serializer):
+        order = serializer.save(created_by=self.request.user)
+        notify(
+            title=f'New order: {order.order_number}',
+            message=f'{self.request.user.full_name} created order for {order.client.company_name}.',
+            notification_type='system', link='/sales-orders',
+            actor=self.request.user, client=order.client,
+        )
 
     # ── Status Transition ──
     @action(detail=True, methods=['post'], url_path='transition')
@@ -38,6 +50,13 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         from .workflow_service import transition_order, WorkflowError
         try:
             order = transition_order(order, new_status, request.user, remarks)
+            notify(
+                title=f'Order {order.order_number} → {new_status.replace("_", " ").title()}',
+                message=f'{request.user.full_name} updated order status to {new_status.replace("_", " ")}.',
+                notification_type='system', link='/sales-orders',
+                actor=request.user, client=order.client,
+                extra_users=[order.created_by] if order.created_by else [],
+            )
             return Response(OrderSerializer(order).data)
         except WorkflowError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -99,6 +118,13 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             triggered_by=request.user,
         )
 
+        notify(
+            title=f'PO uploaded for {order.order_number}',
+            message=f'{request.user.full_name} uploaded purchase order document.',
+            notification_type='system', link='/sales-orders',
+            actor=request.user, client=order.client,
+            extra_users=[order.created_by] if order.created_by else [],
+        )
         return Response({'status': 'PO uploaded', 'po_number': po_number})
 
     # ── Upload Document ──

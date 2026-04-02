@@ -362,6 +362,15 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             email_in_reply_to=draft.communication.email_message_id or '',
         )
 
+        if draft.client:
+            from notifications.helpers import notify
+            notify(
+                title=f'Draft reply sent to {draft.to_email}',
+                message=f'{request.user.full_name} sent reply: {draft.subject}',
+                notification_type='system', link=f'/clients/{draft.client.id}',
+                actor=request.user, client=draft.client,
+            )
+
         return Response({'status': 'sent', 'sent_at': draft.sent_at.isoformat()})
 
     @action(detail=True, methods=['post'])
@@ -530,6 +539,15 @@ def send_email_view(request):
             mime_type=f.content_type or '',
         )
 
+    if client:
+        from notifications.helpers import notify
+        notify(
+            title=f'Email sent to {data["to"]}',
+            message=f'{request.user.full_name} sent email: {data["subject"]}',
+            notification_type='system', link=f'/clients/{client.id}',
+            actor=request.user, client=client,
+        )
+
     return Response(
         CommunicationSerializer(comm).data,
         status=status.HTTP_201_CREATED
@@ -585,6 +603,15 @@ def send_whatsapp_view(request):
         whatsapp_message_id=wa_message_id,
         external_phone=data['to'],
     )
+
+    if client:
+        from notifications.helpers import notify
+        notify(
+            title=f'WhatsApp sent to {data["to"]}',
+            message=f'{request.user.full_name} sent WhatsApp message to {client.company_name}.',
+            notification_type='system', link=f'/clients/{client.id}',
+            actor=request.user, client=client,
+        )
 
     return Response(
         CommunicationSerializer(comm).data,

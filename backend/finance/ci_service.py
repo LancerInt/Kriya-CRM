@@ -127,8 +127,10 @@ def generate_ci_pdf(ci):
     from django.conf import settings
 
     buffer = io.BytesIO()
+    pdf_title = f'CI {ci.invoice_number} - {ci.client_company_name}'
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=8*mm, bottomMargin=8*mm,
-                            leftMargin=10*mm, rightMargin=10*mm)
+                            leftMargin=10*mm, rightMargin=10*mm,
+                            title=pdf_title, author='Kriya Biosys Private Limited')
     styles = getSampleStyleSheet()
     el = []
 
@@ -559,8 +561,9 @@ def send_ci_email(ci, user):
     from communications.services import EmailService
     from django.core.files.base import ContentFile
 
-    contact = ci.client.contacts.filter(is_deleted=False).order_by('-is_primary').first()
-    if not contact or not contact.email:
+    from communications.services import get_client_email_recipients
+    contact_email, contact, cc_string = get_client_email_recipients(ci.client)
+    if not contact_email:
         raise ValueError(f'No email for {ci.client_company_name}')
 
     email_account = EmailAccount.objects.filter(is_active=True).first()
@@ -593,9 +596,10 @@ def send_ci_email(ci, user):
     pdf_file.name = f'CI_{ci.invoice_number.replace("/", "-")}.pdf'
 
     EmailService.send_email(
-        email_account=email_account, to=contact.email,
+        email_account=email_account, to=contact_email,
         subject=subject, body_html=body_html,
         attachments=[pdf_file],
+        cc=cc_string or None,
     )
 
     ci.status = 'sent'
@@ -605,10 +609,11 @@ def send_ci_email(ci, user):
         client=ci.client, contact=contact, user=user,
         comm_type='email', direction='outbound',
         subject=subject, body=body_html, status='sent',
-        email_account=email_account, external_email=contact.email,
+        email_account=email_account, external_email=contact_email,
+        email_cc=cc_string,
     )
 
-    return contact.email
+    return contact_email
 
 
 def _number_to_words(num, currency='USD'):

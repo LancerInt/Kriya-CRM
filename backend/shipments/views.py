@@ -2,6 +2,8 @@ from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets
 from .models import Shipment
 from .serializers import ShipmentSerializer
+from notifications.helpers import notify
+
 
 class ShipmentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = ShipmentSerializer
@@ -15,3 +17,21 @@ class ShipmentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(client__in=client_ids)
         return qs
+
+    def perform_create(self, serializer):
+        shipment = serializer.save()
+        notify(
+            title=f'New shipment: {shipment.shipment_number}',
+            message=f'{self.request.user.full_name} created shipment for {shipment.client.company_name}.',
+            notification_type='system', link='/shipments',
+            actor=self.request.user, client=shipment.client,
+        )
+
+    def perform_update(self, serializer):
+        shipment = serializer.save()
+        notify(
+            title=f'Shipment updated: {shipment.shipment_number}',
+            message=f'{self.request.user.full_name} updated shipment status to {shipment.status.replace("_", " ")}.',
+            notification_type='system', link='/shipments',
+            actor=self.request.user, client=shipment.client,
+        )
