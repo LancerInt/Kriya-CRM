@@ -21,7 +21,7 @@ def generate_email_reply(communication):
     thread_context = _get_thread_context(communication)
 
     # Build the prompt
-    prompt = f"""You are a professional export trade executive at Kriya Global Trade.
+    prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
 Write a reply email to the following client email.
 
 Client: {client_name}
@@ -39,7 +39,7 @@ RULES:
 - If they mention pricing, say we'll prepare a competitive quotation
 - If they mention samples, offer to arrange sample dispatch
 - If they confirm an order, acknowledge and outline next steps
-- Sign off as "Kriya Global Trade"
+- Sign off as "Kriya Biosys Private Limited"
 - Do NOT include email headers (From, To, Date)
 - Just write the reply body
 - Keep it under 150 words"""
@@ -125,7 +125,7 @@ We will prepare a competitive quotation based on your requirements and share it 
 Could you please confirm the required quantity and preferred delivery terms (FOB/CIF/CFR)?
 
 Best regards,
-Kriya Global Trade"""
+Kriya Biosys Private Limited"""
 
     elif any(w in body_lower for w in ['sample', 'trial', 'test']):
         return f"""Dear {contact_name},
@@ -140,7 +140,7 @@ We would be happy to arrange product samples for your evaluation. Please share:
 We will dispatch the samples at the earliest.
 
 Best regards,
-Kriya Global Trade"""
+Kriya Biosys Private Limited"""
 
     elif any(w in body_lower for w in ['order', 'confirm', 'proceed', 'purchase']):
         return f"""Dear {contact_name},
@@ -152,7 +152,7 @@ We will prepare the Proforma Invoice with the agreed terms and share it for your
 Please let us know if you need any modifications.
 
 Best regards,
-Kriya Global Trade"""
+Kriya Biosys Private Limited"""
 
     else:
         return f"""Dear {contact_name},
@@ -164,11 +164,19 @@ We have noted your inquiry and our team will review it promptly. We will get bac
 Should you have any immediate questions, please don't hesitate to reach out.
 
 Best regards,
-Kriya Global Trade"""
+Kriya Biosys Private Limited"""
 
 
 def _get_contact_name(communication):
-    """Get the contact's name from the communication."""
+    """Get the contact's current name from the client's contacts (handles renames)."""
+    # Look up current contact name by email (in case name was changed)
+    if communication.client and communication.external_email:
+        from clients.models import Contact
+        contact = Contact.objects.filter(
+            client=communication.client, email__iexact=communication.external_email, is_deleted=False
+        ).first()
+        if contact and contact.name:
+            return contact.name
     if communication.contact and communication.contact.name:
         return communication.contact.name
     if communication.external_email:

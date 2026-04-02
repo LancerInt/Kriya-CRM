@@ -111,7 +111,7 @@ class CallLogViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                     body_html = f"""
                     <div style="font-family: Arial, sans-serif; max-width: 600px;">
                         <h2 style="color: #1e3a5f;">Meeting Invitation</h2>
-                        <p>You are invited to a meeting with <strong>Kriya Global Trade</strong>.</p>
+                        <p>You are invited to a meeting with <strong>Kriya Biosys Private Limited</strong>.</p>
                         <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
                             <tr><td style="padding: 8px; color: #666; width: 120px;">Subject</td><td style="padding: 8px; font-weight: bold;">{topic}</td></tr>
                             <tr style="background: #f9f9f9;"><td style="padding: 8px; color: #666;">Date & Time</td><td style="padding: 8px;">{scheduled}</td></tr>

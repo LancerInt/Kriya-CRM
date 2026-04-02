@@ -137,12 +137,21 @@ def _generate_draft_for_email(communication):
 
     reply = generate_email_reply(communication)
 
+    # Build CC: other client contacts + admin/manager emails
+    cc = ''
+    if communication.client:
+        from communications.services import get_client_email_recipients
+        to_email, _, cc = get_client_email_recipients(
+            communication.client, source_communication=communication
+        )
+
     EmailDraft.objects.create(
         client=communication.client,
         communication=communication,
         subject=reply['subject'],
         body=reply['body'],
         to_email=communication.external_email or '',
+        cc=cc,
         generated_by_ai=True,
     )
     logger.info(f'AI draft generated for email: {communication.subject}')

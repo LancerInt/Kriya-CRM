@@ -71,7 +71,7 @@ def send_order_status_email(order, status):
             <tr><td style="padding:8px;color:#666;">Client</td><td style="padding:8px;">{order.client.company_name}</td></tr>
             <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Total</td><td style="padding:8px;">{order.currency} {order.total:,.2f}</td></tr>
         </table>
-        <p>Best regards,<br/>Kriya Global Trade</p>
+        <p>Best regards,<br/>Kriya Biosys Private Limited</p>
     </div>
     """
 
@@ -140,7 +140,7 @@ def send_quotation_email(quotation, user):
             <td style="padding:8px;border:1px solid #eee;text-align:right;">{quotation.currency} {item.total_price:,.2f}</td>
         </tr>'''
 
-    subject = f'Quotation {quotation.quotation_number} - Kriya Global Trade'
+    subject = f'Quotation {quotation.quotation_number} - Kriya Biosys Private Limited'
     body_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:700px;">
         <h2 style="color:#1e3a5f;">Quotation - {quotation.quotation_number}</h2>
@@ -165,7 +165,7 @@ def send_quotation_email(quotation, user):
             </tr>
         </table>
         <p>Please confirm your acceptance.</p>
-        <p>Best regards,<br/>Kriya Global Trade</p>
+        <p>Best regards,<br/>Kriya Biosys Private Limited</p>
     </div>
     """
 

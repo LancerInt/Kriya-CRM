@@ -415,20 +415,12 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const primaryContact = client?.contacts?.find((c) => c.is_primary) || client?.contacts?.[0];
   const contactEmail = primaryContact?.email || "";
   const contactPhone = primaryContact?.phone || "";
-  const [replyToEmail, setReplyToEmail] = useState(null);
 
   // Get all contact emails for this client
   const allContactEmails = (client?.contacts || []).map(c => c.email).filter(Boolean);
 
-  // When replying to an inbound email: to = sender, cc = other contacts
-  // When composing fresh: to = primary contact, cc = other contacts
-  const composeToEmail = replyToEmail || contactEmail;
-  const composeCcEmails = allContactEmails.filter(e => e !== composeToEmail).join(", ");
-
-  const handleReply = (comm) => {
-    setReplyToEmail(comm.external_email || contactEmail);
-    setShowEmailModal(true);
-  };
+  // CC = other client contacts + admin/manager emails
+  const composeToEmail = contactEmail;
 
   // Fetch admin/manager emails for auto CC
   useEffect(() => {
@@ -438,6 +430,16 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setAdminManagerEmails(emails);
     }).catch(() => {});
   }, []);
+
+  // Combine other contacts + admin/manager into CC
+  const otherContactEmails = allContactEmails.filter(e => e !== composeToEmail);
+  const allCcParts = [...otherContactEmails];
+  if (adminManagerEmails) {
+    adminManagerEmails.split(",").map(e => e.trim()).filter(Boolean).forEach(e => {
+      if (!allCcParts.includes(e) && e !== composeToEmail) allCcParts.push(e);
+    });
+  }
+  const composeCcEmails = allCcParts.join(", ");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -637,11 +639,6 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         {row.direction === "inbound" && row.draft_id && row.draft_status === "sent" && (
           <span className="text-[10px] text-green-600 font-medium">Replied</span>
         )}
-        {row.direction === "inbound" && row.comm_type === "email" && (
-          <button onClick={() => handleReply(row)} className="px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100">
-            Reply
-          </button>
-        )}
         <button onClick={() => setSelectedComm(row)} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">
           Snapshot
         </button>
@@ -676,7 +673,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         }
         return true;
       })} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
-      <ComposeEmailModal open={showEmailModal} onClose={() => { setShowEmailModal(false); setReplyToEmail(null); }} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} onSent={reload} />
+      <ComposeEmailModal open={showEmailModal} onClose={() => setShowEmailModal(false)} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} onSent={reload} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} clientId={clientId} contactPhone={contactPhone} onSent={reload} />
 
       {/* Communication Detail Modal */}

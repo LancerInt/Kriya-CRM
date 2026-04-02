@@ -36,7 +36,7 @@ def _email_client_status(shipment, title, message):
             <tr><td style="padding:8px;color:#666;">B/L Number</td><td style="padding:8px;">{shipment.bl_number or 'TBD'}</td></tr>
             <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">ETA</td><td style="padding:8px;">{shipment.estimated_arrival or 'TBD'}</td></tr>
         </table>
-        <p>Best regards,<br/>Kriya Global Trade</p>
+        <p>Best regards,<br/>Kriya Biosys Private Limited</p>
     </div>
     """
     EmailService.send_email(

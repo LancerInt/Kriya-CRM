@@ -331,7 +331,7 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         # Default bank details (can be made configurable via settings)
         default_bank_details = (
             "Bank Name: State Bank of India\n"
-            "Account Name: Kriya Global Trade Pvt Ltd\n"
+            "Account Name: Kriya Biosys Private Limited\n"
             "Account Number: 39876543210\n"
             "IFSC Code: SBIN0001234\n"
             "SWIFT Code: SBININBB\n"
