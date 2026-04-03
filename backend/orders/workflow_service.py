@@ -164,6 +164,10 @@ def transition_order(order, new_status, user, remarks=''):
     if new_status in AUTO_EMAIL_STATUSES:
         _send_client_status_email(order, new_status, user)
 
+    # 8. Auto-create purchase history when order is delivered
+    if new_status == 'delivered':
+        _auto_create_purchase_history(order)
+
     logger.info(f'Order {order.order_number}: {old_status} → {new_status} by {user.username}')
     return order
 
@@ -225,3 +229,64 @@ def get_order_timeline(order):
         })
 
     return timeline
+
+
+def _auto_create_purchase_history(order):
+    """Auto-create purchase history entries from delivered order items."""
+    from clients.models import PurchaseHistory
+
+    for item in order.items.all():
+        # Skip if already recorded for this order + product
+        exists = PurchaseHistory.objects.filter(
+            client=order.client, order=order,
+            product_name=item.product_name, is_deleted=False,
+        ).exists()
+        if exists:
+            continue
+
+        PurchaseHistory.objects.create(
+            client=order.client,
+            order=order,
+            product=item.product,
+            product_name=item.product_name,
+            quantity=item.quantity,
+            unit=item.unit,
+            unit_price=item.unit_price,
+            total_price=item.total_price,
+            currency=order.currency,
+            purchase_date=order.delivered_at.date() if order.delivered_at else timezone.now().date(),
+            invoice_number=order.order_number,
+            status='completed',
+        )
+
+    # Also auto-update price list with latest prices
+    _auto_update_price_list(order)
+
+
+def _auto_update_price_list(order):
+    """Auto-create/update client price list from order items."""
+    from clients.models import ClientPriceList
+
+    for item in order.items.all():
+        existing = ClientPriceList.objects.filter(
+            client=order.client,
+            product_name=item.product_name,
+            is_deleted=False,
+        ).first()
+
+        if existing:
+            # Update price if changed
+            if existing.unit_price != item.unit_price:
+                existing.unit_price = item.unit_price
+                existing.currency = order.currency
+                existing.save(update_fields=['unit_price', 'currency', 'updated_at'])
+        else:
+            ClientPriceList.objects.create(
+                client=order.client,
+                product=item.product,
+                product_name=item.product_name,
+                client_product_name=item.client_product_name or '',
+                unit_price=item.unit_price,
+                currency=order.currency,
+                unit=item.unit,
+            )

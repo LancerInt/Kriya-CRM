@@ -47,8 +47,63 @@ export default function TeamChatPage() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const pollRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  // Drag and drop handlers
+  const handleDragEnter = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.items?.length > 0) setDragging(true);
+  };
+  const handleDragLeave = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setDragging(false);
+  };
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
+  const handleDrop = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    setDragging(false);
+    dragCounter.current = 0;
+    if (!activeRoom) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("message_type", detectFileType(file));
+      fd.append("content", file.name);
+      try {
+        const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setMessages((prev) => [...prev, res.data]);
+      } catch { toast.error(`Failed to upload ${file.name}`); }
+    }
+    setTimeout(scrollToBottom, 100);
+  };
+
+  // Paste handler — detect pasted files/images from clipboard
+  const handlePaste = async (e) => {
+    if (!activeRoom) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items.filter(item => item.kind === "file").map(item => item.getAsFile()).filter(Boolean);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const file of files) {
+      const fd = new FormData();
+      const name = file.name === "image.png" ? `pasted-image-${Date.now()}.png` : file.name;
+      fd.append("file", file, name);
+      fd.append("message_type", detectFileType(file));
+      fd.append("content", name);
+      try {
+        const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setMessages((prev) => [...prev, res.data]);
+      } catch { toast.error(`Failed to upload ${name}`); }
+    }
+    setTimeout(scrollToBottom, 100);
+  };
 
   // Load rooms — split into channels and DMs
   const loadRooms = () => {
@@ -124,17 +179,19 @@ export default function TeamChatPage() {
   };
 
   const handleSendFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !activeRoom) return;
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("message_type", detectFileType(file));
-    fd.append("content", file.name);
-    try {
-      const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setMessages((prev) => [...prev, res.data]);
-      setTimeout(scrollToBottom, 100);
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to upload")); }
+    const files = Array.from(e.target.files);
+    if (!files.length || !activeRoom) return;
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("message_type", detectFileType(file));
+      fd.append("content", file.name);
+      try {
+        const res = await api.post(`/chat/rooms/${activeRoom.id}/send/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setMessages((prev) => [...prev, res.data]);
+      } catch (err) { toast.error(getErrorMessage(err, `Failed to upload ${file.name}`)); }
+    }
+    setTimeout(scrollToBottom, 100);
     e.target.value = "";
   };
 
@@ -528,7 +585,17 @@ export default function TeamChatPage() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col bg-white">
+      <div className="flex-1 flex flex-col bg-white relative" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
+        {/* Drag overlay */}
+        {dragging && (
+          <div className="absolute inset-0 z-50 bg-indigo-50/90 border-2 border-dashed border-indigo-400 rounded-lg flex flex-col items-center justify-center pointer-events-none">
+            <svg className="w-16 h-16 text-indigo-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <p className="text-indigo-600 font-semibold text-lg">Drop files here</p>
+            <p className="text-indigo-400 text-sm mt-1">Images, PDFs, documents, videos, audio</p>
+          </div>
+        )}
         {/* Header */}
         {activeRoom && (
           <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
@@ -698,7 +765,7 @@ export default function TeamChatPage() {
               <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Attach file/image/video">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
-              <input type="file" ref={fileInputRef} onChange={handleSendFile} className="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" />
+              <input type="file" ref={fileInputRef} onChange={handleSendFile} className="hidden" multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar" />
 
               <button type="button" onClick={recording ? stopRecording : startRecording} className={`p-2 rounded-lg transition-colors ${recording ? "text-red-600 bg-red-50 animate-pulse" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`} title={recording ? "Stop recording" : "Record voice message"}>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
@@ -717,6 +784,7 @@ export default function TeamChatPage() {
                   disabled={sending}
                   className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:opacity-50 text-sm"
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  onPaste={handlePaste}
                 />
               )}
               <button type="submit" disabled={sending || !input.trim() || recording} className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 text-sm">

@@ -216,3 +216,22 @@ class QuoteRequest(TimeStampedModel):
 
     def __str__(self):
         return f'QR: {self.extracted_product or "Unknown"} from {self.sender_name or self.sender_email or "Unknown"}'
+
+
+class ArchivedSender(TimeStampedModel):
+    """
+    Tracks sender emails whose future messages should be auto-archived.
+    When a user archives a mail and chooses "Archive all from this sender",
+    an entry is created here. During email sync, incoming emails from these
+    senders are automatically soft-deleted.
+    """
+    email = models.EmailField(db_index=True)
+    archived_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+    reason = models.CharField(max_length=255, blank=True, default='User chose to archive all from this sender')
+
+    class Meta:
+        db_table = 'archived_senders'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Auto-archive: {self.email}'

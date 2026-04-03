@@ -85,3 +85,53 @@ class ClientAssignment(models.Model):
     class Meta:
         db_table = 'client_assignments'
         unique_together = ('client', 'user')
+
+
+class ClientPriceList(SoftDeleteModel):
+    """Custom product pricing for a specific client."""
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='price_list')
+    product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
+    product_name = models.CharField(max_length=255)
+    client_product_name = models.CharField(max_length=255, blank=True, help_text='Product name as known by the client')
+    unit_price = models.DecimalField(max_digits=15, decimal_places=2)
+    currency = models.CharField(max_length=3, default='USD')
+    unit = models.CharField(max_length=20, default='KG')
+    moq = models.CharField(max_length=100, blank=True, help_text='Minimum Order Quantity')
+    valid_from = models.DateField(null=True, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'client_price_list'
+        ordering = ['product_name']
+
+    def __str__(self):
+        return f'{self.product_name} → {self.client.company_name} @ {self.currency} {self.unit_price}'
+
+
+class PurchaseHistory(SoftDeleteModel):
+    """Tracks individual product purchases by a client."""
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='purchase_history')
+    order = models.ForeignKey('orders.Order', on_delete=models.SET_NULL, null=True, blank=True)
+    product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
+    product_name = models.CharField(max_length=255)
+    quantity = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    unit = models.CharField(max_length=20, default='KG')
+    unit_price = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    total_price = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default='USD')
+    purchase_date = models.DateField()
+    invoice_number = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=20, default='completed', choices=[
+        ('completed', 'Completed'),
+        ('pending', 'Pending'),
+        ('cancelled', 'Cancelled'),
+    ])
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'purchase_history'
+        ordering = ['-purchase_date']
+
+    def __str__(self):
+        return f'{self.product_name} - {self.client.company_name} ({self.purchase_date})'

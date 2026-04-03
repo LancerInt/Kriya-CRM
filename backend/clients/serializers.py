@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Client, Contact, ClientPort, ClientAssignment
+from .models import Client, Contact, ClientPort, ClientAssignment, ClientPriceList, PurchaseHistory
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -13,6 +13,28 @@ class ClientPortSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientPort
         fields = ['id', 'port_name']
+
+
+class ClientPriceListSerializer(serializers.ModelSerializer):
+    product_base_price = serializers.DecimalField(source='product.base_price', max_digits=15, decimal_places=2, read_only=True, default=None)
+
+    class Meta:
+        model = ClientPriceList
+        fields = ['id', 'client', 'product', 'product_name', 'client_product_name',
+                  'unit_price', 'currency', 'unit', 'moq', 'valid_from', 'valid_until',
+                  'notes', 'product_base_price', 'created_at']
+        read_only_fields = ['id']
+
+
+class PurchaseHistorySerializer(serializers.ModelSerializer):
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+
+    class Meta:
+        model = PurchaseHistory
+        fields = ['id', 'client', 'order', 'order_number', 'product', 'product_name',
+                  'quantity', 'unit', 'unit_price', 'total_price', 'currency',
+                  'purchase_date', 'invoice_number', 'status', 'notes', 'created_at']
+        read_only_fields = ['id']
 
 
 class ClientListSerializer(serializers.ModelSerializer):

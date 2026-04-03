@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
@@ -16,6 +17,8 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const user = useSelector((state) => state.auth.user);
+  const canEdit = user?.role === "admin" || user?.role === "manager";
 
   const loadProducts = () => {
     setLoading(true);
@@ -89,12 +92,12 @@ export default function ProductsPage() {
         ))}
       </div>
     ) : <span className="text-gray-400">{"\u2014"}</span> },
-    { key: "actions", label: "", render: (row) => (
+    ...(canEdit ? [{ key: "actions", label: "", render: (row) => (
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => openEdit(row)} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Edit</button>
         <button onClick={(e) => handleDelete(row.id, e)} className="text-xs text-red-600 hover:text-red-700 font-medium">Delete</button>
       </div>
-    )},
+    )}] : []),
   ];
 
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
@@ -104,10 +107,10 @@ export default function ProductsPage() {
       <PageHeader
         title="Products"
         subtitle={`${products.length} products`}
-        action={
+        action={canEdit ?
           <button onClick={openCreate} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
             + Add Product
-          </button>
+          </button> : null
         }
       />
       <DataTable columns={columns} data={products} loading={loading} emptyTitle="No products" emptyDescription="Add your first product" />

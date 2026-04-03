@@ -13,6 +13,7 @@ urlpatterns = [
     path('send-email/', views.send_email_view, name='send-email'),
     path('send-whatsapp/', views.send_whatsapp_view, name='send-whatsapp'),
     path('summarize-voice/', views.summarize_voice_text, name='summarize-voice'),
+    path('refine-email/', views.refine_email_text, name='refine-email'),
     path('whatsapp-webhook/', views.whatsapp_webhook_view, name='whatsapp-webhook'),
     path('', include(router.urls)),
 ]

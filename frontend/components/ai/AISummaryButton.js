@@ -91,30 +91,110 @@ function MarkdownBlock({ text }) {
   );
 }
 
-export default function AISummaryButton({ prompt, title = "AI Summary", size = "sm", variant = "icon" }) {
+export default function AISummaryButton({ prompt, title = "AI Summary", size = "sm", variant = "icon", clientContext = "", clientId = "" }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState("");
   const [msgIdx, setMsgIdx] = useState(0);
+  const [messages, setMessages] = useState([]); // { role: 'user'|'ai', text }
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
 
   const handleClick = async () => {
     setOpen(true);
     setLoading(true);
     setSummary("");
+    setMessages([]);
     setMsgIdx(0);
 
     const interval = setInterval(() => setMsgIdx((p) => (p + 1) % THINKING_MSGS.length), 1500);
 
     try {
-      const res = await api.post("/agents/quick-chat/", { message: prompt });
+      const res = await api.post("/agents/quick-chat/", { message: prompt, client_id: clientId || "" }, { timeout: 120000 });
       setSummary(res.data.content);
     } catch (err) {
-      setSummary(err.response?.data?.error || "Failed to generate summary. Make sure AI is configured in Settings.");
+      setSummary(err.response?.data?.error || (err.code === "ECONNABORTED" ? "Request timed out. AI is taking too long. Please try again." : "Connection error. Check your AI settings or try again."));
     } finally {
       setLoading(false);
       clearInterval(interval);
     }
   };
+
+  const handleAsk = async (e) => {
+    e?.preventDefault();
+    const q = question.trim();
+    if (!q || asking) return;
+    setQuestion("");
+    setMessages(prev => [...prev, { role: "user", text: q }]);
+    setAsking(true);
+    try {
+      const context = clientContext ? `Context: This question is about the client. ${clientContext}\n\nPrevious summary:\n${summary}\n\n` : `Previous summary:\n${summary}\n\n`;
+      const res = await api.post("/agents/quick-chat/", { message: q, client_id: clientId || "" }, { timeout: 120000 });
+      setMessages(prev => [...prev, { role: "ai", text: res.data.content }]);
+    } catch {
+      setMessages(prev => [...prev, { role: "ai", text: "Failed to get answer. Please try again." }]);
+    } finally { setAsking(false); }
+  };
+
+  const modalContent = loading ? (
+    <div className="flex items-center gap-3 py-8 justify-center">
+      <div className="relative w-5 h-5"><div className="absolute inset-0 rounded-full border-2 border-purple-200" /><div className="absolute inset-0 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" /></div>
+      <span className="text-sm text-gray-500 animate-pulse">{THINKING_MSGS[msgIdx]}</span>
+    </div>
+  ) : (
+    <div>
+      <div className="max-h-[50vh] overflow-y-auto">
+        <MarkdownBlock text={summary} />
+
+        {/* Follow-up conversation */}
+        {messages.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                  msg.role === "user" ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"
+                }`}>
+                  {msg.role === "ai" ? <MarkdownBlock text={msg.text} /> : msg.text}
+                </div>
+              </div>
+            ))}
+            {asking && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 rounded-xl px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                  Thinking...
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Ask question input */}
+      <form onSubmit={handleAsk} className="mt-4 pt-3 border-t border-gray-200 flex gap-2">
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask a follow-up question about this client..."
+          disabled={asking}
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-50"
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAsk(); } }}
+        />
+        <button type="submit" disabled={asking || !question.trim()} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+          Ask
+        </button>
+      </form>
+
+      <div className="flex gap-2 mt-3">
+        <button onClick={() => { navigator.clipboard.writeText(summary); toast.success("Copied!"); }} className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Copy</button>
+        <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Close</button>
+      </div>
+    </div>
+  );
 
   if (variant === "button") {
     return (
@@ -123,48 +203,17 @@ export default function AISummaryButton({ prompt, title = "AI Summary", size = "
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
           AI Summary
         </button>
-        <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">
-          {loading ? (
-            <div className="flex items-center gap-3 py-8 justify-center">
-              <div className="relative w-5 h-5"><div className="absolute inset-0 rounded-full border-2 border-purple-200" /><div className="absolute inset-0 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" /></div>
-              <span className="text-sm text-gray-500 animate-pulse">{THINKING_MSGS[msgIdx]}</span>
-            </div>
-          ) : (
-            <div>
-              <MarkdownBlock text={summary} />
-              <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200">
-                <button onClick={() => { navigator.clipboard.writeText(summary); toast.success("Copied!"); }} className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Copy</button>
-                <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Close</button>
-              </div>
-            </div>
-          )}
-        </Modal>
+        <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">{modalContent}</Modal>
       </>
     );
   }
 
-  // Icon variant (default)
   return (
     <>
       <button onClick={handleClick} className="p-1.5 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors" title="AI Summary">
         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">
-        {loading ? (
-          <div className="flex items-center gap-3 py-8 justify-center">
-            <div className="relative w-5 h-5"><div className="absolute inset-0 rounded-full border-2 border-purple-200" /><div className="absolute inset-0 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" /></div>
-            <span className="text-sm text-gray-500 animate-pulse">{THINKING_MSGS[msgIdx]}</span>
-          </div>
-        ) : (
-          <div>
-            <MarkdownBlock text={summary} />
-            <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200">
-              <button onClick={() => { navigator.clipboard.writeText(summary); toast.success("Copied!"); }} className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Copy</button>
-              <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Close</button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">{modalContent}</Modal>
     </>
   );
 }

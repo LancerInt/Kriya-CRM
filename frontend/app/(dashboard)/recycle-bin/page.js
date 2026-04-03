@@ -15,6 +15,19 @@ export default function RecycleBinPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [restoring, setRestoring] = useState(null);
+  const [archivedSenders, setArchivedSenders] = useState([]);
+
+  const loadArchivedSenders = () => {
+    api.get("/communications/archived-senders/").then(r => setArchivedSenders(r.data)).catch(() => {});
+  };
+
+  const handleUnarchiveSender = async (sender) => {
+    try {
+      await api.post("/communications/unarchive-sender/", { id: sender.id });
+      toast.success(`${sender.email} removed from auto-archive list`);
+      loadArchivedSenders();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to unarchive")); }
+  };
 
   const loadItems = () => {
     setLoading(true);
@@ -23,7 +36,7 @@ export default function RecycleBinPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadItems(); }, []);
+  useEffect(() => { loadItems(); loadArchivedSenders(); }, []);
 
   const handleRestore = async (item) => {
     setRestoring(item.id);
@@ -147,6 +160,40 @@ export default function RecycleBinPage() {
         </div>
       )}
 
+      {/* Archived Senders Section */}
+      {isAdminOrManager && archivedSenders.length > 0 && (
+        <div className="mt-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-800">Auto-Archived Senders</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Future emails from these senders are automatically archived. Remove to stop auto-archiving.</p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-gray-700">Sender Email</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-700">Archived By</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-700">Date</th>
+                <th className="text-right px-4 py-2 font-medium text-gray-700">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {archivedSenders.map((s) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium text-gray-900">{s.email}</td>
+                  <td className="px-4 py-2 text-gray-500">{s.archived_by || "-"}</td>
+                  <td className="px-4 py-2 text-gray-500">{(() => { try { return format(new Date(s.created_at), "MMM d, yyyy"); } catch { return "-"; } })()}</td>
+                  <td className="px-4 py-2 text-right">
+                    <button onClick={() => handleUnarchiveSender(s)} className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100">
+                      Unarchive Sender
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
         <p className="font-medium">How Archive works:</p>
         <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-700">
@@ -156,6 +203,7 @@ export default function RecycleBinPage() {
           <li>Click <strong>Restore</strong> to recover an item back to its original location</li>
           <li>Click <strong>Delete Forever</strong> to permanently remove immediately</li>
           {isAdminOrManager && <li><strong>Empty Archive</strong> permanently removes everything (admin/manager only)</li>}
+          {isAdminOrManager && <li><strong>Auto-Archived Senders</strong> shows senders whose emails are automatically archived. Click "Unarchive Sender" to stop.</li>}
         </ul>
       </div>
     </div>

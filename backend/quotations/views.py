@@ -537,4 +537,26 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             extra_users=[q.created_by] if q.created_by else [],
         )
 
+        # Auto-update client price list from quotation items
+        from clients.models import ClientPriceList
+        for item in q.items.all():
+            if not item.product_name:
+                continue
+            existing = ClientPriceList.objects.filter(
+                client=q.client, product_name=item.product_name, is_deleted=False,
+            ).first()
+            if existing:
+                if existing.unit_price != item.unit_price:
+                    existing.unit_price = item.unit_price
+                    existing.currency = q.currency
+                    existing.save(update_fields=['unit_price', 'currency', 'updated_at'])
+            else:
+                ClientPriceList.objects.create(
+                    client=q.client, product=item.product,
+                    product_name=item.product_name,
+                    client_product_name=item.client_product_name or '',
+                    unit_price=item.unit_price,
+                    currency=q.currency, unit=item.unit,
+                )
+
         return Response({'status': 'sent', 'sent_via': send_via})

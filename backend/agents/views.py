@@ -162,8 +162,10 @@ def delete_message(request, pk):
 
 @api_view(['POST'])
 def quick_chat(request):
-    """One-shot chat without conversation history."""
+    """One-shot chat without conversation history. Supports client_id for client-specific queries."""
     message = request.data.get('message', '').strip()
+    client_id = request.data.get('client_id', '').strip()
+
     if not message:
         return Response({'error': 'Message is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -171,9 +173,119 @@ def quick_chat(request):
     if not config:
         return Response({'error': 'No AI configured.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # If client_id provided, pre-fetch all client data and inject into prompt
+    if client_id:
+        try:
+            client_data = _get_client_context(client_id)
+            message = f"""Here is the complete data for this client. Answer the user's question using ONLY this data. Do not suggest using tools — just answer directly.
+
+{client_data}
+
+User's question: {message}"""
+        except Exception as e:
+            logger.error(f'Failed to fetch client context: {e}')
+
     from .ai_service import chat_with_agent
     try:
         result = chat_with_agent([{'role': 'user', 'content': message}], request.user, config)
         return Response({'content': result['content'], 'tool_calls': result.get('tool_calls', [])})
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _get_client_context(client_id):
+    """Pre-fetch all client data for AI context."""
+    from clients.models import Client, ClientPriceList, PurchaseHistory
+    from communications.models import Communication
+    from quotations.models import Quotation, Inquiry
+    from orders.models import Order
+    from tasks.models import Task
+    from shipments.models import Shipment
+    import json
+
+    client = Client.objects.select_related('primary_executive', 'shadow_executive').get(id=client_id, is_deleted=False)
+    contacts = list(client.contacts.filter(is_deleted=False).values('name', 'email', 'phone', 'designation', 'is_primary'))
+
+    # Recent communications (last 10)
+    comms = list(Communication.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:10].values(
+        'direction', 'subject', 'external_email', 'comm_type', 'created_at'
+    ))
+    for c in comms:
+        c['created_at'] = c['created_at'].isoformat() if c['created_at'] else ''
+
+    # Orders
+    orders = list(Order.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:10].values(
+        'order_number', 'status', 'total', 'currency', 'created_at'
+    ))
+    for o in orders:
+        o['created_at'] = o['created_at'].isoformat() if o['created_at'] else ''
+        o['total'] = float(o['total'])
+
+    # Quotations
+    quotes = list(Quotation.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:10].values(
+        'quotation_number', 'status', 'total', 'currency', 'created_at'
+    ))
+    for q in quotes:
+        q['created_at'] = q['created_at'].isoformat() if q['created_at'] else ''
+        q['total'] = float(q['total'])
+
+    # Tasks
+    tasks = list(Task.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:10].values(
+        'title', 'status', 'priority', 'due_date'
+    ))
+    for t in tasks:
+        t['due_date'] = t['due_date'].isoformat() if t['due_date'] else ''
+
+    # Shipments
+    shipments = list(Shipment.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:5].values(
+        'shipment_number', 'status', 'dispatch_date', 'estimated_arrival'
+    ))
+    for s in shipments:
+        s['dispatch_date'] = s['dispatch_date'].isoformat() if s['dispatch_date'] else ''
+        s['estimated_arrival'] = s['estimated_arrival'].isoformat() if s['estimated_arrival'] else ''
+
+    # Price list
+    prices = list(ClientPriceList.objects.filter(client=client, is_deleted=False).values(
+        'product_name', 'client_product_name', 'unit_price', 'currency', 'unit', 'moq'
+    ))
+    for p in prices:
+        p['unit_price'] = float(p['unit_price'])
+
+    # Purchase history
+    purchases = list(PurchaseHistory.objects.filter(client=client, is_deleted=False).order_by('-purchase_date')[:10].values(
+        'product_name', 'quantity', 'unit', 'unit_price', 'total_price', 'currency', 'purchase_date', 'invoice_number', 'status'
+    ))
+    for ph in purchases:
+        ph['quantity'] = float(ph['quantity'])
+        ph['unit_price'] = float(ph['unit_price'])
+        ph['total_price'] = float(ph['total_price'])
+        ph['purchase_date'] = ph['purchase_date'].isoformat() if ph['purchase_date'] else ''
+
+    # Inquiries
+    inquiries = list(Inquiry.objects.filter(client=client, is_deleted=False).order_by('-created_at')[:5].values(
+        'product_name', 'stage', 'source', 'quantity', 'requirements'
+    ))
+
+    data = {
+        'client': {
+            'company_name': client.company_name,
+            'country': client.country,
+            'city': client.city,
+            'status': client.status,
+            'business_type': client.business_type,
+            'currency': client.preferred_currency,
+            'primary_executive': client.primary_executive.full_name if client.primary_executive else '',
+            'shadow_executive': client.shadow_executive.full_name if client.shadow_executive else '',
+        },
+        'contacts': contacts,
+        'price_list': prices,
+        'purchase_history': purchases,
+        'recent_communications': comms,
+        'orders': orders,
+        'quotations': quotes,
+        'tasks': tasks,
+        'shipments': shipments,
+        'inquiries': inquiries,
+    }
+
+    return json.dumps(data, indent=2, default=str)

@@ -2,9 +2,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Count, Q, Value, CharField, Case, When
-from .models import Client, Contact, ClientPort
+from .models import Client, Contact, ClientPort, ClientPriceList, PurchaseHistory
 from .serializers import (ClientListSerializer, ClientDetailSerializer,
-                          ClientCreateSerializer, ContactSerializer, ClientPortSerializer)
+                          ClientCreateSerializer, ContactSerializer, ClientPortSerializer,
+                          ClientPriceListSerializer, PurchaseHistorySerializer)
 
 
 def get_client_qs_for_user(user, base_qs=None):
@@ -124,3 +125,27 @@ class ContactViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Contact.objects.filter(is_deleted=False).select_related('client')
+
+
+class ClientPriceListViewSet(viewsets.ModelViewSet):
+    serializer_class = ClientPriceListSerializer
+    filterset_fields = ['client', 'product', 'currency']
+    search_fields = ['product_name', 'client_product_name']
+
+    def get_queryset(self):
+        return ClientPriceList.objects.filter(is_deleted=False).select_related('product', 'client')
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()
+
+
+class PurchaseHistoryViewSet(viewsets.ModelViewSet):
+    serializer_class = PurchaseHistorySerializer
+    filterset_fields = ['client', 'product', 'status']
+    search_fields = ['product_name', 'invoice_number']
+
+    def get_queryset(self):
+        return PurchaseHistory.objects.filter(is_deleted=False).select_related('order', 'product', 'client')
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()

@@ -156,6 +156,32 @@ function UndoToastContent({ onUndo, preview }) {
 }
 
 /**
+ * Toast shown after undo — with "View message" still available.
+ */
+function CancelledToastContent({ preview }) {
+  const [showPreview, setShowPreview] = useState(false);
+  return (
+    <>
+      <div className="flex items-center gap-3 px-4 py-3 bg-gray-900 text-white rounded-xl shadow-2xl border border-white/10">
+        <span className="text-base">↩</span>
+        <span className="text-sm font-medium">Email cancelled</span>
+        {preview && (
+          <>
+            <span className="text-white/20">|</span>
+            <button onClick={() => setShowPreview(true)} className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
+              View message
+            </button>
+          </>
+        )}
+      </div>
+      {showPreview && preview && (
+        <MessagePreviewOverlay preview={preview} onClose={() => setShowPreview(false)} />
+      )}
+    </>
+  );
+}
+
+/**
  * Closes the compose flow immediately, shows a 10-second undo toast,
  * then calls sendFn() if not cancelled.
  *
@@ -173,12 +199,10 @@ export function sendWithUndo(sendFn, { preview, onSent, onUndone, onError } = {}
   const undo = () => {
     cancelled = true;
     toast.dismiss(toastId);
-    toast("Email cancelled", {
-      icon: "↩",
-      style: { background: "#1f2937", color: "white", borderRadius: "12px" },
-      duration: 3000,
-      position: "bottom-center",
-    });
+    toast.custom(
+      () => <CancelledToastContent preview={preview} />,
+      { duration: 5000, position: "bottom-center" }
+    );
     if (onUndone) onUndone();
   };
 

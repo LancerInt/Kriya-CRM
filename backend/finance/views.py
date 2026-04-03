@@ -53,6 +53,37 @@ class PaymentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             notification_type='alert', link='/finance',
             actor=self.request.user, client=payment.client,
         )
+        # Auto-create purchase history from invoice items
+        if payment.invoice:
+            _auto_purchase_history_from_invoice(payment)
+
+
+def _auto_purchase_history_from_invoice(payment):
+    """Create purchase history entries from the paid invoice's items."""
+    from clients.models import PurchaseHistory
+    invoice = payment.invoice
+
+    for item in invoice.items.all():
+        exists = PurchaseHistory.objects.filter(
+            client=payment.client, invoice_number=invoice.invoice_number,
+            product_name=item.product_name, is_deleted=False,
+        ).exists()
+        if exists:
+            continue
+
+        PurchaseHistory.objects.create(
+            client=payment.client,
+            product_name=item.product_name,
+            quantity=item.quantity,
+            unit=item.unit,
+            unit_price=item.unit_price,
+            total_price=item.total_price,
+            currency=payment.currency,
+            purchase_date=payment.payment_date,
+            invoice_number=invoice.invoice_number,
+            status='completed',
+        )
+
 
 class FIRCRecordViewSet(viewsets.ModelViewSet):
     queryset = FIRCRecord.objects.all()

@@ -51,6 +51,9 @@ RULES:
         # Fallback to template
         reply_body = _template_reply(client_name, contact_name, original_subject, original_body)
 
+    # Ensure proper greeting and sign-off
+    reply_body = _ensure_greeting_signoff(reply_body, contact_name)
+
     # Build reply subject
     reply_subject = original_subject
     if not reply_subject.lower().startswith('re:'):
@@ -167,6 +170,28 @@ Best regards,
 Kriya Biosys Private Limited"""
 
 
+def _ensure_greeting_signoff(body, contact_name):
+    """Ensure email body has Dear <name>, at top and Best regards at bottom."""
+    # Check if greeting exists
+    has_greeting = bool(re.match(r'^Dear\s+', body, re.IGNORECASE))
+
+    # Strip any existing sign-off
+    clean = re.sub(
+        r'\n*(Best regards|Kind regards|Warm regards|Regards|Sincerely|Thanks|Thank you),?\s*\n.*$',
+        '', body, flags=re.IGNORECASE | re.DOTALL
+    ).rstrip()
+
+    # If no greeting, strip any misplaced one from middle/end and add at top
+    if not has_greeting:
+        clean = re.sub(r'\n*Dear\s+[^,\n]+,?\s*$', '', clean, flags=re.IGNORECASE).rstrip()
+        if contact_name:
+            clean = f'Dear {contact_name},\n\n{clean}'
+
+    # Add sign-off
+    clean = f'{clean}\n\nBest regards,\nKriya Biosys Private Limited'
+    return clean
+
+
 def _get_contact_name(communication):
     """Get the contact's current name from the client's contacts (handles renames)."""
     # Look up current contact name by email (in case name was changed)
@@ -210,3 +235,70 @@ def _get_thread_context(communication):
 def _clean_html(html):
     """Strip HTML tags from email body."""
     return re.sub(r'<[^>]+>', ' ', html).strip()
+
+
+REFINE_PROMPTS = {
+    'polish': 'Improve the grammar, clarity, and flow of this email while keeping the same meaning and tone. Fix any typos or awkward phrasing. Keep the same length.',
+    'formalize': 'Rewrite this email in a more formal, professional business tone. Use proper business language suitable for international trade correspondence. Keep the same content and meaning.',
+    'elaborate': 'Expand on the points in this email with more detail and context. Add relevant professional details while keeping it natural and concise. Do not exceed 2x the original length.',
+    'shorten': 'Condense this email to be shorter and more concise while keeping all key information. Remove unnecessary words and filler. Aim for 50-70% of the original length.',
+}
+
+
+def refine_email_body(body, action, contact_name=''):
+    """
+    Refine email body text using AI.
+    action: polish | formalize | elaborate | shorten
+    Returns the refined text or original if AI fails.
+    """
+    instruction = REFINE_PROMPTS.get(action)
+    if not instruction:
+        return body
+
+    # Extract greeting (Dear ...,) from the original body if present
+    greeting = ''
+    clean_body = body
+    greeting_match = re.match(r'^(Dear\s+[^,\n]+,)\s*\n?', body, re.IGNORECASE)
+    if greeting_match:
+        greeting = greeting_match.group(1)
+        clean_body = body[greeting_match.end():].strip()
+    elif contact_name:
+        greeting = f'Dear {contact_name},'
+
+    # Strip any existing sign-off from the body before sending to AI
+    clean_body = re.sub(
+        r'\n*(Best regards|Kind regards|Warm regards|Regards|Sincerely|Thanks|Thank you),?\s*\n.*$',
+        '', clean_body, flags=re.IGNORECASE | re.DOTALL
+    ).rstrip()
+
+    prompt = f"""{instruction}
+
+EMAIL BODY (no greeting, no sign-off):
+{clean_body}
+
+RULES:
+- Return ONLY the refined body text
+- Do NOT include any greeting like "Dear ..."
+- Do NOT include any sign-off like "Best regards" or company name
+- Do NOT add subject line, headers, or explanations
+- Just return the refined body paragraphs"""
+
+    result = _generate_with_ai(prompt)
+    if not result:
+        return body
+
+    # Clean AI output: remove any greeting/sign-off the AI may have added
+    result = re.sub(r'^(Dear\s+[^,\n]+,)\s*\n?', '', result, flags=re.IGNORECASE).strip()
+    result = re.sub(
+        r'\n*(Best regards|Kind regards|Warm regards|Regards|Sincerely|Thanks|Thank you),?\s*\n.*$',
+        '', result, flags=re.IGNORECASE | re.DOTALL
+    ).rstrip()
+
+    # Reassemble: greeting + refined body + sign-off
+    parts = []
+    if greeting:
+        parts.append(greeting)
+    parts.append(result)
+    parts.append("Best regards,\nKriya Biosys Private Limited")
+
+    return '\n\n'.join(parts)

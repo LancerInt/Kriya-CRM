@@ -83,6 +83,15 @@ def sync_emails(email_account_id=None):
             if em.get('date'):
                 Communication.objects.filter(id=comm.id).update(created_at=em['date'])
 
+            # Auto-archive if sender is in the archived senders list
+            if direction == 'inbound' and external:
+                from communications.models import ArchivedSender
+                if ArchivedSender.objects.filter(email__iexact=external).exists():
+                    comm.soft_delete()
+                    logger.info(f'Auto-archived email from {external} (sender in archive list)')
+                    total_synced += 1
+                    continue
+
             # Auto-create contact if client matched but no contact
             if client and not contact and direction == 'inbound':
                 try:

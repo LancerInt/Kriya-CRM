@@ -61,6 +61,7 @@ export default function CommunicationsPage() {
   const [executives, setExecutives] = useState([]);
   const [unmatchedCategory, setUnmatchedCategory] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [archivePrompt, setArchivePrompt] = useState(null); // { commId, senderEmail }
 
   const loadData = useCallback(() => {
     dispatch(fetchCommunications());
@@ -139,12 +140,25 @@ export default function CommunicationsPage() {
     } catch {}
   };
 
-  const handleArchiveEmail = async (commId) => {
+  const handleArchiveEmail = (commId, senderEmail) => {
+    setArchivePrompt({ commId, senderEmail });
+  };
+
+  const confirmArchive = async (archiveSender) => {
+    if (!archivePrompt) return;
     try {
-      await api.delete(`/communications/${commId}/`);
-      toast.success("Moved to Archive");
+      await api.post(`/communications/${archivePrompt.commId}/archive/`, { archive_sender: archiveSender });
+      if (archiveSender) {
+        toast.success(`Archived! All future emails from ${archivePrompt.senderEmail} will be auto-archived.`);
+      } else {
+        toast.success("Moved to Archive");
+      }
+      setArchivePrompt(null);
       loadData();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to archive")); }
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to archive"));
+      setArchivePrompt(null);
+    }
   };
 
   const toggleSelect = (id) => {
@@ -282,7 +296,7 @@ export default function CommunicationsPage() {
         <button onClick={(e) => { e.stopPropagation(); setSelectedComm(row); }} className="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">
           View
         </button>
-        <button onClick={(e) => { e.stopPropagation(); if (confirm("Archive this email? It can be restored from Archive within 30 days.")) handleArchiveEmail(row.id); }} className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100">
+        <button onClick={(e) => { e.stopPropagation(); handleArchiveEmail(row.id, row.external_email); }} className="px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100">
           Archive
         </button>
       </div>
@@ -612,6 +626,40 @@ export default function CommunicationsPage() {
                 )}
               </div>
               <button onClick={() => setSelectedComm(null)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-sm hover:bg-gray-50">Close</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Archive Sender Prompt */}
+      <Modal open={!!archivePrompt} onClose={() => setArchivePrompt(null)} title="Archive Email" size="sm">
+        {archivePrompt && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Do you also want to auto-archive all future emails from <strong className="text-gray-900">{archivePrompt.senderEmail}</strong>?
+            </p>
+            <p className="text-xs text-gray-400">
+              If you choose "Archive All", all existing and future emails from this sender will be moved to archive. Admin/Manager can unarchive or permanently delete them later.
+            </p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => confirmArchive(true)}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
+              >
+                Archive All from Sender
+              </button>
+              <button
+                onClick={() => confirmArchive(false)}
+                className="flex-1 px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700"
+              >
+                Archive This Only
+              </button>
+              <button
+                onClick={() => setArchivePrompt(null)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}

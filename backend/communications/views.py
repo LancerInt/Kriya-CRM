@@ -179,6 +179,76 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': 'all marked as read'})
 
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, pk=None):
+        """Archive a communication. Optionally auto-archive all future emails from this sender."""
+        comm = self.get_object()
+        archive_sender = request.data.get('archive_sender', False)
+
+        # Soft-delete this communication
+        comm.soft_delete()
+
+        if archive_sender and comm.external_email:
+            from .models import ArchivedSender
+            # Create auto-archive rule (if not already exists)
+            ArchivedSender.objects.get_or_create(
+                email__iexact=comm.external_email,
+                defaults={
+                    'email': comm.external_email.lower(),
+                    'archived_by': request.user,
+                }
+            )
+            # Also archive all existing emails from this sender
+            existing = Communication.objects.filter(
+                external_email__iexact=comm.external_email,
+                is_deleted=False,
+            ).exclude(id=comm.id)
+            count = 0
+            for c in existing:
+                c.soft_delete()
+                count += 1
+
+            return Response({
+                'status': 'archived',
+                'sender_archived': True,
+                'existing_archived': count,
+                'sender_email': comm.external_email,
+            })
+
+        return Response({'status': 'archived', 'sender_archived': False})
+
+    @action(detail=False, methods=['get'], url_path='archived-senders')
+    def archived_senders(self, request):
+        """List all auto-archived senders."""
+        from .models import ArchivedSender
+        senders = ArchivedSender.objects.all().values('id', 'email', 'archived_by__full_name', 'created_at')
+        # full_name is a property, need to get it differently
+        senders_list = []
+        for s in ArchivedSender.objects.select_related('archived_by').all():
+            senders_list.append({
+                'id': str(s.id),
+                'email': s.email,
+                'archived_by': s.archived_by.full_name if s.archived_by else '',
+                'created_at': s.created_at.isoformat(),
+            })
+        return Response(senders_list)
+
+    @action(detail=False, methods=['post'], url_path='unarchive-sender')
+    def unarchive_sender(self, request):
+        """Remove a sender from auto-archive list."""
+        from .models import ArchivedSender
+        sender_id = request.data.get('id')
+        email = request.data.get('email', '').strip().lower()
+
+        if sender_id:
+            ArchivedSender.objects.filter(id=sender_id).delete()
+        elif email:
+            ArchivedSender.objects.filter(email__iexact=email).delete()
+        else:
+            return Response({'error': 'id or email required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({'status': 'sender unarchived'})
+
     @action(detail=True, methods=['post'], url_path='mark-as-client')
     def mark_as_client(self, request, pk=None):
         """Mark an unmatched communication as client mail and assign to a client."""
@@ -624,6 +694,7 @@ def summarize_voice_text(request):
     """Summarize raw voice transcript into a professional email body using AI."""
     raw_text = request.data.get('text', '').strip()
     context = request.data.get('context', '')  # e.g. client name, subject
+    contact_name = request.data.get('contact_name', '').strip()
 
     if not raw_text:
         return Response({'error': 'text is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -647,17 +718,47 @@ Voice note: "{raw_text}"
 Email body:"""
 
     from .ai_email_service import _generate_with_ai
+    import re as _re
     result = _generate_with_ai(prompt)
 
     if result:
-        return Response({'summarized': result})
+        # Strip any greeting/sign-off AI may have added
+        result = _re.sub(r'^(Dear\s+[^,\n]+,)\s*\n?', '', result, flags=_re.IGNORECASE).strip()
+        result = _re.sub(
+            r'\n*(Best regards|Kind regards|Warm regards|Regards|Sincerely|Thanks|Thank you),?\s*\n.*$',
+            '', result, flags=_re.IGNORECASE | _re.DOTALL
+        ).rstrip()
     else:
         # Fallback: just clean up the text minimally
-        cleaned = raw_text.replace('  ', ' ').strip()
-        # Capitalize first letter of sentences
-        import re
-        cleaned = re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), cleaned)
-        return Response({'summarized': cleaned})
+        result = raw_text.replace('  ', ' ').strip()
+        result = _re.sub(r'(^|[.!?]\s+)([a-z])', lambda m: m.group(1) + m.group(2).upper(), result)
+
+    # Always wrap with greeting + sign-off
+    greeting = f'Dear {contact_name},' if contact_name else ''
+    parts = []
+    if greeting:
+        parts.append(greeting)
+    parts.append(result)
+    parts.append("Best regards,\nKriya Biosys Private Limited")
+
+    return Response({'summarized': '\n\n'.join(parts)})
+
+
+@api_view(['POST'])
+def refine_email_text(request):
+    """Refine email body: polish, formalize, elaborate, or shorten."""
+    body = request.data.get('body', '').strip()
+    action = request.data.get('action', '').strip()
+    contact_name = request.data.get('contact_name', '').strip()
+
+    if not body:
+        return Response({'error': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if action not in ('polish', 'formalize', 'elaborate', 'shorten'):
+        return Response({'error': 'action must be one of: polish, formalize, elaborate, shorten'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from communications.ai_email_service import refine_email_body
+    result = refine_email_body(body, action, contact_name=contact_name)
+    return Response({'refined': result})
 
 
 @api_view(['GET', 'POST'])

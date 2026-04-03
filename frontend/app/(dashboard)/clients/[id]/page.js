@@ -27,6 +27,8 @@ const TABS = [
   { key: "samples", label: "Samples" },
   { key: "finance", label: "Finance" },
   { key: "meetings", label: "Meetings" },
+  { key: "price_list", label: "Price List" },
+  { key: "purchase_history", label: "Purchase History" },
   { key: "documents", label: "Documents" },
 ];
 
@@ -391,6 +393,62 @@ function useTabData(clientId, endpoint, activeTab, tabKey) {
   return { data, loading, reload };
 }
 
+// ── Refine Dropdown (Polish / Formalize / Elaborate / Shorten) ──
+function RefineDropdown({ body, onRefined, contactName }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(null);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleRefine = async (action) => {
+    if (!body?.trim()) { toast.error("Write something first"); return; }
+    setLoading(action);
+    try {
+      const r = await api.post("/communications/refine-email/", { body, action, contact_name: contactName || '' });
+      onRefined(r.data.refined);
+      toast.success(`Text ${action === "polish" ? "polished" : action === "formalize" ? "formalized" : action === "elaborate" ? "elaborated" : "shortened"}!`);
+    } catch { toast.error("Failed to refine"); }
+    finally { setLoading(null); setOpen(false); }
+  };
+
+  const options = [
+    { key: "polish", icon: "✨", label: "Polish", desc: "Fix grammar & improve clarity" },
+    { key: "formalize", icon: "👔", label: "Formalize", desc: "Make it more professional" },
+    { key: "elaborate", icon: "📝", label: "Elaborate", desc: "Add more detail" },
+    { key: "shorten", icon: "✂️", label: "Shorten", desc: "Make it concise" },
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(!open)} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        Refine
+        <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1">
+          {options.map(({ key, icon, label, desc }) => (
+            <button key={key} onClick={() => handleRefine(key)} disabled={!!loading}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50">
+              <span className="text-sm">{icon}</span>
+              <div>
+                <span className="text-xs font-medium text-gray-800">{label}</span>
+                <p className="text-[10px] text-gray-400">{desc}</p>
+              </div>
+              {loading === key && <svg className="w-3.5 h-3.5 animate-spin ml-auto text-indigo-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Communications Tab ──
 function CommunicationsTab({ clientId, activeTab, client }) {
   const { data, loading, reload } = useTabData(clientId, "/communications/", activeTab, "communications");
@@ -580,7 +638,10 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       if (rawTranscript.trim()) {
         setDraftForm(prev => ({ ...prev, body: rawTranscript.trim() + '\n\n⏳ AI is summarizing...' }));
         const context = `Client: ${client?.company_name || ''}, Subject: ${draftForm.subject || ''}`;
-        api.post('/communications/summarize-voice/', { text: rawTranscript.trim(), context })
+        const voiceContactName = draft?.to_email
+          ? (client?.contacts?.find(c => c.email === draft.to_email)?.name || client?.contacts?.find(c => c.is_primary)?.name || '')
+          : (client?.contacts?.find(c => c.is_primary)?.name || '');
+        api.post('/communications/summarize-voice/', { text: rawTranscript.trim(), context, contact_name: voiceContactName })
           .then((res) => {
             setDraftForm(prev => ({ ...prev, body: res.data.summarized }));
             toast.success("AI summarized your voice input");
@@ -886,6 +947,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                 <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
                   {isListening ? '⏹ Stop Recording' : '🎤 Voice to Text'}
                 </button>
+                <RefineDropdown body={draftForm.body} onRefined={(text) => setDraftForm({ ...draftForm, body: text })} contactName={draft?.to_email ? (client?.contacts?.find(c => c.email === draft.to_email)?.name || client?.contacts?.find(c => c.is_primary)?.name || '') : (client?.contacts?.find(c => c.is_primary)?.name || '')} />
                 <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
                   Discard
                 </button>
@@ -1357,6 +1419,298 @@ function MeetingsTab({ clientId, activeTab }) {
   );
 }
 
+// ── Price List Tab ──
+function PriceListTab({ clientId, activeTab }) {
+  const { data, loading, reload } = useTabData(clientId, "/clients/price-list/", activeTab, "price_list");
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [products, setProducts] = useState([]);
+  const plUser = useSelector((state) => state.auth.user);
+  const canEdit = plUser?.role === "admin" || plUser?.role === "manager";
+  const [form, setForm] = useState({ product: "", product_name: "", client_product_name: "", unit_price: "", currency: "USD", unit: "KG", moq: "", valid_from: "", valid_until: "", notes: "" });
+
+  useEffect(() => {
+    api.get("/products/").then(r => setProducts(r.data.results || r.data)).catch(() => {});
+  }, []);
+
+  const handleProductSelect = (productId) => {
+    const p = products.find(pr => String(pr.id) === String(productId));
+    if (p) {
+      setForm(f => ({ ...f, product: p.id, product_name: p.name, unit_price: p.base_price || "", currency: p.currency || "USD", unit: p.unit || "KG" }));
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = { ...form, client: clientId };
+      if (!payload.valid_from) payload.valid_from = null;
+      if (!payload.valid_until) payload.valid_until = null;
+      if (editing) {
+        await api.patch(`/clients/price-list/${editing}/`, payload);
+        toast.success("Price updated");
+      } else {
+        await api.post("/clients/price-list/", payload);
+        toast.success("Price added");
+      }
+      setShowModal(false); setEditing(null); reload();
+      setForm({ product: "", product_name: "", client_product_name: "", unit_price: "", currency: "USD", unit: "KG", moq: "", valid_from: "", valid_until: "", notes: "" });
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+  };
+
+  const handleEdit = (item) => {
+    setEditing(item.id);
+    setForm({ product: item.product || "", product_name: item.product_name, client_product_name: item.client_product_name || "", unit_price: item.unit_price, currency: item.currency, unit: item.unit, moq: item.moq || "", valid_from: item.valid_from || "", valid_until: item.valid_until || "", notes: item.notes || "" });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Remove this price entry?")) return;
+    try { await api.delete(`/clients/price-list/${id}/`); toast.success("Removed"); reload(); }
+    catch { toast.error("Failed to delete"); }
+  };
+
+  const columns = [
+    { key: "product_name", label: "Product Name", render: (row) => <span className="font-medium">{row.product_name}</span> },
+    { key: "client_product_name", label: "Client's Name", render: (row) => row.client_product_name || "—" },
+    { key: "unit_price", label: "Price", render: (row) => <span className="font-semibold text-green-700">{row.currency} {Number(row.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> },
+    { key: "unit", label: "Unit" },
+    { key: "moq", label: "MOQ", render: (row) => row.moq || "—" },
+    { key: "product_base_price", label: "Base Price", render: (row) => row.product_base_price ? <span className="text-gray-400">{row.currency} {Number(row.product_base_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : "—" },
+    { key: "valid_until", label: "Valid Until", render: (row) => row.valid_until ? fmtDate(row.valid_until) : "—" },
+    ...(canEdit ? [{ key: "actions", label: "", render: (row) => (
+      <div className="flex gap-1">
+        <button onClick={() => handleEdit(row)} className="px-2 py-1 text-xs text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">Edit</button>
+        <button onClick={() => handleDelete(row.id)} className="px-2 py-1 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100">Delete</button>
+      </div>
+    )}] : []),
+  ];
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">{data.length} product{data.length !== 1 ? "s" : ""} in price list</p>
+        {canEdit && <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", client_product_name: "", unit_price: "", currency: "USD", unit: "KG", moq: "", valid_from: "", valid_until: "", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Price</button>}
+      </div>
+      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No price list" emptyDescription="Add custom product pricing for this client" />
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditing(null); }} title={editing ? "Edit Price" : "Add Price"} size="lg">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
+            <select value={form.product} onChange={(e) => { setForm({ ...form, product: e.target.value }); handleProductSelect(e.target.value); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+              <option value="">Select product (or type manually below)</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+              <input value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Client's Product Name</label>
+              <input value={form.client_product_name} onChange={(e) => setForm({ ...form, client_product_name: e.target.value })} placeholder="Name used by client" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price *</label>
+              <input type="number" step="0.01" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="USD">USD</option><option value="EUR">EUR</option><option value="INR">INR</option><option value="GBP">GBP</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
+              <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="KG">KG</option><option value="MT">MT</option><option value="Ltrs">Ltrs</option><option value="Pcs">Pcs</option><option value="Drums">Drums</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">MOQ</label>
+              <input value={form.moq} onChange={(e) => setForm({ ...form, moq: e.target.value })} placeholder="e.g. 500 KG" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valid From</label>
+              <input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Until</label>
+              <input type="date" value={form.valid_until} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">{editing ? "Update" : "Add Price"}</button>
+            <button type="button" onClick={() => { setShowModal(false); setEditing(null); }} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  );
+}
+
+// ── Purchase History Tab ──
+function PurchaseHistoryTab({ clientId, activeTab }) {
+  const { data, loading, reload } = useTabData(clientId, "/clients/purchase-history/", activeTab, "purchase_history");
+  const [showModal, setShowModal] = useState(false);
+  const phUser = useSelector((state) => state.auth.user);
+  const canEdit = phUser?.role === "admin" || phUser?.role === "manager";
+  const [editing, setEditing] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [form, setForm] = useState({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" });
+
+  useEffect(() => {
+    api.get("/products/").then(r => setProducts(r.data.results || r.data)).catch(() => {});
+  }, []);
+
+  const handleProductSelect = (productId) => {
+    const p = products.find(pr => String(pr.id) === String(productId));
+    if (p) setForm(f => ({ ...f, product: p.id, product_name: p.name, unit_price: p.base_price || "", unit: p.unit || "KG" }));
+  };
+
+  const calcTotal = (qty, price) => {
+    const q = parseFloat(qty) || 0;
+    const p = parseFloat(price) || 0;
+    return (q * p).toFixed(2);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = { ...form, client: clientId, total_price: calcTotal(form.quantity, form.unit_price) };
+      if (editing) {
+        await api.patch(`/clients/purchase-history/${editing}/`, payload);
+        toast.success("Purchase updated");
+      } else {
+        await api.post("/clients/purchase-history/", payload);
+        toast.success("Purchase recorded");
+      }
+      setShowModal(false); setEditing(null); reload();
+      setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" });
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+  };
+
+  const handleEdit = (item) => {
+    setEditing(item.id);
+    setForm({ product: item.product || "", product_name: item.product_name, quantity: item.quantity, unit: item.unit, unit_price: item.unit_price, total_price: item.total_price, currency: item.currency, purchase_date: item.purchase_date || "", invoice_number: item.invoice_number || "", status: item.status, notes: item.notes || "" });
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Remove this purchase record?")) return;
+    try { await api.delete(`/clients/purchase-history/${id}/`); toast.success("Removed"); reload(); }
+    catch { toast.error("Failed to delete"); }
+  };
+
+  const totalValue = data.reduce((sum, r) => sum + (parseFloat(r.total_price) || 0), 0);
+
+  const columns = [
+    { key: "purchase_date", label: "Purchase Date", render: (row) => fmtDate(row.purchase_date) },
+    { key: "product_name", label: "Product", render: (row) => <span className="font-medium">{row.product_name}</span> },
+    { key: "quantity", label: "Quantity", render: (row) => `${Number(row.quantity).toLocaleString()} ${row.unit}` },
+    { key: "unit_price", label: "Unit Price", render: (row) => `${row.currency} ${Number(row.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+    { key: "total_price", label: "Total", render: (row) => <span className="font-semibold text-green-700">{row.currency} {Number(row.total_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> },
+    { key: "invoice_number", label: "Invoice #", render: (row) => row.invoice_number || "—" },
+    { key: "order_number", label: "Order #", render: (row) => row.order_number || "—" },
+    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
+    ...(canEdit ? [{ key: "actions", label: "", render: (row) => (
+      <div className="flex gap-1">
+        <button onClick={() => handleEdit(row)} className="px-2 py-1 text-xs text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">Edit</button>
+        <button onClick={() => handleDelete(row.id)} className="px-2 py-1 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100">Delete</button>
+      </div>
+    )}] : []),
+  ];
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-sm text-gray-500">{data.length} purchase{data.length !== 1 ? "s" : ""}</p>
+          {totalValue > 0 && <p className="text-xs text-gray-400">Total: USD {totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>}
+        </div>
+        {canEdit && <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Purchase</button>}
+      </div>
+      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No purchase history" emptyDescription="Record purchases for this client" />
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditing(null); }} title={editing ? "Edit Purchase" : "Record Purchase"} size="lg">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
+              <select value={form.product} onChange={(e) => { setForm({ ...form, product: e.target.value }); handleProductSelect(e.target.value); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="">Select product</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+              <input value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date *</label>
+              <input type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
+              <input type="number" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value, total_price: calcTotal(e.target.value, form.unit_price) })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price *</label>
+              <input type="number" step="0.01" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value, total_price: calcTotal(form.quantity, e.target.value) })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Total</label>
+              <input value={form.total_price || calcTotal(form.quantity, form.unit_price)} readOnly className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-600" />
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="USD">USD</option><option value="EUR">EUR</option><option value="INR">INR</option><option value="GBP">GBP</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
+              <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="KG">KG</option><option value="MT">MT</option><option value="Ltrs">Ltrs</option><option value="Pcs">Pcs</option><option value="Drums">Drums</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Invoice #</label>
+              <input value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option value="completed">Completed</option><option value="pending">Pending</option><option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">{editing ? "Update" : "Record Purchase"}</button>
+            <button type="button" onClick={() => { setShowModal(false); setEditing(null); }} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  );
+}
+
 // ── Documents Tab ──
 function DocumentsTab({ clientId, activeTab }) {
   const { data, loading, reload } = useTabData(clientId, "/documents/", activeTab, "documents");
@@ -1477,7 +1831,8 @@ export default function ClientDetailPage() {
             <AISummaryButton
               variant="button"
               title={`${client.company_name} — AI Summary`}
-              prompt={`Give me a comprehensive summary of client "${client.company_name}" (ID: ${id}). Include: their contact details, recent communications, order history, pending tasks, shipment status, and any action items. Use get_client_summary, get_recent_communications, get_tasks, get_orders, and get_shipments tools with client_id="${id}".`}
+              prompt={`Give me a comprehensive summary of this client. Include: contact details, recent communications, order history, pending tasks, shipment status, price list, purchase history, and any action items.`}
+              clientId={id}
             />
             <Link href={`/clients/${id}/edit`} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
               Edit Client
@@ -1515,6 +1870,8 @@ export default function ClientDetailPage() {
       {activeTab === "samples" && <SamplesTab clientId={id} activeTab={activeTab} />}
       {activeTab === "finance" && <FinanceTab clientId={id} activeTab={activeTab} />}
       {activeTab === "meetings" && <MeetingsTab clientId={id} activeTab={activeTab} />}
+      {activeTab === "price_list" && <PriceListTab clientId={id} activeTab={activeTab} />}
+      {activeTab === "purchase_history" && <PurchaseHistoryTab clientId={id} activeTab={activeTab} />}
       {activeTab === "documents" && <DocumentsTab clientId={id} activeTab={activeTab} />}
     </div>
   );
