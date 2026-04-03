@@ -11,6 +11,7 @@ Flow:
 7. Notify assigned executive
 """
 import logging
+from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,8 @@ def _generate_draft_quotation(quote_request):
             company_product_name = str(matched_product)  # includes concentration
         # If no match, both names stay the same — executive can fix later
 
+    # Get client-specific price, fallback to product base price
+    unit_price = _get_client_price(client, matched_product)
     QuotationItem.objects.create(
         quotation=quotation,
         product=matched_product,
@@ -264,8 +267,8 @@ def _generate_draft_quotation(quote_request):
         description=qr.extracted_packaging or '',
         quantity=qty,
         unit=qr.extracted_unit or 'MT',
-        unit_price=float(matched_product.base_price) if matched_product else 0,
-        total_price=(qty * float(matched_product.base_price)) if matched_product else 0,
+        unit_price=unit_price,
+        total_price=qty * unit_price,
     )
 
     return quotation
@@ -327,6 +330,28 @@ def _match_product(extracted_name):
             return product
 
     return None
+
+
+def _get_client_price(client, product):
+    """
+    Get client-specific price from ClientPriceList.
+    Falls back to product base_price if no client-specific price exists.
+    """
+    if not product:
+        return 0
+
+    if client:
+        from clients.models import ClientPriceList
+        client_price = ClientPriceList.objects.filter(
+            client=client,
+            is_deleted=False,
+        ).filter(
+            models.Q(product=product) | models.Q(product_name__iexact=product.name)
+        ).first()
+        if client_price:
+            return float(client_price.unit_price)
+
+    return float(product.base_price) if product.base_price else 0
 
 
 def _notify_executive(quote_request, assigned_to):

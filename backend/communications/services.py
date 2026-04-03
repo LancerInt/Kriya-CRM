@@ -140,6 +140,21 @@ class ContactMatcher:
 
 class EmailService:
     @staticmethod
+    def _decode_header(raw):
+        """Decode MIME encoded-word headers like =?UTF-8?Q?...?= into plain text."""
+        if not raw or '=?' not in raw:
+            return raw
+        from email.header import decode_header
+        parts = decode_header(raw)
+        decoded = ''
+        for part, charset in parts:
+            if isinstance(part, bytes):
+                decoded += part.decode(charset or 'utf-8', errors='replace')
+            else:
+                decoded += part
+        return decoded
+
+    @staticmethod
     def send_email(email_account, to, subject, body_html, cc=None, bcc=None, attachments=None):
         """Send email via SMTP. Returns Message-ID on success."""
         from common.encryption import decrypt_value
@@ -301,7 +316,7 @@ class EmailService:
             'from_email': from_email,
             'to_email': to_email,
             'cc': cc_string,
-            'subject': msg.get('Subject', '(No Subject)'),
+            'subject': EmailService._decode_header(msg.get('Subject', '(No Subject)')),
             'body': body,
             'date': date,
             'message_id': msg.get('Message-ID', ''),

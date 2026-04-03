@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -7,6 +7,63 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { sendWithUndo } from "@/lib/undoSend";
+
+// Refine Dropdown for reply box
+function ReplyRefineDropdown({ body, onRefined, contactName }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(null);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleRefine = async (action) => {
+    if (!body?.trim()) { toast.error("Write something first"); return; }
+    setLoading(action);
+    try {
+      const r = await api.post("/communications/refine-email/", { body, action, contact_name: contactName || "" });
+      onRefined(r.data.refined);
+      toast.success(`Text ${action === "polish" ? "polished" : action === "formalize" ? "formalized" : action === "elaborate" ? "elaborated" : "shortened"}!`);
+    } catch { toast.error("Failed to refine"); }
+    finally { setLoading(null); setOpen(false); }
+  };
+
+  const options = [
+    { key: "polish", icon: "✨", label: "Polish", desc: "Fix grammar & improve clarity" },
+    { key: "formalize", icon: "👔", label: "Formalize", desc: "Make it more professional" },
+    { key: "elaborate", icon: "📝", label: "Elaborate", desc: "Add more detail" },
+    { key: "shorten", icon: "✂️", label: "Shorten", desc: "Make it concise" },
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(!open)} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+        Refine
+        <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1">
+          {options.map(({ key, icon, label, desc }) => (
+            <button key={key} onClick={() => handleRefine(key)} disabled={!!loading}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50">
+              <span className="text-sm">{icon}</span>
+              <div>
+                <span className="text-xs font-medium text-gray-800">{label}</span>
+                <p className="text-[10px] text-gray-400">{desc}</p>
+              </div>
+              {loading === key && <svg className="w-3.5 h-3.5 animate-spin ml-auto text-indigo-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CommunicationDetailPage() {
   const { id } = useParams();
@@ -14,10 +71,18 @@ export default function CommunicationDetailPage() {
   const [comm, setComm] = useState(null);
   const [thread, setThread] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showReply, setShowReply] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [replyCc, setReplyCc] = useState("");
+  const [replySubject, setReplySubject] = useState("");
+  const [sending, setSending] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [selectedAccount, setSelectedAccount] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
+  const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
       .then((res) => {
         setComm(res.data.communication);
@@ -25,6 +90,13 @@ export default function CommunicationDetailPage() {
       })
       .catch((err) => { toast.error(getErrorMessage(err, "Failed to load")); router.push("/communications"); })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    loadThread();
+    api.get("/communications/email-accounts/").then(r => setEmailAccounts(r.data.results || r.data)).catch(() => {});
   }, [id]);
 
   if (loading) return <LoadingSpinner size="lg" />;
@@ -129,6 +201,156 @@ export default function CommunicationDetailPage() {
       {thread.length > 1 && (
         <div className="mt-4 text-center">
           <span className="text-xs text-gray-400">{thread.length} messages in this conversation</span>
+        </div>
+      )}
+
+      {/* Reply Section — only show if last message in thread is inbound (awaiting reply) */}
+      {comm.comm_type === "email" && thread.length > 0 && thread[thread.length - 1].direction === "inbound" && (
+        <div className="mt-6">
+          {!showReply ? (
+            <button onClick={() => {
+              const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+              const subj = comm.subject || "";
+              setReplySubject(subj.startsWith("Re:") ? subj : `Re: ${subj}`);
+              // Build CC from client contacts + admin/manager
+              if (comm.client) {
+                api.get(`/clients/${comm.client}/`).then(r => {
+                  const contacts = r.data.contacts || [];
+                  const toEmail = lastInbound.external_email || "";
+                  const otherEmails = contacts.map(c => c.email).filter(e => e && e.toLowerCase() !== toEmail.toLowerCase());
+                  api.get("/auth/users/").then(ur => {
+                    const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
+                    const allCc = [...otherEmails];
+                    admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
+                    setReplyCc(allCc.join(", "));
+                  }).catch(() => {});
+                }).catch(() => {});
+              }
+              if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
+              setShowReply(true);
+            }} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+              Reply to this conversation
+            </button>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">Reply</span>
+                <button onClick={() => setShowReply(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+              </div>
+
+              <div className="px-5 py-3 space-y-3">
+                {/* From */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+                  <select value={selectedAccount} onChange={(e) => setSelectedAccount(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <option value="">Select email account</option>
+                    {emailAccounts.map(a => <option key={a.id} value={a.id}>{a.display_name ? `${a.display_name} <${a.email}>` : a.email}</option>)}
+                  </select>
+                </div>
+
+                {/* To (read-only) */}
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+                    <input value={([...thread].reverse().find(m => m.direction === "inbound") || comm).external_email || ""} readOnly className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">CC</label>
+                    <input value={replyCc} onChange={(e) => setReplyCc(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  </div>
+                </div>
+
+                {/* Subject */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                  <input value={replySubject} onChange={(e) => setReplySubject(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                </div>
+
+                {/* Body */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Body</label>
+                  <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} rows={8} placeholder="Write your reply..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono" />
+                </div>
+
+                {/* Attachments */}
+                <div className="flex items-center gap-2">
+                  <label className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer flex items-center gap-1">
+                    📎 Attach
+                    <input type="file" ref={fileInputRef} multiple onChange={(e) => setAttachments(prev => [...prev, ...Array.from(e.target.files)])} className="hidden" />
+                  </label>
+                  {attachments.length > 0 && <span className="text-xs text-gray-400">{attachments.length} file(s)</span>}
+                </div>
+                {attachments.length > 0 && (
+                  <div className="space-y-1">
+                    {attachments.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
+                        <span>{f.name} ({(f.size / 1024).toFixed(1)} KB)</span>
+                        <button onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions bar */}
+              <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+                <div className="flex gap-2">
+                  <button onClick={async () => {
+                    if (!comm.client) { toast.error("No client linked"); return; }
+                    setGeneratingDraft(true);
+                    try {
+                      // Find the last inbound message to generate reply for
+                      const lastInbound = [...thread].reverse().find(m => m.direction === "inbound");
+                      if (!lastInbound) { toast.error("No inbound message to reply to"); return; }
+                      // Check if draft exists
+                      const drafts = await api.get(`/communications/drafts/`, { params: { communication: lastInbound.id } });
+                      const draftList = drafts.data.results || drafts.data;
+                      if (draftList.length > 0) {
+                        const d = draftList[0];
+                        setReplyBody(d.body);
+                        if (d.cc) setReplyCc(d.cc);
+                        toast.success("AI draft loaded");
+                      } else {
+                        toast.error("No AI draft found for this email");
+                      }
+                    } catch { toast.error("Failed to load AI draft"); }
+                    finally { setGeneratingDraft(false); }
+                  }} disabled={generatingDraft} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${generatingDraft ? "opacity-50" : ""} text-purple-700 bg-purple-50 hover:bg-purple-100`}>
+                    {generatingDraft ? "Loading..." : "✨ AI Draft"}
+                  </button>
+                  <ReplyRefineDropdown body={replyBody} onRefined={(text) => setReplyBody(text)} contactName={([...thread].reverse().find(m => m.direction === "inbound") || comm).contact_name || ""} />
+                </div>
+                <button onClick={async () => {
+                  const toEmail = ([...thread].reverse().find(m => m.direction === "inbound") || comm).external_email;
+                  if (!toEmail) { toast.error("No recipient email"); return; }
+                  if (!replyBody.trim()) { toast.error("Write a reply first"); return; }
+                  if (!selectedAccount) { toast.error("Select an email account"); return; }
+
+                  const fd = new FormData();
+                  fd.append("email_account", selectedAccount);
+                  fd.append("to", toEmail);
+                  fd.append("subject", replySubject);
+                  fd.append("body", replyBody);
+                  if (replyCc) fd.append("cc", replyCc);
+                  if (comm.client) fd.append("client", comm.client);
+                  attachments.forEach(f => fd.append("attachments", f));
+
+                  setShowReply(false);
+                  sendWithUndo(
+                    () => api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } }),
+                    {
+                      preview: { to: toEmail, cc: replyCc, subject: replySubject, body: replyBody },
+                      onSent: () => { setReplyBody(""); setAttachments([]); loadThread(); toast.success("Reply sent!"); },
+                      onError: (err) => toast.error(getErrorMessage(err, "Failed to send")),
+                    }
+                  );
+                }} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  Send Reply
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

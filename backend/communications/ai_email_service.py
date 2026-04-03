@@ -175,11 +175,14 @@ def _ensure_greeting_signoff(body, contact_name):
     # Check if greeting exists
     has_greeting = bool(re.match(r'^Dear\s+', body, re.IGNORECASE))
 
-    # Strip any existing sign-off
+    # Strip any existing sign-off variations
     clean = re.sub(
         r'\n*(Best regards|Kind regards|Warm regards|Regards|Sincerely|Thanks|Thank you),?\s*\n.*$',
         '', body, flags=re.IGNORECASE | re.DOTALL
     ).rstrip()
+
+    # Also strip standalone company name at the end (without "Best regards" before it)
+    clean = re.sub(r'\n+Kriya\s+Biosys[^\n]*$', '', clean, flags=re.IGNORECASE).rstrip()
 
     # If no greeting, strip any misplaced one from middle/end and add at top
     if not has_greeting:

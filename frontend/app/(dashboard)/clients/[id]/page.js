@@ -512,14 +512,47 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     finally { setSubmitting(false); }
   };
 
+  const [savedAttachments, setSavedAttachments] = useState([]); // from server
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+
   const openDraft = async (draftId) => {
     try {
       const res = await api.get(`/communications/drafts/${draftId}/`);
       setDraft(res.data);
       setDraftForm({ subject: res.data.subject, body: res.data.body, cc: res.data.cc || adminManagerEmails });
       setDraftAttachments([]);
+      setSavedAttachments(res.data.attachments || []);
+      setLastSavedAt(res.data.last_saved_at);
       setShowDraftModal(true);
     } catch { toast.error("Failed to load draft"); }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!draft) return;
+    setSavingDraft(true);
+    try {
+      const fd = new FormData();
+      fd.append("subject", draftForm.subject);
+      fd.append("body", draftForm.body);
+      fd.append("cc", draftForm.cc);
+      draftAttachments.forEach(f => fd.append("attachments", f));
+      const res = await api.post(`/communications/drafts/${draft.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setDraft(res.data);
+      setSavedAttachments(res.data.attachments || []);
+      setDraftAttachments([]); // clear new files (now saved on server)
+      setLastSavedAt(res.data.last_saved_at);
+      toast.success("Draft saved");
+    } catch { toast.error("Failed to save draft"); }
+    finally { setSavingDraft(false); }
+  };
+
+  const handleRemoveSavedAttachment = async (attId) => {
+    try {
+      await api.post(`/communications/drafts/${draft.id}/remove-attachment/`, { attachment_id: attId });
+      setSavedAttachments(prev => prev.filter(a => a.id !== attId));
+      toast.success("Attachment removed");
+    } catch { toast.error("Failed to remove"); }
   };
 
   const handleSendDraft = async () => {
@@ -924,8 +957,27 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                   📎 Add Files
                   <input type="file" multiple onChange={(e) => setDraftAttachments(prev => [...prev, ...Array.from(e.target.files)])} className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip" />
                 </label>
-                <span className="text-xs text-gray-400">{draftAttachments.length > 0 ? `${draftAttachments.length} file(s)` : "No files attached"}</span>
+                <span className="text-xs text-gray-400">
+                  {(savedAttachments.length + draftAttachments.length) > 0 ? `${savedAttachments.length + draftAttachments.length} file(s)` : "No files attached"}
+                </span>
               </div>
+              {/* Saved attachments (from server) */}
+              {savedAttachments.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {savedAttachments.map((att) => (
+                    <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-500">📄</span>
+                        <span className="font-medium">{att.filename}</span>
+                        <span className="text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
+                        <span className="text-green-600 text-[10px]">Saved</span>
+                      </div>
+                      <button onClick={() => handleRemoveSavedAttachment(att.id)} className="text-red-400 hover:text-red-600">&times;</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* New attachments (not yet saved) */}
               {draftAttachments.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {draftAttachments.map((file, i) => (
@@ -934,6 +986,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                         <span className="text-gray-500">📄</span>
                         <span className="font-medium">{file.name}</span>
                         <span className="text-gray-400">{(file.size / 1024).toFixed(1)} KB</span>
+                        <span className="text-amber-600 text-[10px]">Unsaved</span>
                       </div>
                       <button onClick={() => setDraftAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
                     </div>
@@ -942,12 +995,20 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               )}
             </div>
 
+            {/* Last saved indicator */}
+            {lastSavedAt && (
+              <p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p>
+            )}
+
             <div className="flex items-center justify-between pt-2 border-t border-gray-200">
               <div className="flex gap-2">
                 <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
                   {isListening ? '⏹ Stop Recording' : '🎤 Voice to Text'}
                 </button>
                 <RefineDropdown body={draftForm.body} onRefined={(text) => setDraftForm({ ...draftForm, body: text })} contactName={draft?.to_email ? (client?.contacts?.find(c => c.email === draft.to_email)?.name || client?.contacts?.find(c => c.is_primary)?.name || '') : (client?.contacts?.find(c => c.is_primary)?.name || '')} />
+                <button onClick={handleSaveDraft} disabled={savingDraft} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50">
+                  {savingDraft ? "Saving..." : "💾 Save as Draft"}
+                </button>
                 <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
                   Discard
                 </button>

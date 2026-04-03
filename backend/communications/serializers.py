@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft, QuoteRequest
+from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft, DraftAttachment, QuoteRequest
 from common.encryption import encrypt_value
 
 
@@ -112,19 +112,29 @@ class SendEmailSerializer(serializers.Serializer):
     email_account = serializers.UUIDField()
 
 
+class DraftAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DraftAttachment
+        fields = ['id', 'filename', 'file', 'file_size', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class EmailDraftSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     original_subject = serializers.CharField(source='communication.subject', read_only=True, default='')
     original_direction = serializers.CharField(source='communication.direction', read_only=True, default='')
+    attachments = DraftAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = EmailDraft
         fields = ['id', 'client', 'client_name', 'communication', 'original_subject',
                   'original_direction', 'subject', 'body', 'to_email', 'cc', 'status',
                   'generated_by_ai', 'created_by', 'edited_by',
-                  'sent_at', 'created_at', 'updated_at']
+                  'sent_at', 'last_saved_at', 'draft_version',
+                  'created_at', 'updated_at', 'attachments']
         read_only_fields = ['id', 'client', 'communication', 'generated_by_ai',
-                            'created_by', 'sent_at', 'created_at', 'updated_at']
+                            'created_by', 'sent_at', 'created_at', 'updated_at',
+                            'last_saved_at', 'draft_version']
 
 
 class SendWhatsAppSerializer(serializers.Serializer):

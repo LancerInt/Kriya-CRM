@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
+import Modal from "@/components/ui/Modal";
 import StatusBadge from "@/components/ui/StatusBadge";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
@@ -16,6 +17,20 @@ export default function RecycleBinPage() {
   const [filter, setFilter] = useState("all");
   const [restoring, setRestoring] = useState(null);
   const [archivedSenders, setArchivedSenders] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handlePreview = async (item) => {
+    setPreviewLoading(true);
+    setPreview({ ...item, data: null });
+    try {
+      const res = await api.post("/recycle-bin/preview/", { model: item.model, id: item.id });
+      setPreview({ ...item, data: res.data });
+    } catch {
+      setPreview({ ...item, data: { _error: 'Could not load preview.' } });
+    }
+    finally { setPreviewLoading(false); }
+  };
 
   const loadArchivedSenders = () => {
     api.get("/communications/archived-senders/").then(r => setArchivedSenders(r.data)).catch(() => {});
@@ -121,7 +136,7 @@ export default function RecycleBinPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map((item) => (
-                <tr key={`${item.model}-${item.id}`} className="hover:bg-gray-50">
+                <tr key={`${item.model}-${item.id}`} className="hover:bg-gray-50 cursor-pointer" onClick={() => handlePreview(item)}>
                   <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
                   <td className="px-4 py-3"><StatusBadge status={item.type.toLowerCase()} /></td>
                   <td className="px-4 py-3 text-gray-500">
@@ -159,6 +174,80 @@ export default function RecycleBinPage() {
           </table>
         </div>
       )}
+
+      {/* Preview Modal */}
+      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name || "Preview"} size="lg">
+        {previewLoading ? (
+          <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+        ) : preview?.data?._error ? (
+          <p className="text-sm text-gray-500 py-4">{preview.data._error}</p>
+        ) : preview?.data ? (
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            {/* Type badge */}
+            <div className="flex items-center gap-2">
+              <StatusBadge status={preview.type.toLowerCase()} />
+              {preview.data.status && <StatusBadge status={preview.data.status} />}
+              {preview.data.direction && (
+                <span className={`text-xs font-medium px-2 py-0.5 rounded ${preview.data.direction === "inbound" ? "text-blue-700 bg-blue-50" : "text-green-700 bg-green-50"}`}>
+                  {preview.data.direction === "inbound" ? "Received" : "Sent"}
+                </span>
+              )}
+            </div>
+
+            {/* Key-value fields */}
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              {preview.data.company_name && <div><span className="text-gray-400 block text-xs">Company</span><span className="font-medium">{preview.data.company_name}</span></div>}
+              {preview.data.client_name && <div><span className="text-gray-400 block text-xs">Client</span><span className="font-medium">{preview.data.client_name}</span></div>}
+              {preview.data.external_email && <div><span className="text-gray-400 block text-xs">Email</span><span className="font-medium">{preview.data.external_email}</span></div>}
+              {preview.data.subject && <div className="col-span-2"><span className="text-gray-400 block text-xs">Subject</span><span className="font-medium">{preview.data.subject}</span></div>}
+              {preview.data.to_email && <div><span className="text-gray-400 block text-xs">To</span><span className="font-medium">{preview.data.to_email}</span></div>}
+              {preview.data.email && <div><span className="text-gray-400 block text-xs">Email</span><span className="font-medium">{preview.data.email}</span></div>}
+              {preview.data.name && <div><span className="text-gray-400 block text-xs">Name</span><span className="font-medium">{preview.data.name}</span></div>}
+              {preview.data.phone && <div><span className="text-gray-400 block text-xs">Phone</span><span className="font-medium">{preview.data.phone}</span></div>}
+              {preview.data.order_number && <div><span className="text-gray-400 block text-xs">Order #</span><span className="font-medium">{preview.data.order_number}</span></div>}
+              {preview.data.quotation_number && <div><span className="text-gray-400 block text-xs">Quotation #</span><span className="font-medium">{preview.data.quotation_number}</span></div>}
+              {preview.data.invoice_number && <div><span className="text-gray-400 block text-xs">Invoice #</span><span className="font-medium">{preview.data.invoice_number}</span></div>}
+              {preview.data.total != null && <div><span className="text-gray-400 block text-xs">Total</span><span className="font-medium">{preview.data.currency || "USD"} {Number(preview.data.total).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>}
+              {preview.data.product_name && <div><span className="text-gray-400 block text-xs">Product</span><span className="font-medium">{preview.data.product_name}</span></div>}
+              {preview.data.title && <div className="col-span-2"><span className="text-gray-400 block text-xs">Title</span><span className="font-medium">{preview.data.title}</span></div>}
+              {preview.data.created_at && <div><span className="text-gray-400 block text-xs">Created</span><span className="font-medium">{(() => { try { return format(new Date(preview.data.created_at), "MMM d, yyyy h:mm a"); } catch { return "—"; } })()}</span></div>}
+            </div>
+
+            {/* Body/Content */}
+            {preview.data.body && (
+              <div>
+                <span className="text-gray-400 block text-xs mb-1">Content</span>
+                <div className="bg-gray-50 rounded-lg p-4 text-sm max-h-60 overflow-y-auto">
+                  {preview.data.body?.includes("<") ? (
+                    <div dangerouslySetInnerHTML={{ __html: preview.data.body }} />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{preview.data.body}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {preview.data.description && !preview.data.body && (
+              <div>
+                <span className="text-gray-400 block text-xs mb-1">Description</span>
+                <p className="text-sm bg-gray-50 rounded-lg p-4 whitespace-pre-wrap">{preview.data.description}</p>
+              </div>
+            )}
+            {preview.data.notes && (
+              <div>
+                <span className="text-gray-400 block text-xs mb-1">Notes</span>
+                <p className="text-sm bg-gray-50 rounded-lg p-3 whitespace-pre-wrap">{preview.data.notes}</p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-2 border-t border-gray-200">
+              <button onClick={() => { handleRestore(preview); setPreview(null); }} className="px-4 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100">Restore</button>
+              <button onClick={() => { handlePurge(preview); setPreview(null); }} className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100">Delete Forever</button>
+              <button onClick={() => setPreview(null)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       {/* Archived Senders Section */}
       {isAdminOrManager && archivedSenders.length > 0 && (

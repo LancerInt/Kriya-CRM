@@ -241,8 +241,9 @@ def _fill_pi_items(pi, text):
     else:
         pi_product_name = raw_product_text
 
-    # Get price from product master
-    base_price = float(matched_product.base_price) if matched_product else 0
+    # Get client-specific price, fallback to product base price
+    from communications.auto_quote_service import _get_client_price
+    base_price = _get_client_price(pi.client, matched_product)
     line_total = quantity * base_price
 
     # Delete empty items and create filled one

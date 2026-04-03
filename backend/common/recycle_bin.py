@@ -85,23 +85,77 @@ def recycle_bin_list(request):
             if obj.deleted_at:
                 days_left = max(0, 30 - (timezone.now() - obj.deleted_at).days)
 
+            # For communications, show specific type (Email, WhatsApp, Call, Note)
+            item_type = display_name
+            if model_label == 'communications.Communication' and hasattr(obj, 'comm_type'):
+                type_map = {'email': 'Email', 'whatsapp': 'WhatsApp', 'call': 'Call', 'note': 'Note'}
+                item_type = type_map.get(obj.comm_type, 'Activity')
+
             item_data = {
                 'id': str(obj.id),
                 'model': model_label,
-                'type': display_name,
+                'type': item_type,
                 'name': _get_display(obj, model_label),
                 'deleted_at': obj.deleted_at.isoformat() if obj.deleted_at else None,
                 'days_left': days_left,
             }
-            # Add classification for communications so Archive shows category
-            if model_label == 'communications.Communication' and hasattr(obj, 'classification'):
-                item_data['classification'] = obj.classification
+            # Add extra info for communications
+            if model_label == 'communications.Communication':
+                item_data['classification'] = getattr(obj, 'classification', '')
                 item_data['external_email'] = obj.external_email or ''
+                item_data['direction'] = getattr(obj, 'direction', '')
             items.append(item_data)
 
     # Sort by deleted_at descending
     items.sort(key=lambda x: x['deleted_at'] or '', reverse=True)
     return Response(items)
+
+
+@api_view(['POST'])
+def recycle_bin_preview(request):
+    """Preview a soft-deleted item's full data."""
+    model_label = request.data.get('model')
+    obj_id = request.data.get('id')
+
+    if not model_label or not obj_id:
+        return Response({'error': 'model and id are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if model_label not in RECYCLABLE_MODELS:
+        return Response({'error': 'Invalid model'}, status=status.HTTP_400_BAD_REQUEST)
+
+    Model = apps.get_model(model_label)
+    try:
+        obj = Model.objects.get(id=obj_id, is_deleted=True)
+    except Model.DoesNotExist:
+        return Response({'error': 'Item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Build preview data from model fields
+    data = {}
+    skip_fields = {'id', 'is_deleted', 'deleted_at', 'updated_at', 'password'}
+    for field in obj._meta.get_fields():
+        if not hasattr(field, 'attname') or field.attname in skip_fields:
+            continue
+        name = field.attname.replace('_id', '') if field.attname.endswith('_id') else field.attname
+        val = getattr(obj, field.attname, None)
+        if val is None or val == '':
+            continue
+        # Convert special types
+        if hasattr(val, 'isoformat'):
+            val = val.isoformat()
+        elif isinstance(val, (int, float, bool, str)):
+            pass
+        else:
+            val = str(val)
+        data[name] = val
+
+    # Add display name for FK fields
+    if hasattr(obj, 'client') and obj.client:
+        data['client_name'] = obj.client.company_name
+    if hasattr(obj, 'user') and obj.user:
+        data['user_name'] = obj.user.full_name
+
+    data['_type'] = RECYCLABLE_MODELS[model_label]
+    data['_name'] = _get_display(obj, model_label)
+    return Response(data)
 
 
 @api_view(['POST'])

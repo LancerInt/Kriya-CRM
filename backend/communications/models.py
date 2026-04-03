@@ -138,6 +138,8 @@ class EmailDraft(TimeStampedModel):
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_drafts')
     edited_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='edited_drafts')
     sent_at = models.DateTimeField(null=True, blank=True)
+    last_saved_at = models.DateTimeField(null=True, blank=True)
+    draft_version = models.IntegerField(default=1)
 
     class Meta:
         db_table = 'email_drafts'
@@ -145,6 +147,20 @@ class EmailDraft(TimeStampedModel):
 
     def __str__(self):
         return f"Draft: {self.subject[:50]} ({self.status})"
+
+
+class DraftAttachment(TimeStampedModel):
+    """File attachments saved with an email draft."""
+    draft = models.ForeignKey(EmailDraft, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='draft_attachments/%Y/%m/')
+    filename = models.CharField(max_length=255)
+    file_size = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'draft_attachments'
+
+    def __str__(self):
+        return self.filename
 
 
 class CommunicationAttachment(TimeStampedModel):

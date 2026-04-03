@@ -19,18 +19,32 @@ ALLOWED_TRANSITIONS = {
     'confirmed': ['po_received', 'cancelled'],
     'po_received': ['pif_sent', 'cancelled'],
     'pif_sent': ['docs_preparing', 'cancelled'],
-    'docs_preparing': ['docs_approved', 'cancelled'],
-    'docs_approved': ['factory_ready', 'cancelled'],
-    'factory_ready': ['container_booked', 'cancelled'],
-    'container_booked': ['inspection', 'packed', 'cancelled'],
+    'docs_preparing': ['factory_ready', 'cancelled'],
+    'factory_ready': ['inspection', 'cancelled'],
     'inspection': ['inspection_passed', 'cancelled'],
-    'inspection_passed': ['dispatched', 'cancelled'],
+    'inspection_passed': ['container_booked', 'cancelled'],
+    'container_booked': ['docs_approved', 'packed', 'cancelled'],
+    'packed': ['docs_approved', 'cancelled'],
+    'docs_approved': ['dispatched', 'cancelled'],
     'dispatched': ['in_transit'],
     'in_transit': ['arrived'],
-    'arrived': ['customs'],
-    'customs': ['delivered'],
-    'delivered': [],  # Terminal state
+    'arrived': [],  # Terminal state
     'cancelled': [],  # Terminal state
+}
+
+# Revert map: each status can go back to its previous stage(s)
+REVERT_TRANSITIONS = {
+    'po_received': 'confirmed',
+    'pif_sent': 'po_received',
+    'docs_preparing': 'pif_sent',
+    'factory_ready': 'docs_preparing',
+    'inspection': 'factory_ready',
+    'inspection_passed': 'inspection',
+    'container_booked': 'inspection_passed',
+    'packed': 'container_booked',
+    'docs_approved': 'container_booked',
+    'dispatched': 'docs_approved',
+    'in_transit': 'dispatched',
 }
 
 # Statuses that require specific data before transition
@@ -44,25 +58,29 @@ TRANSITION_REQUIREMENTS = {
         'message': '',
     },
     'dispatched': {
-        'check': lambda order: order.status == 'inspection_passed',
-        'message': 'Inspection must pass before dispatching.',
+        'check': lambda order: order.status == 'docs_approved',
+        'message': 'Documents must be approved before dispatching.',
     },
 }
 
 # Statuses that trigger auto-email to client
-AUTO_EMAIL_STATUSES = ['inspection_passed', 'dispatched', 'in_transit', 'delivered']
+AUTO_EMAIL_STATUSES = ['inspection_passed', 'dispatched', 'in_transit', 'arrived']
 
 # Status timestamp field mapping
 STATUS_TIMESTAMP_MAP = {
     'confirmed': 'confirmed_at',
     'po_received': 'po_received_at',
     'pif_sent': 'pif_sent_at',
-    'docs_approved': 'docs_approved_at',
+    'docs_preparing': 'docs_preparing_at',
     'factory_ready': 'factory_ready_at',
-    'container_booked': 'container_booked_at',
+    'inspection': 'inspection_at',
     'inspection_passed': 'inspection_passed_at',
+    'container_booked': 'container_booked_at',
+    'packed': 'container_booked_at',  # reuse container_booked timestamp for packed
+    'docs_approved': 'docs_approved_at',
     'dispatched': 'dispatched_at',
-    'delivered': 'delivered_at',
+    'in_transit': 'in_transit_at',
+    'arrived': 'arrived_at',
 }
 
 
@@ -164,8 +182,8 @@ def transition_order(order, new_status, user, remarks=''):
     if new_status in AUTO_EMAIL_STATUSES:
         _send_client_status_email(order, new_status, user)
 
-    # 8. Auto-create purchase history when order is delivered
-    if new_status == 'delivered':
+    # 8. Auto-create purchase history when order arrives
+    if new_status == 'arrived':
         _auto_create_purchase_history(order)
 
     logger.info(f'Order {order.order_number}: {old_status} → {new_status} by {user.username}')
@@ -204,14 +222,55 @@ def _send_client_status_email(order, new_status, user):
         logger.error(f'Failed to send status email for {order.order_number}: {e}')
 
 
+def revert_order(order, user, remarks=''):
+    """
+    Revert order to its previous stage.
+    Only admin/manager can revert. Clears the timestamp for the reverted stage.
+    """
+    from orders.models import OrderStatusHistory, WorkflowEventLog
+
+    if user.role not in ('admin', 'manager'):
+        raise WorkflowError('Only admin or manager can revert order status.')
+
+    previous = REVERT_TRANSITIONS.get(order.status)
+    if not previous:
+        raise WorkflowError(f'Cannot revert from "{get_status_display(order.status)}". No previous stage.')
+
+    old_status = order.status
+
+    # Clear timestamp for the current status
+    ts_field = STATUS_TIMESTAMP_MAP.get(old_status)
+    if ts_field and hasattr(order, ts_field):
+        setattr(order, ts_field, None)
+
+    order.status = previous
+    order.save()
+
+    # Log
+    OrderStatusHistory.objects.create(
+        order=order, from_status=old_status, to_status=previous,
+        changed_by=user, remarks=remarks or f'Reverted from {get_status_display(old_status)}',
+    )
+    WorkflowEventLog.objects.create(
+        order=order, event_type='status_change',
+        description=f'Reverted from {get_status_display(old_status)} to {get_status_display(previous)}',
+        metadata={'from': old_status, 'to': previous, 'remarks': remarks, 'reverted': True},
+        triggered_by=user,
+    )
+
+    logger.info(f'Order {order.order_number}: REVERTED {old_status} → {previous} by {user.username}')
+    return order
+
+
 def get_order_timeline(order):
     """Return the full timeline of an order (status changes + events)."""
     from orders.models import Order
 
     all_statuses = [
-        'confirmed', 'po_received', 'pif_sent', 'docs_preparing', 'docs_approved',
-        'factory_ready', 'container_booked', 'inspection', 'inspection_passed',
-        'dispatched', 'in_transit', 'arrived', 'customs', 'delivered',
+        'confirmed', 'po_received', 'pif_sent', 'docs_preparing',
+        'factory_ready', 'inspection', 'inspection_passed',
+        'container_booked', 'docs_approved',
+        'dispatched', 'in_transit', 'arrived',
     ]
 
     status_idx = all_statuses.index(order.status) if order.status in all_statuses else -1
@@ -254,7 +313,7 @@ def _auto_create_purchase_history(order):
             unit_price=item.unit_price,
             total_price=item.total_price,
             currency=order.currency,
-            purchase_date=order.delivered_at.date() if order.delivered_at else timezone.now().date(),
+            purchase_date=timezone.now().date(),
             invoice_number=order.order_number,
             status='completed',
         )

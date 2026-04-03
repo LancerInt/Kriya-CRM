@@ -44,6 +44,8 @@ class OrderSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     allowed_transitions = serializers.SerializerMethodField()
+    can_revert = serializers.SerializerMethodField()
+    revert_to = serializers.SerializerMethodField()
     quotation_number = serializers.CharField(source='quotation.quotation_number', read_only=True, default='')
 
     class Meta:
@@ -56,10 +58,20 @@ class OrderSerializer(serializers.ModelSerializer):
             'confirmed_at', 'pi_sent_at', 'po_received_at', 'pif_sent_at', 'docs_approved_at',
             'factory_ready_at', 'container_booked_at', 'inspection_passed_at',
             'dispatched_at', 'delivered_at',
-            'allowed_transitions', 'items', 'created_at', 'updated_at',
+            'docs_preparing_at', 'inspection_at', 'in_transit_at', 'arrived_at',
+            'allowed_transitions', 'can_revert', 'revert_to', 'items', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'status']
 
     def get_allowed_transitions(self, obj):
         from orders.workflow_service import get_allowed_transitions, get_status_display
         return [{'status': s, 'label': get_status_display(s)} for s in get_allowed_transitions(obj)]
+
+    def get_can_revert(self, obj):
+        from orders.workflow_service import REVERT_TRANSITIONS
+        return obj.status in REVERT_TRANSITIONS
+
+    def get_revert_to(self, obj):
+        from orders.workflow_service import REVERT_TRANSITIONS, get_status_display
+        prev = REVERT_TRANSITIONS.get(obj.status)
+        return {'status': prev, 'label': get_status_display(prev)} if prev else None

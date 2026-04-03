@@ -118,6 +118,49 @@ class ClientViewSet(viewsets.ModelViewSet):
             'samples': client.samples.filter(is_deleted=False).count(),
         })
 
+    @action(detail=True, methods=['get'], url_path='product-price')
+    def product_price(self, request, pk=None):
+        """Get client-specific price for a product. Falls back to base price."""
+        client = self.get_object()
+        product_id = request.query_params.get('product_id')
+        product_name = request.query_params.get('product_name', '')
+
+        from products.models import Product
+        price_entry = None
+
+        if product_id:
+            price_entry = ClientPriceList.objects.filter(
+                client=client, product_id=product_id, is_deleted=False
+            ).first()
+        if not price_entry and product_name:
+            price_entry = ClientPriceList.objects.filter(
+                client=client, product_name__iexact=product_name, is_deleted=False
+            ).first()
+
+        if price_entry:
+            return Response({
+                'unit_price': str(price_entry.unit_price),
+                'currency': price_entry.currency,
+                'unit': price_entry.unit,
+                'source': 'client_price_list',
+                'client_product_name': price_entry.client_product_name,
+            })
+
+        # Fallback to product base price
+        product = None
+        if product_id:
+            product = Product.objects.filter(id=product_id, is_deleted=False).first()
+        if product:
+            return Response({
+                'unit_price': str(product.base_price),
+                'currency': product.currency,
+                'unit': product.unit,
+                'source': 'product_base_price',
+                'client_product_name': '',
+            })
+
+        return Response({'unit_price': '0', 'currency': 'USD', 'unit': 'KG', 'source': 'none', 'client_product_name': ''})
+
 
 class ContactViewSet(viewsets.ModelViewSet):
     serializer_class = ContactSerializer

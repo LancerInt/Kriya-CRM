@@ -17,7 +17,7 @@ class Order(TimeStampedModel):
         INSPECTION_PASSED = 'inspection_passed', 'Inspection Passed'
         DISPATCHED = 'dispatched', 'Dispatched'
         IN_TRANSIT = 'in_transit', 'In Transit'
-        ARRIVED = 'arrived', 'Arrived at Port'
+        ARRIVED = 'arrived', 'Delivered'
         CUSTOMS = 'customs', 'Customs Clearance'
         DELIVERED = 'delivered', 'Delivered'
         CANCELLED = 'cancelled', 'Cancelled'
@@ -53,7 +53,11 @@ class Order(TimeStampedModel):
     factory_ready_at = models.DateTimeField(null=True, blank=True)
     container_booked_at = models.DateTimeField(null=True, blank=True)
     inspection_passed_at = models.DateTimeField(null=True, blank=True)
+    docs_preparing_at = models.DateTimeField(null=True, blank=True)
+    inspection_at = models.DateTimeField(null=True, blank=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
+    in_transit_at = models.DateTimeField(null=True, blank=True)
+    arrived_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

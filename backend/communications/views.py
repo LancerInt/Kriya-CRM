@@ -368,7 +368,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
     filterset_fields = ['client', 'status']
 
     def get_queryset(self):
-        qs = EmailDraft.objects.filter(is_deleted=False).select_related('client', 'communication')
+        qs = EmailDraft.objects.filter(is_deleted=False).select_related('client', 'communication').prefetch_related('attachments')
         user = self.request.user
         if user.role == 'executive':
             from clients.views import get_client_qs_for_user
@@ -450,6 +450,47 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.status = 'discarded'
         draft.save(update_fields=['status'])
         return Response({'status': 'discarded'})
+
+    @action(detail=True, methods=['post'], url_path='save-draft')
+    def save_draft(self, request, pk=None):
+        """Save current draft state (subject, body, cc, attachments)."""
+        from django.utils import timezone
+        from .models import DraftAttachment
+
+        draft = self.get_object()
+        if draft.status != 'draft':
+            return Response({'error': 'Can only save active drafts'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update text fields
+        if 'subject' in request.data:
+            draft.subject = request.data['subject']
+        if 'body' in request.data:
+            draft.body = request.data['body']
+        if 'cc' in request.data:
+            draft.cc = request.data['cc']
+
+        draft.edited_by = request.user
+        draft.last_saved_at = timezone.now()
+        draft.draft_version += 1
+        draft.save()
+
+        # Handle file attachments
+        for f in request.FILES.getlist('attachments'):
+            DraftAttachment.objects.create(
+                draft=draft, file=f, filename=f.name, file_size=f.size,
+            )
+
+        return Response(EmailDraftSerializer(draft).data)
+
+    @action(detail=True, methods=['post'], url_path='remove-attachment')
+    def remove_attachment(self, request, pk=None):
+        """Remove an attachment from a draft."""
+        from .models import DraftAttachment
+        att_id = request.data.get('attachment_id')
+        if not att_id:
+            return Response({'error': 'attachment_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        DraftAttachment.objects.filter(id=att_id, draft_id=pk).delete()
+        return Response({'status': 'removed'})
 
     @action(detail=True, methods=['post'])
     def regenerate(self, request, pk=None):

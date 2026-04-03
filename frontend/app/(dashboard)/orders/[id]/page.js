@@ -109,6 +109,18 @@ export default function OrderDetailPage() {
     finally { setTransitioning(false); }
   };
 
+  const handleRevert = async () => {
+    if (!confirm(`Revert order to "${order.revert_to?.label}"? This will undo the current stage.`)) return;
+    setTransitioning(true);
+    try {
+      await api.post(`/orders/${id}/revert/`, { remarks });
+      toast.success(`Reverted to ${order.revert_to?.label}`);
+      setRemarks("");
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Revert failed")); }
+    finally { setTransitioning(false); }
+  };
+
   const handleUploadPo = async (e) => {
     e.preventDefault();
     if (!poFile) return;
@@ -358,7 +370,7 @@ export default function OrderDetailPage() {
             <h3 className="font-semibold">Current:</h3>
             <StatusBadge status={order.status} />
           </div>
-          {order.status === "pi_sent" && !order.po_document && (
+          {(order.status === "confirmed" || order.status === "pi_sent") && !order.po_document && (
             <button onClick={() => setShowPoModal(true)} className="px-3 py-1.5 text-xs bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200">
               Upload PO / Signed PI
             </button>
@@ -374,6 +386,12 @@ export default function OrderDetailPage() {
                   {transitioning ? "..." : `\u2192 ${t.label}`}
                 </button>
               ))}
+              {order.can_revert && order.revert_to && (
+                <button onClick={handleRevert} disabled={transitioning}
+                  className="px-4 py-2 text-amber-700 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-50 disabled:opacity-50">
+                  ← Revert to {order.revert_to.label}
+                </button>
+              )}
               {order.allowed_transitions.some((t) => t.status === "cancelled") && (
                 <button onClick={() => { if (confirm("Cancel this order?")) handleTransition("cancelled"); }}
                   className="px-4 py-2 text-red-600 border border-red-200 text-sm rounded-lg hover:bg-red-50">Cancel Order</button>
@@ -383,7 +401,15 @@ export default function OrderDetailPage() {
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
           </div>
         )}
-        {order.status === "delivered" && <p className="text-green-700 font-medium text-sm mt-2">Order delivered successfully.</p>}
+        {(!order.allowed_transitions || order.allowed_transitions.length === 0) && order.can_revert && order.revert_to && (
+          <div className="mt-2">
+            <button onClick={handleRevert} disabled={transitioning}
+              className="px-4 py-2 text-amber-700 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-50 disabled:opacity-50">
+              ← Revert to {order.revert_to.label}
+            </button>
+          </div>
+        )}
+        {order.status === "arrived" && <p className="text-green-700 font-medium text-sm mt-2">Order delivered successfully.</p>}
         {order.status === "cancelled" && <p className="text-red-700 font-medium text-sm mt-2">This order has been cancelled.</p>}
       </div>
 
@@ -473,8 +499,33 @@ export default function OrderDetailPage() {
       <Modal open={showPoModal} onClose={() => setShowPoModal(false)} title="Upload PO / Signed PI">
         <form onSubmit={handleUploadPo} className="space-y-4">
           <div><label className="block text-sm font-medium text-gray-700 mb-1">PO Number</label><input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Document *</label><input type="file" onChange={(e) => setPoFile(e.target.files[0])} required className="w-full text-sm" /></div>
-          <div className="flex gap-3"><button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">Upload</button><button type="button" onClick={() => setShowPoModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Document *</label>
+            <label
+              className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${poFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setPoFile(e.dataTransfer.files[0]); }}
+            >
+              {poFile ? (
+                <div className="flex items-center gap-3">
+                  <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{poFile.name}</p>
+                    <p className="text-xs text-gray-400">{(poFile.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                  <button type="button" onClick={(e) => { e.preventDefault(); setPoFile(null); }} className="ml-2 text-red-400 hover:text-red-600 text-xs font-medium">Remove</button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <svg className="w-8 h-8 mx-auto text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                  <p className="text-sm text-gray-500">Drag & drop or <span className="text-indigo-600 font-medium">browse</span></p>
+                  <p className="text-xs text-gray-400 mt-0.5">PDF, Word, Images</p>
+                </div>
+              )}
+              <input type="file" onChange={(e) => setPoFile(e.target.files[0])} className="hidden" />
+            </label>
+          </div>
+          <div className="flex gap-3"><button type="submit" disabled={!poFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button><button type="button" onClick={() => setShowPoModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
         </form>
       </Modal>
 
@@ -485,8 +536,33 @@ export default function OrderDetailPage() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={docType} onChange={(e) => setDocType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none"><option value="pi">Proforma Invoice</option><option value="po">Purchase Order</option><option value="commercial_invoice">Commercial Invoice</option><option value="packing_list">Packing List</option><option value="bl">Bill of Lading</option><option value="coa">COA</option><option value="insurance">Insurance</option><option value="other">Other</option></select></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Name</label><input value={docName} onChange={(e) => setDocName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" /></div>
           </div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">File *</label><input type="file" onChange={(e) => setDocFile(e.target.files[0])} required className="w-full text-sm" /></div>
-          <div className="flex gap-3"><button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">Upload</button><button type="button" onClick={() => setShowDocModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">File *</label>
+            <label
+              className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${docFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setDocFile(e.dataTransfer.files[0]); }}
+            >
+              {docFile ? (
+                <div className="flex items-center gap-3">
+                  <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{docFile.name}</p>
+                    <p className="text-xs text-gray-400">{(docFile.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                  <button type="button" onClick={(e) => { e.preventDefault(); setDocFile(null); }} className="ml-2 text-red-400 hover:text-red-600 text-xs font-medium">Remove</button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <svg className="w-8 h-8 mx-auto text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                  <p className="text-sm text-gray-500">Drag & drop or <span className="text-indigo-600 font-medium">browse</span></p>
+                  <p className="text-xs text-gray-400 mt-0.5">PDF, Word, Excel, Images</p>
+                </div>
+              )}
+              <input type="file" onChange={(e) => setDocFile(e.target.files[0])} className="hidden" />
+            </label>
+          </div>
+          <div className="flex gap-3"><button type="submit" disabled={!docFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button><button type="button" onClick={() => setShowDocModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
         </form>
       </Modal>
 

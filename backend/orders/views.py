@@ -61,6 +61,26 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         except WorkflowError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    # ── Revert Status ──
+    @action(detail=True, methods=['post'], url_path='revert')
+    def revert(self, request, pk=None):
+        """Revert order to previous status (admin/manager only)."""
+        order = self.get_object()
+        remarks = request.data.get('remarks', '')
+        from .workflow_service import revert_order, WorkflowError
+        try:
+            order = revert_order(order, request.user, remarks)
+            notify(
+                title=f'Order {order.order_number} reverted to {order.status.replace("_", " ").title()}',
+                message=f'{request.user.full_name} reverted the order status.',
+                notification_type='alert', link='/sales-orders',
+                actor=request.user, client=order.client,
+                extra_users=[order.created_by] if order.created_by else [],
+            )
+            return Response(OrderSerializer(order).data)
+        except WorkflowError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
     # ── Timeline ──
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
