@@ -59,6 +59,19 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
             file=file,
             filename=file.name if file else '',
         )
+
+        # Notify DM recipient
+        if room.is_direct:
+            from notifications.models import Notification
+            for member in room.members.exclude(id=request.user.id):
+                Notification.objects.create(
+                    user=member,
+                    notification_type='system',
+                    title=f'New message from {request.user.full_name}',
+                    message=content[:100] if msg_type == 'text' else f'{request.user.full_name} sent a {msg_type}',
+                    link='/team-chat',
+                )
+
         return Response(ChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], url_path='direct')

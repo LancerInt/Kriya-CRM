@@ -100,6 +100,20 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Auto-contact creation failed for {comm.id}: {e}')
 
+            # Notify executive about new inbound email from client
+            if direction == 'inbound' and client:
+                try:
+                    from notifications.helpers import notify
+                    notify(
+                        title=f'New email from {external}',
+                        message=f'{em["subject"][:80]}' if em.get('subject') else 'New email received',
+                        notification_type='system',
+                        link=f'/clients/{client.id}',
+                        client=client,
+                    )
+                except Exception as e:
+                    logger.error(f'Email notification failed: {e}')
+
             # Auto-generate AI draft reply for inbound emails with a matched client
             if direction == 'inbound' and client:
                 try:

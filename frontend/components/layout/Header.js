@@ -14,6 +14,7 @@ export default function Header({ onMenuClick }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -31,6 +32,16 @@ export default function Header({ onMenuClick }) {
     const interval = setInterval(() => {
       runSync(true);
     }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll unread notification count every 30 seconds
+  const fetchUnread = () => {
+    api.get("/notifications/unread-count/").then(r => setUnreadCount(r.data.count || 0)).catch(() => {});
+  };
+  useEffect(() => {
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -86,8 +97,13 @@ export default function Header({ onMenuClick }) {
         </button>
 
         {/* Notifications */}
-        <button onClick={() => router.push("/notifications")} className="relative p-2 rounded-lg hover:bg-gray-100">
+        <button onClick={() => { router.push("/notifications"); fetchUnread(); }} className="relative p-2 rounded-lg hover:bg-gray-100">
           <HiOutlineBell className="w-5 h-5 text-gray-600" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-red-500 rounded-full">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
         </button>
 
         {/* User dropdown */}
