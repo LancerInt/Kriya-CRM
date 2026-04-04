@@ -3,10 +3,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
-from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, CommercialInvoice
+from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, CommercialInvoice, LogisticsInvoice
 from .serializers import (InvoiceSerializer, PaymentSerializer, FIRCRecordSerializer,
                           GSTRecordSerializer, ProformaInvoiceSerializer,
-                          CommercialInvoiceSerializer)
+                          CommercialInvoiceSerializer, LogisticsInvoiceSerializer)
 from notifications.helpers import notify
 
 
@@ -413,6 +413,102 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 message=f'{request.user.full_name} sent commercial invoice to {sent_to}.',
                 notification_type='system', link='/finance',
                 actor=request.user, client=ci.client,
+            )
+            return Response({'status': 'sent', 'sent_to': sent_to})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class LogisticsInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
+    serializer_class = LogisticsInvoiceSerializer
+    filterset_fields = ['client', 'order', 'status']
+
+    def get_queryset(self):
+        qs = LogisticsInvoice.objects.filter(is_deleted=False).select_related('client', 'order').prefetch_related('items')
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(client__in=client_ids)
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='save-with-items')
+    def save_with_items(self, request, pk=None):
+        from .models import LogisticsInvoiceItem
+        li = self.get_object()
+        data = dict(request.data)
+        items_data = data.pop('items', None)
+        allowed = {
+            'invoice_date', 'status', 'exporter_ref', 'client_company_name', 'client_tax_number',
+            'client_address', 'client_pincode', 'client_city_state_country', 'client_phone',
+            'notify_company_name', 'notify_address', 'notify_phone',
+            'country_of_origin', 'country_of_final_destination', 'port_of_loading', 'port_of_discharge',
+            'vessel_flight_no', 'final_destination', 'terms_of_delivery', 'payment_terms',
+            'buyer_reference', 'exchange_rate', 'currency', 'freight', 'insurance', 'discount',
+            'igst_rate', 'shipping_forwarding', 'amount_in_words', 'bank_details', 'display_overrides',
+        }
+        for field in allowed:
+            if field in data:
+                val = data[field]
+                if val == '' and field in ('exchange_rate', 'freight', 'insurance', 'discount', 'igst_rate', 'shipping_forwarding'):
+                    val = 0
+                setattr(li, field, val)
+        if items_data is not None:
+            li.items.all().delete()
+            total_usd = 0
+            xrate = float(li.exchange_rate) if li.exchange_rate else 0
+            for item_data in items_data:
+                qty = float(item_data.get('quantity', 0) or 0)
+                price = float(item_data.get('unit_price', 0) or 0)
+                amt_usd = qty * price
+                LogisticsInvoiceItem.objects.create(
+                    li=li, product_name=item_data.get('product_name', ''),
+                    packages_description=item_data.get('packages_description', ''),
+                    description_of_goods=item_data.get('description_of_goods', ''),
+                    quantity=qty, unit=item_data.get('unit', 'Kg'),
+                    unit_price=price, amount_usd=amt_usd, amount_inr=amt_usd * xrate,
+                )
+                total_usd += amt_usd
+            li.total_fob_usd = total_usd
+            li.subtotal_usd = total_usd
+            li.subtotal_inr = total_usd * xrate
+        li.save()
+        return Response(LogisticsInvoiceSerializer(li).data)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order')
+    def create_from_order(self, request):
+        order_id = request.data.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        from orders.models import Order
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        from .li_service import create_li_from_order
+        li = create_li_from_order(order, request.user)
+        return Response(LogisticsInvoiceSerializer(li).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        li = self.get_object()
+        from .li_service import generate_li_pdf
+        pdf_buffer = generate_li_pdf(li)
+        response = HttpResponse(pdf_buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="LI_{li.invoice_number.replace("/", "-")}_{li.client_company_name.replace(" ", "_")}.pdf"'
+        return response
+
+    @action(detail=True, methods=['post'], url_path='send-email')
+    def send_email(self, request, pk=None):
+        li = self.get_object()
+        from .li_service import send_li_email
+        try:
+            sent_to = send_li_email(li, request.user)
+            notify(
+                title=f'LI {li.invoice_number} sent to {li.client.company_name}',
+                message=f'{request.user.full_name} sent logistics invoice to {sent_to}.',
+                notification_type='system', link='/finance',
+                actor=request.user, client=li.client,
             )
             return Response({'status': 'sent', 'sent_to': sent_to})
         except Exception as e:

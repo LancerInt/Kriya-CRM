@@ -15,6 +15,7 @@ class TaskSerializer(serializers.ModelSerializer):
                   'due_date', 'priority', 'status', 'is_auto_generated', 'is_overdue',
                   'completed_at', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_by']
+        extra_kwargs = {'owner': {'required': False}}
 
     def get_is_overdue(self, obj):
         if obj.due_date and obj.status in ['pending', 'in_progress']:

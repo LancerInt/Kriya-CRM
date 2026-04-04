@@ -81,6 +81,12 @@ export default function CommunicationDetailPage() {
   const [selectedAccount, setSelectedAccount] = useState("");
   const [attachments, setAttachments] = useState([]);
   const fileInputRef = useRef(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const [replyDraftId, setReplyDraftId] = useState(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [savedAttachments, setSavedAttachments] = useState([]);
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -98,6 +104,106 @@ export default function CommunicationDetailPage() {
     loadThread();
     api.get("/communications/email-accounts/").then(r => setEmailAccounts(r.data.results || r.data)).catch(() => {});
   }, [id]);
+
+  // Voice to Text
+  const handleVoiceToText = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { toast.error("Speech recognition not supported"); return; }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognitionRef.current = recognition;
+    let rawTranscript = "";
+    recognition.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) rawTranscript += e.results[i][0].transcript + " ";
+      }
+      setReplyBody(prev => prev + rawTranscript);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (rawTranscript.trim()) {
+        setReplyBody(rawTranscript.trim() + "\n\n⏳ AI is summarizing...");
+        const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+        const contactName = lastInbound.contact_name || "";
+        const context = `Client: ${comm.client_name || ""}, Subject: ${replySubject || ""}`;
+        api.post("/communications/summarize-voice/", { text: rawTranscript.trim(), context, contact_name: contactName })
+          .then(r => { setReplyBody(r.data.summarized); toast.success("AI summarized your voice input"); })
+          .catch(() => { setReplyBody(rawTranscript.trim()); toast.error("AI summary failed, raw text kept"); });
+      }
+    };
+    recognition.onerror = () => { setIsListening(false); toast.error("Voice recognition error"); };
+    recognition.start();
+    setIsListening(true);
+    toast.success("Listening... speak now");
+  };
+
+  // Save as Draft
+  const handleSaveReplyDraft = async () => {
+    const lastInbound = [...thread].reverse().find(m => m.direction === "inbound");
+    if (!lastInbound) { toast.error("No inbound message"); return; }
+    const toEmail = lastInbound.external_email || "";
+    setSavingDraft(true);
+    try {
+      if (replyDraftId) {
+        // Update existing draft
+        const fd = new FormData();
+        fd.append("subject", replySubject);
+        fd.append("body", replyBody);
+        fd.append("cc", replyCc);
+        attachments.forEach(f => fd.append("attachments", f));
+        const res = await api.post(`/communications/drafts/${replyDraftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setSavedAttachments(res.data.attachments || []);
+        setAttachments([]);
+        setLastSavedAt(res.data.last_saved_at);
+        toast.success("Draft saved");
+      } else {
+        // Create new draft
+        const payload = { communication: lastInbound.id, client: comm.client || null, subject: replySubject, body: replyBody, to_email: toEmail, cc: replyCc };
+        const res = await api.post("/communications/drafts/", payload);
+        setReplyDraftId(res.data.id);
+        // Now save attachments if any
+        if (attachments.length > 0) {
+          const fd = new FormData();
+          fd.append("subject", replySubject);
+          fd.append("body", replyBody);
+          fd.append("cc", replyCc);
+          attachments.forEach(f => fd.append("attachments", f));
+          const res2 = await api.post(`/communications/drafts/${res.data.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+          setSavedAttachments(res2.data.attachments || []);
+          setAttachments([]);
+          setLastSavedAt(res2.data.last_saved_at);
+        }
+        toast.success("Draft saved");
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save draft")); }
+    finally { setSavingDraft(false); }
+  };
+
+  const handleDiscardReply = async () => {
+    if (!confirm("Discard this reply?")) return;
+    if (replyDraftId) {
+      try { await api.post(`/communications/drafts/${replyDraftId}/discard/`); } catch {}
+    }
+    setReplyBody(""); setReplyCc(""); setReplySubject(""); setAttachments([]); setSavedAttachments([]);
+    setReplyDraftId(null); setLastSavedAt(null); setShowReply(false);
+    toast.success("Reply discarded");
+  };
+
+  const handleRemoveSavedAtt = async (attId) => {
+    if (!replyDraftId) return;
+    try {
+      await api.post(`/communications/drafts/${replyDraftId}/remove-attachment/`, { attachment_id: attId });
+      setSavedAttachments(prev => prev.filter(a => a.id !== attId));
+    } catch { toast.error("Failed to remove"); }
+  };
 
   if (loading) return <LoadingSpinner size="lg" />;
   if (!comm) return null;
@@ -276,16 +382,38 @@ export default function CommunicationDetailPage() {
                 {/* Attachments */}
                 <div className="flex items-center gap-2">
                   <label className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer flex items-center gap-1">
-                    📎 Attach
-                    <input type="file" ref={fileInputRef} multiple onChange={(e) => setAttachments(prev => [...prev, ...Array.from(e.target.files)])} className="hidden" />
+                    📎 Add Files
+                    <input type="file" ref={fileInputRef} multiple onChange={(e) => setAttachments(prev => [...prev, ...Array.from(e.target.files)])} className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip" />
                   </label>
-                  {attachments.length > 0 && <span className="text-xs text-gray-400">{attachments.length} file(s)</span>}
+                  <span className="text-xs text-gray-400">{(savedAttachments.length + attachments.length) > 0 ? `${savedAttachments.length + attachments.length} file(s)` : "No files attached"}</span>
                 </div>
+                {/* Saved attachments */}
+                {savedAttachments.length > 0 && (
+                  <div className="space-y-1">
+                    {savedAttachments.map((att) => (
+                      <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-500">📄</span>
+                          <span className="font-medium">{att.filename}</span>
+                          <span className="text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
+                          <span className="text-green-600 text-[10px]">Saved</span>
+                        </div>
+                        <button onClick={() => handleRemoveSavedAtt(att.id)} className="text-red-400 hover:text-red-600">&times;</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* New unsaved attachments */}
                 {attachments.length > 0 && (
                   <div className="space-y-1">
                     {attachments.map((f, i) => (
                       <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
-                        <span>{f.name} ({(f.size / 1024).toFixed(1)} KB)</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500">📄</span>
+                          <span className="font-medium">{f.name}</span>
+                          <span className="text-gray-400">{(f.size / 1024).toFixed(1)} KB</span>
+                          <span className="text-amber-600 text-[10px]">Unsaved</span>
+                        </div>
                         <button onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
                       </div>
                     ))}
@@ -293,23 +421,32 @@ export default function CommunicationDetailPage() {
                 )}
               </div>
 
+              {/* Last saved indicator */}
+              {lastSavedAt && (
+                <div className="px-5"><p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p></div>
+              )}
+
               {/* Actions bar */}
               <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
                 <div className="flex gap-2">
+                  <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
+                    {isListening ? '⏹ Stop Recording' : '🎤 Voice to Text'}
+                  </button>
                   <button onClick={async () => {
                     if (!comm.client) { toast.error("No client linked"); return; }
                     setGeneratingDraft(true);
                     try {
-                      // Find the last inbound message to generate reply for
                       const lastInbound = [...thread].reverse().find(m => m.direction === "inbound");
                       if (!lastInbound) { toast.error("No inbound message to reply to"); return; }
-                      // Check if draft exists
                       const drafts = await api.get(`/communications/drafts/`, { params: { communication: lastInbound.id } });
                       const draftList = drafts.data.results || drafts.data;
                       if (draftList.length > 0) {
                         const d = draftList[0];
                         setReplyBody(d.body);
                         if (d.cc) setReplyCc(d.cc);
+                        setReplyDraftId(d.id);
+                        setSavedAttachments(d.attachments || []);
+                        setLastSavedAt(d.last_saved_at);
                         toast.success("AI draft loaded");
                       } else {
                         toast.error("No AI draft found for this email");
@@ -320,6 +457,12 @@ export default function CommunicationDetailPage() {
                     {generatingDraft ? "Loading..." : "✨ AI Draft"}
                   </button>
                   <ReplyRefineDropdown body={replyBody} onRefined={(text) => setReplyBody(text)} contactName={([...thread].reverse().find(m => m.direction === "inbound") || comm).contact_name || ""} />
+                  <button onClick={handleSaveReplyDraft} disabled={savingDraft} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50">
+                    {savingDraft ? "Saving..." : "💾 Save as Draft"}
+                  </button>
+                  <button onClick={handleDiscardReply} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
+                    Discard
+                  </button>
                 </div>
                 <button onClick={async () => {
                   const toEmail = ([...thread].reverse().find(m => m.direction === "inbound") || comm).external_email;

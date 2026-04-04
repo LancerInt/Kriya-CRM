@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (Invoice, InvoiceItem, Payment, FIRCRecord, GSTRecord,
                       ProformaInvoice, ProformaInvoiceItem,
-                      CommercialInvoice, CommercialInvoiceItem)
+                      CommercialInvoice, CommercialInvoiceItem,
+                      LogisticsInvoice, LogisticsInvoiceItem)
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -81,5 +82,22 @@ class CommercialInvoiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CommercialInvoice
+        fields = '__all__'
+        read_only_fields = ['id', 'created_by', 'pdf_file']
+
+
+class LIItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LogisticsInvoiceItem
+        fields = ['id', 'product_name', 'packages_description', 'description_of_goods',
+                  'quantity', 'unit', 'unit_price', 'amount_usd', 'amount_inr']
+
+
+class LogisticsInvoiceSerializer(serializers.ModelSerializer):
+    items = LIItemSerializer(many=True, read_only=True)
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+
+    class Meta:
+        model = LogisticsInvoice
         fields = '__all__'
         read_only_fields = ['id', 'created_by', 'pdf_file']

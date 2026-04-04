@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import PIEditorModal from "@/components/finance/PIEditorModal";
 import CIEditorModal from "@/components/finance/CIEditorModal";
 import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
+import LIEditorModal from "@/components/finance/LIEditorModal";
 
 function fmtDate(d) { if (!d) return "\u2014"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
@@ -77,6 +78,12 @@ export default function OrderDetailPage() {
   const [ciLoading, setCiLoading] = useState(false);
   const [ciSending, setCiSending] = useState(false);
   const [ciItems, setCiItems] = useState([]);
+  const [showLiModal, setShowLiModal] = useState(false);
+  const [li, setLi] = useState(null);
+  const [liForm, setLiForm] = useState({});
+  const [liItems, setLiItems] = useState([]);
+  const [liLoading, setLiLoading] = useState(false);
+  const [liSending, setLiSending] = useState(false);
   const [showQtModal, setShowQtModal] = useState(false);
   const [qt, setQt] = useState(null);
   const [qtForm, setQtForm] = useState({});
@@ -221,6 +228,61 @@ export default function OrderDetailPage() {
     finally { setPiSending(false); }
   };
 
+  // ── LI Handlers ──
+  const handleGenerateLI = async () => {
+    setLiLoading(true);
+    setShowLiModal(true);
+    try {
+      const existing = await api.get(`/finance/li/`, { params: { order: id } });
+      const liList = existing.data.results || existing.data;
+      if (liList.length > 0) {
+        setLi(liList[0]); setLiForm({ ...liList[0], ...liList[0].display_overrides }); setLiItems(liList[0].items || []);
+      } else {
+        const res = await api.post(`/finance/li/create-from-order/`, { order_id: id });
+        setLi(res.data); setLiForm({ ...res.data, ...res.data.display_overrides }); setLiItems(res.data.items || []);
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to generate LI")); setShowLiModal(false); }
+    finally { setLiLoading(false); }
+  };
+
+  const handleSaveLI = async () => {
+    if (!li) return;
+    try {
+      const display_overrides = {};
+      Object.entries(liForm).forEach(([k, v]) => {
+        if (k.startsWith("_")) display_overrides[k] = v;
+      });
+      const res = await api.post(`/finance/li/${li.id}/save-with-items/`, { ...liForm, display_overrides, items: liItems });
+      setLi(res.data); setLiForm({ ...res.data, ...res.data.display_overrides }); setLiItems(res.data.items || []);
+      toast.success("LI saved");
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+  };
+
+  const handlePreviewLI = async () => {
+    if (!li) return;
+    await handleSaveLI();
+    try {
+      const res = await api.get(`/finance/li/${li.id}/generate-pdf/`, { responseType: "blob" });
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const title = `LI ${li.invoice_number} - ${li.client_company_name || "Client"}`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+    } catch { toast.error("Failed to preview"); }
+  };
+
+  const handleSendLI = async () => {
+    if (!li) return;
+    await handleSaveLI();
+    setLiSending(true);
+    try {
+      const res = await api.post(`/finance/li/${li.id}/send-email/`);
+      toast.success(`LI sent to ${res.data.sent_to}`);
+      setShowLiModal(false);
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to send LI")); }
+    finally { setLiSending(false); }
+  };
+
   // ── CI Handlers ──
   const handleGenerateCI = async () => {
     setCiLoading(true);
@@ -354,6 +416,7 @@ export default function OrderDetailPage() {
             <button onClick={handleGenerateQt} className="px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Generate Quotation</button>
             <button onClick={handleGeneratePI} className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">Generate PI</button>
             <button onClick={handleGenerateCI} className="px-3 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700">Generate CI</button>
+            <button onClick={handleGenerateLI} className="px-3 py-2 bg-cyan-600 text-white text-sm font-medium rounded-lg hover:bg-cyan-700">Generate LI</button>
             <button onClick={handleDownloadPDF} className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">PDF</button>
             <button onClick={() => setShowDocModal(true)} className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Upload Doc</button>
             <button onClick={() => router.back()} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Back</button>
@@ -595,6 +658,21 @@ export default function OrderDetailPage() {
         onSave={handleSaveCI} onPreview={handlePreviewCI}
         onSend={handleSendCI} sending={ciSending}
       />
+
+      {/* LI Editor Modal */}
+      <LIEditorModal
+        open={showLiModal && !liLoading}
+        onClose={() => setShowLiModal(false)}
+        li={li} liForm={liForm} setLiForm={setLiForm}
+        liItems={liItems} setLiItems={setLiItems}
+        onSave={handleSaveLI} onPreview={handlePreviewLI}
+        onSend={handleSendLI} sending={liSending}
+      />
+      {liLoading && showLiModal && (
+        <Modal open={true} onClose={() => setShowLiModal(false)} title="Loading LI..." size="sm">
+          <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600" /></div>
+        </Modal>
+      )}
 
       {/* Quotation Editor */}
       {qtLoading && showQtModal && (

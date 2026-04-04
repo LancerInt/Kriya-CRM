@@ -8,4 +8,5 @@ router.register('firc', views.FIRCRecordViewSet, basename='firc')
 router.register('gst', views.GSTRecordViewSet, basename='gst')
 router.register('pi', views.ProformaInvoiceViewSet, basename='proforma-invoice')
 router.register('ci', views.CommercialInvoiceViewSet, basename='commercial-invoice')
+router.register('li', views.LogisticsInvoiceViewSet, basename='logistics-invoice')
 urlpatterns = [path('', include(router.urls))]

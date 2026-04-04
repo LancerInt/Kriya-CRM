@@ -292,3 +292,90 @@ class CommercialInvoiceItem(models.Model):
     def save(self, *args, **kwargs):
         self.total_price = self.quantity * self.unit_price
         super().save(*args, **kwargs)
+
+
+class LogisticsInvoice(TimeStampedModel):
+    """Logistics Invoice for shipping/freight charges."""
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        SENT = 'sent', 'Sent'
+
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='logistics_invoices')
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='logistics_invoices')
+    invoice_number = models.CharField(max_length=50, unique=True)
+    invoice_date = models.DateField()
+    exporter_ref = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+
+    # ── Consignee (Client) ──
+    client_company_name = models.CharField(max_length=255)
+    client_tax_number = models.CharField(max_length=100, blank=True)
+    client_address = models.TextField(blank=True)
+    client_pincode = models.CharField(max_length=30, blank=True)
+    client_city_state_country = models.CharField(max_length=255, blank=True)
+    client_phone = models.CharField(max_length=50, blank=True)
+
+    # ── Notify Party ──
+    notify_company_name = models.CharField(max_length=255, blank=True)
+    notify_address = models.TextField(blank=True)
+    notify_phone = models.CharField(max_length=50, blank=True)
+
+    # ── Shipment Details ──
+    country_of_origin = models.CharField(max_length=100, default='India')
+    country_of_final_destination = models.CharField(max_length=100, blank=True)
+    port_of_loading = models.CharField(max_length=100, blank=True)
+    port_of_discharge = models.CharField(max_length=100, blank=True)
+    vessel_flight_no = models.CharField(max_length=100, blank=True)
+    final_destination = models.CharField(max_length=100, blank=True)
+    terms_of_delivery = models.CharField(max_length=100, blank=True)
+    payment_terms = models.CharField(max_length=255, blank=True)
+    buyer_reference = models.CharField(max_length=100, blank=True)
+    exchange_rate = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+
+    # ── Totals ──
+    currency = models.CharField(max_length=3, default='USD')
+    total_fob_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    freight = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    insurance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    discount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    subtotal_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    subtotal_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    igst_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    igst_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    grand_total_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    amount_in_words = models.CharField(max_length=500, blank=True)
+    shipping_forwarding = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    # ── Bank Details ──
+    bank_details = models.TextField(default='Bank name: DBS Bank Ltd\nBranch name: Salem - India\nBeneficiary: Kriya Biosys Private Limited\nIFSC Code: DBSS0IN0811\nSwift Code: DBSSINBB\nA/C No: K32250073646\nA/C Type: CA Account')
+
+    display_overrides = models.JSONField(default=dict, blank=True)
+    pdf_file = models.FileField(upload_to='logistics_invoices/%Y/%m/', null=True, blank=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        db_table = 'logistics_invoices'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'LI {self.invoice_number} - {self.client_company_name}'
+
+
+class LogisticsInvoiceItem(models.Model):
+    id = models.AutoField(primary_key=True)
+    li = models.ForeignKey(LogisticsInvoice, on_delete=models.CASCADE, related_name='items')
+    product_name = models.CharField(max_length=255)
+    packages_description = models.TextField(blank=True, help_text='No. & Kind of Packages')
+    description_of_goods = models.TextField(blank=True, help_text='Total N CODE etc.')
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    unit = models.CharField(max_length=20, default='Kg')
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    amount_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = 'logistics_invoice_items'
+
+    def save(self, *args, **kwargs):
+        self.amount_usd = self.quantity * self.unit_price
+        super().save(*args, **kwargs)

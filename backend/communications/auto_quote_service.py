@@ -258,7 +258,7 @@ def _generate_draft_quotation(quote_request):
         # If no match, both names stay the same — executive can fix later
 
     # Get client-specific price, fallback to product base price
-    unit_price = _get_client_price(client, matched_product)
+    unit_price = _get_client_price(qr.client, matched_product)
     QuotationItem.objects.create(
         quotation=quotation,
         product=matched_product,

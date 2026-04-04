@@ -27,7 +27,7 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        task = serializer.save(created_by=self.request.user)
+        task = serializer.save()
         extra = [task.owner] if task.owner else []
         notify(
             title=f'New task: {task.title}',
