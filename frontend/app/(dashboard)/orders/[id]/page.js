@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -50,6 +51,8 @@ function StatusStepper({ timeline }) {
 
 export default function OrderDetailPage() {
   const { id } = useParams();
+  const currentUser = useSelector((state) => state.auth.user);
+  const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
   const router = useRouter();
   const [order, setOrder] = useState(null);
   const [timeline, setTimeline] = useState([]);
@@ -58,14 +61,20 @@ export default function OrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
   const [showPoModal, setShowPoModal] = useState(false);
+  const [showPifModal, setShowPifModal] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
   const [poFile, setPoFile] = useState(null);
   const [poNumber, setPoNumber] = useState("");
+  const [pifFile, setPifFile] = useState(null);
+  const [pifNumber, setPifNumber] = useState("");
   const [docFile, setDocFile] = useState(null);
   const [docType, setDocType] = useState("other");
   const [docName, setDocName] = useState("");
   const [remarks, setRemarks] = useState("");
   const [activeTab, setActiveTab] = useState("details");
+  const [orderDocs, setOrderDocs] = useState([]);
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [showPiModal, setShowPiModal] = useState(false);
   const [pi, setPi] = useState(null);
   const [piForm, setPiForm] = useState({});
@@ -99,6 +108,10 @@ export default function OrderDetailPage() {
       api.get(`/orders/${id}/events/`),
     ]).then(([o, t, h, e]) => {
       setOrder(o.data); setTimeline(t.data); setHistory(h.data); setEvents(e.data);
+      // Load order documents with file URLs
+      if (o.data.id) {
+        api.get(`/orders/${o.data.id}/documents/`).then(r => setOrderDocs(r.data || [])).catch(() => {});
+      }
     }).catch(() => toast.error("Failed to load order"))
       .finally(() => setLoading(false));
   };
@@ -138,6 +151,21 @@ export default function OrderDetailPage() {
       await api.post(`/orders/${id}/upload-po/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success("PO uploaded");
       setShowPoModal(false); setPoFile(null); setPoNumber("");
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
+  };
+
+  const handleUploadPif = async (e) => {
+    e.preventDefault();
+    if (!pifFile) return;
+    const fd = new FormData();
+    fd.append("file", pifFile);
+    fd.append("doc_type", "pif");
+    fd.append("name", pifNumber ? `PIF-${pifNumber}` : pifFile.name);
+    try {
+      await api.post(`/orders/${id}/upload-document/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("PIF uploaded");
+      setShowPifModal(false); setPifFile(null); setPifNumber("");
       loadOrder();
     } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
   };
@@ -433,22 +461,58 @@ export default function OrderDetailPage() {
             <h3 className="font-semibold">Current:</h3>
             <StatusBadge status={order.status} />
           </div>
-          {(order.status === "confirmed" || order.status === "pi_sent") && !order.po_document && (
-            <button onClick={() => setShowPoModal(true)} className="px-3 py-1.5 text-xs bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200">
-              Upload PO / Signed PI
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {(order.status === "confirmed" || order.status === "po_received") && !order.po_document && (
+              <button onClick={() => setShowPoModal(true)} className="px-3 py-1.5 text-xs bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200 flex items-center gap-1">
+                📎 Upload PO
+              </button>
+            )}
+            {order.po_document && (
+              <span className="text-xs text-green-600 font-medium flex items-center gap-1">✅ PO</span>
+            )}
+            {["po_received", "pif_sent"].includes(order.status) && !orderDocs.some(d => d.doc_type === "pif") && (
+              <button onClick={() => setShowPifModal(true)} className="px-3 py-1.5 text-xs bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200 flex items-center gap-1">
+                📎 Upload PIF
+              </button>
+            )}
+            {orderDocs.some(d => d.doc_type === "pif") && (
+              <span className="text-xs text-green-600 font-medium flex items-center gap-1">✅ PIF</span>
+            )}
+          </div>
         </div>
 
         {order.allowed_transitions?.length > 0 && (
           <div>
             <div className="flex flex-wrap gap-2 mb-3">
-              {order.allowed_transitions.filter((t) => t.status !== "cancelled").map((t) => (
-                <button key={t.status} onClick={() => handleTransition(t.status)} disabled={transitioning}
-                  className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {transitioning ? "..." : `\u2192 ${t.label}`}
-                </button>
-              ))}
+              {order.allowed_transitions.filter((t) => t.status !== "cancelled").map((t) => {
+                // Block PO Received if no PO document uploaded
+                const needsPO = t.status === "po_received" && !order.po_document;
+                const needsPIF = (t.status === "pif_sent" && !orderDocs.some(d => d.doc_type === "pif")) ||
+                  (t.status === "docs_preparing" && order.status === "pif_sent" && !orderDocs.some(d => d.doc_type === "pif"));
+                const blocked = needsPO || needsPIF;
+                return (
+                  <div key={t.status} className="flex items-center gap-1">
+                    <button onClick={() => {
+                      if (needsPO) { toast.error("Upload PO first"); setShowPoModal(true); return; }
+                      if (needsPIF) { toast.error("Upload PIF document first"); setShowPifModal(true); return; }
+                      handleTransition(t.status);
+                    }} disabled={transitioning}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 ${blocked ? "bg-gray-300 text-gray-600 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
+                      {transitioning ? "..." : `\u2192 ${t.label}`}
+                    </button>
+                    {needsPO && (
+                      <button onClick={() => setShowPoModal(true)} className="px-3 py-2 text-xs bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200 flex items-center gap-1">
+                        📎 Upload PO
+                      </button>
+                    )}
+                    {needsPIF && (
+                      <button onClick={() => setShowPifModal(true)} className="px-3 py-2 text-xs bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200 flex items-center gap-1">
+                        📎 Upload PIF
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {order.can_revert && order.revert_to && (
                 <button onClick={handleRevert} disabled={transitioning}
                   className="px-4 py-2 text-amber-700 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-50 disabled:opacity-50">
@@ -479,7 +543,7 @@ export default function OrderDetailPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-0">
-          {[{ key: "details", label: "Details" }, { key: "history", label: "Status History" }, { key: "events", label: "Activity Log" }, { key: "documents", label: "Documents" }].map((tab) => (
+          {[{ key: "details", label: "Details" }, { key: "history", label: "Status History" }, { key: "documents", label: "Documents" }].map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`px-4 py-3 text-sm font-medium border-b-2 ${activeTab === tab.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
               {tab.label}
@@ -515,29 +579,59 @@ export default function OrderDetailPage() {
 
       {activeTab === "history" && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold mb-4">Status History</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Status History</h3>
+            <span className="text-xs text-gray-400">{history.length} change{history.length !== 1 ? "s" : ""}</span>
+          </div>
           {history.length === 0 ? <p className="text-gray-400 text-sm">No changes yet</p> : (
-            <div className="space-y-3">{history.map((h) => (
-              <div key={h.id} className="flex gap-3"><div className="w-2 h-2 mt-2 rounded-full bg-indigo-400 shrink-0" /><div>
-                <p className="text-sm"><StatusBadge status={h.from_status} /> <span className="mx-1">&rarr;</span> <StatusBadge status={h.to_status} /></p>
-                <p className="text-xs text-gray-500">{h.changed_by_name} &middot; {fmtDateTime(h.created_at)}</p>
-                {h.remarks && <p className="text-xs italic text-gray-600">"{h.remarks}"</p>}
-              </div></div>
-            ))}</div>
-          )}
-        </div>
-      )}
-
-      {activeTab === "events" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold mb-4">Activity Log</h3>
-          {events.length === 0 ? <p className="text-gray-400 text-sm">No events</p> : (
-            <div className="space-y-3">{events.map((ev) => (
-              <div key={ev.id} className="flex gap-3"><div className={`w-2 h-2 mt-2 rounded-full shrink-0 ${ev.event_type === "status_change" ? "bg-indigo-400" : ev.event_type === "email_sent" ? "bg-green-400" : "bg-blue-400"}`} /><div>
-                <p className="text-sm">{ev.description}</p>
-                <p className="text-xs text-gray-500">{ev.triggered_by_name ? `${ev.triggered_by_name} \u00b7 ` : ""}{fmtDateTime(ev.created_at)}</p>
-              </div></div>
-            ))}</div>
+            <div className="relative">
+              {/* Timeline line */}
+              <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+              <div className="space-y-0">
+                {history.map((h, i) => {
+                  const isRevert = h.remarks?.toLowerCase().includes("revert");
+                  const timeDiff = i > 0 ? (() => {
+                    const prev = new Date(history[i-1].created_at);
+                    const curr = new Date(h.created_at);
+                    const diff = Math.abs(curr - prev);
+                    const mins = Math.floor(diff / 60000);
+                    if (mins < 60) return `${mins}m`;
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+                    return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
+                  })() : null;
+                  return (
+                    <div key={h.id} className="relative pl-10 pb-6">
+                      {/* Dot */}
+                      <div className={`absolute left-2.5 top-1 w-3.5 h-3.5 rounded-full border-2 border-white z-10 ${
+                        isRevert ? "bg-amber-400" : i === history.length - 1 ? "bg-indigo-600" : "bg-green-500"
+                      }`} />
+                      {/* Content */}
+                      <div className={`p-3 rounded-lg ${isRevert ? "bg-amber-50 border border-amber-200" : "bg-gray-50"}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <StatusBadge status={h.from_status} />
+                          <span className="text-gray-400">&rarr;</span>
+                          <StatusBadge status={h.to_status} />
+                          {isRevert && <span className="text-[10px] px-1.5 py-0.5 bg-amber-200 text-amber-800 rounded-full font-medium">Reverted</span>}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
+                          <span className="flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                            {h.changed_by_name}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            {fmtDateTime(h.created_at)}
+                          </span>
+                          {timeDiff && <span className="text-gray-400">({timeDiff} after previous)</span>}
+                        </div>
+                        {h.remarks && <p className="text-xs mt-2 text-gray-600 bg-white rounded px-2 py-1 border border-gray-100">💬 {h.remarks}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -545,16 +639,64 @@ export default function OrderDetailPage() {
       {activeTab === "documents" && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Documents</h3>
+            <h3 className="font-semibold">Documents ({orderDocs.length})</h3>
             <button onClick={() => setShowDocModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg">+ Upload</button>
           </div>
-          {events.filter((e) => e.event_type === "doc_uploaded").length === 0 ? <p className="text-gray-400 text-sm">No documents</p> : (
-            <div className="space-y-2">{events.filter((e) => e.event_type === "doc_uploaded").map((ev) => (
-              <div key={ev.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div><p className="text-sm font-medium">{ev.metadata?.filename || ev.description}</p><p className="text-xs text-gray-500">{ev.metadata?.doc_type} &middot; {fmtDateTime(ev.created_at)}</p></div>
+          {orderDocs.length === 0 ? <p className="text-gray-400 text-sm">No documents uploaded</p> : (
+            <div className="space-y-2">{orderDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+                onClick={async () => {
+                  if (!doc.file) return;
+                  const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+                  try {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
+                    if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
+                      setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                    } else if (ext === "pdf") {
+                      setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                    } else {
+                      const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
+                    }
+                  } catch { toast.error("Failed to open document"); }
+                }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">{{"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊","jpg":"🖼️","jpeg":"🖼️","png":"🖼️","pi":"📋","po":"📦"}[(doc.name || doc.file || "").split(".").pop()?.toLowerCase()] || {"pi":"📋","po":"📦","commercial_invoice":"📑","packing_list":"📦","bl":"🚢","coa":"🧪","insurance":"🛡️"}[doc.doc_type] || "📎"}</span>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{doc.name}</p>
+                    <p className="text-xs text-gray-500">{doc.doc_type} · {fmtDateTime(doc.created_at)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-indigo-600 font-medium">View</span>
+                  {isAdminOrManager && <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
+                </div>
               </div>
             ))}</div>
           )}
+        </div>
+      )}
+
+      {/* Document Preview */}
+      {previewDoc && previewUrl && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4" onClick={() => { setPreviewDoc(null); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+              <p className="text-sm font-semibold text-gray-800">{previewDoc.name}</p>
+              <div className="flex items-center gap-2">
+                <a href={previewUrl} download={previewDoc.name} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">Download</a>
+                <button onClick={() => { setPreviewDoc(null); URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-gray-50 min-h-[400px]">
+              {(previewDoc.name || "").match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)
+                ? <img src={previewUrl} alt={previewDoc.name} className="max-w-full max-h-[78vh] object-contain" />
+                : <iframe src={previewUrl} className="w-full h-[78vh] border-0" />
+              }
+            </div>
+          </div>
         </div>
       )}
 
@@ -589,6 +731,35 @@ export default function OrderDetailPage() {
             </label>
           </div>
           <div className="flex gap-3"><button type="submit" disabled={!poFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button><button type="button" onClick={() => setShowPoModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
+        </form>
+      </Modal>
+
+      {/* PIF Modal */}
+      <Modal open={showPifModal} onClose={() => setShowPifModal(false)} title="Upload PIF">
+        <form onSubmit={handleUploadPif} className="space-y-4">
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">PIF Number</label><input value={pifNumber} onChange={(e) => setPifNumber(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none" /></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Document *</label>
+            <label
+              className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${pifFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setPifFile(e.dataTransfer.files[0]); }}>
+              {pifFile ? (
+                <div className="flex items-center gap-3">
+                  <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <div><p className="text-sm font-medium text-gray-800">{pifFile.name}</p><p className="text-xs text-gray-400">{(pifFile.size / 1024).toFixed(1)} KB</p></div>
+                  <button type="button" onClick={(e) => { e.preventDefault(); setPifFile(null); }} className="ml-2 text-red-400 hover:text-red-600 text-xs font-medium">Remove</button>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <svg className="w-8 h-8 mx-auto text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                  <p className="text-sm text-gray-500">Drag & drop or <span className="text-indigo-600 font-medium">browse</span></p>
+                </div>
+              )}
+              <input type="file" onChange={(e) => setPifFile(e.target.files[0])} className="hidden" />
+            </label>
+          </div>
+          <div className="flex gap-3"><button type="submit" disabled={!pifFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button><button type="button" onClick={() => setShowPifModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button></div>
         </form>
       </Modal>
 

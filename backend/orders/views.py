@@ -147,6 +147,23 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         )
         return Response({'status': 'PO uploaded', 'po_number': po_number})
 
+    @action(detail=True, methods=['get'])
+    def documents(self, request, pk=None):
+        """List all documents for this order."""
+        order = self.get_object()
+        docs = order.order_documents.select_related('uploaded_by').all()
+        return Response(OrderDocumentSerializer(docs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='delete-document')
+    def delete_document(self, request, pk=None):
+        """Delete a specific document from this order."""
+        order = self.get_object()
+        doc_id = request.data.get('doc_id')
+        if not doc_id:
+            return Response({'error': 'doc_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = OrderDocument.objects.filter(order=order, id=doc_id).delete()
+        return Response({'status': 'deleted', 'count': deleted})
+
     # ── Upload Document ──
     @action(detail=True, methods=['post'], url_path='upload-document')
     def upload_document(self, request, pk=None):

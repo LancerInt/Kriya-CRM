@@ -244,7 +244,28 @@ def revert_order(order, user, remarks=''):
         setattr(order, ts_field, None)
 
     order.status = previous
+
+    # Clear documents related to the reverted stage
+    if old_status == 'po_received' or previous == 'confirmed':
+        order.po_document = None
+        order.po_number = ''
+
     order.save()
+
+    # Remove documents uploaded for the reverted stage
+    from orders.models import OrderDocument
+    # Map: which doc types belong to which stage
+    stage_doc_types = {
+        'po_received': ['po'],
+        'pif_sent': ['pif'],
+        'docs_preparing': [],
+        'docs_approved': [],
+    }
+    # Delete docs for the old (reverted) stage
+    doc_types_to_remove = stage_doc_types.get(old_status, [])
+    if doc_types_to_remove:
+        OrderDocument.objects.filter(order=order, doc_type__in=doc_types_to_remove).delete()
+        logger.info(f'Cleaned up {doc_types_to_remove} documents for reverted stage {old_status}')
 
     # Log
     OrderStatusHistory.objects.create(
