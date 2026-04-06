@@ -9,16 +9,28 @@ from .serializers import (ClientListSerializer, ClientDetailSerializer,
 
 
 def get_client_qs_for_user(user, base_qs=None):
-    """Return filtered client queryset based on user role."""
+    """Return filtered client queryset based on user role.
+    Includes executive-level shadow access — if user shadows another executive,
+    they see all of that executive's clients too.
+    """
     if base_qs is None:
         base_qs = Client.objects.filter(is_deleted=False)
 
     if user.role == 'executive':
-        return base_qs.filter(
+        from accounts.models import ExecutiveShadow
+        # Get executives this user shadows (executive-level)
+        shadowed_exec_ids = list(
+            ExecutiveShadow.objects.filter(shadow=user).values_list('executive_id', flat=True)
+        )
+        q = (
             Q(primary_executive=user) |
             Q(shadow_executive=user) |
             Q(assignments__user=user)
-        ).distinct()
+        )
+        # Add clients of all executives this user shadows
+        if shadowed_exec_ids:
+            q |= Q(primary_executive_id__in=shadowed_exec_ids)
+        return base_qs.filter(q).distinct()
     # Admin and manager see everything
     return base_qs
 

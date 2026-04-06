@@ -426,6 +426,52 @@ export default function CommunicationDetailPage() {
                 <div className="px-5"><p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p></div>
               )}
 
+              {/* Smart Generate Buttons — generate doc + attach PDF to reply */}
+              {(() => {
+                const allText = thread.map(m => `${m.subject || ""} ${m.body || ""}`).join(" ").toLowerCase();
+                const wantsQuote = /quotation|quote|pricing|price list|rate card|rates/i.test(allText);
+                const wantsPI = /proforma invoice|proforma|performa|PI\b|send PI|need PI/i.test(allText);
+                if ((!wantsQuote && !wantsPI) || !comm.client) return null;
+
+                const generateAndAttach = async (type) => {
+                  try {
+                    let docId, pdfUrl, filename;
+                    if (type === "quote") {
+                      const res = await api.post("/quotations/quotations/create-blank/", { client_id: comm.client });
+                      docId = res.data.id;
+                      filename = `Quotation_${res.data.quotation_number.replace(/\//g, "-")}.pdf`;
+                      pdfUrl = `/quotations/quotations/${docId}/generate-pdf/`;
+                      toast.success(`Quotation ${res.data.quotation_number} created`);
+                    } else {
+                      const res = await api.post("/finance/pi/create-standalone/", { client_id: comm.client });
+                      docId = res.data.id;
+                      filename = `PI_${res.data.invoice_number.replace(/\//g, "-")}.pdf`;
+                      pdfUrl = `/finance/pi/${docId}/generate-pdf/`;
+                      toast.success(`PI ${res.data.invoice_number} created`);
+                    }
+                    const pdfRes = await api.get(pdfUrl, { responseType: "blob" });
+                    const file = new File([pdfRes.data], filename, { type: "application/pdf" });
+                    setAttachments(prev => [...prev, file]);
+                    toast.success(`${filename} attached to reply`);
+                  } catch { toast.error(`Failed to generate ${type === "quote" ? "quotation" : "PI"}`); }
+                };
+
+                return (
+                  <div className="px-5 py-2 flex gap-2">
+                    {wantsQuote && (
+                      <button onClick={() => generateAndAttach("quote")} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100">
+                        📋 Generate &amp; Attach Quotation
+                      </button>
+                    )}
+                    {wantsPI && (
+                      <button onClick={() => generateAndAttach("pi")} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100">
+                        📄 Generate &amp; Attach PI
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Actions bar */}
               <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
                 <div className="flex gap-2">

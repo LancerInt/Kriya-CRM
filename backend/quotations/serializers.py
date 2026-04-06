@@ -32,6 +32,12 @@ class QuotationSerializer(serializers.ModelSerializer):
     client_phone = serializers.CharField(source='client.phone_number', read_only=True, default='')
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default='')
+    parent_number = serializers.CharField(source='parent.quotation_number', read_only=True, default='')
+    revision_count = serializers.SerializerMethodField()
+
+    def get_revision_count(self, obj):
+        return obj.revisions.count()
+
     class Meta:
         model = Quotation
         fields = ['id', 'quotation_number', 'client', 'client_name',
@@ -46,7 +52,9 @@ class QuotationSerializer(serializers.ModelSerializer):
                   'packaging_details', 'display_overrides',
                   'validity_days', 'subtotal', 'total', 'notes', 'sent_via', 'sent_at',
                   'created_by', 'created_by_name',
-                  'approved_by', 'approved_by_name', 'approved_at', 'items', 'created_at', 'updated_at']
+                  'approved_by', 'approved_by_name', 'approved_at',
+                  'parent_number', 'revision_count',
+                  'items', 'created_at', 'updated_at']
         read_only_fields = ['id', 'quotation_number', 'created_by', 'approved_by', 'approved_at']
 
 class QuotationCreateSerializer(serializers.ModelSerializer):

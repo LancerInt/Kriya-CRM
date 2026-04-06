@@ -5,6 +5,8 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { sendWithUndo } from "@/lib/undoSend";
+import EmailChips from "@/components/ui/EmailChips";
+import RichTextEditor from "@/components/ui/RichTextEditor";
 
 export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, ccEmails, onSent }) {
   const [accounts, setAccounts] = useState([]);
@@ -96,31 +98,11 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">CC</label>
-            <input
-              type="text"
+            <EmailChips
               value={form.cc}
-              onChange={(e) => setForm({ ...form, cc: e.target.value })}
-              placeholder="email1@example.com, email2@example.com"
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none ${
-                form.cc && !form.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))
-                  ? "border-red-300 bg-red-50" : "border-gray-300"
-              }`}
+              onChange={(val) => setForm({ ...form, cc: val })}
+              placeholder="Add CC recipients..."
             />
-            {form.cc && !form.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) && (
-              <p className="text-xs text-red-500 mt-1">Invalid email(s). Separate multiple with commas.</p>
-            )}
-            {form.cc && form.cc.includes(",") && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {form.cc.split(",").filter((e) => e.trim()).map((email, i) => {
-                  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-                  return (
-                    <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${valid ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
-                      {email.trim()}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
         <div>
@@ -134,12 +116,11 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Body *</label>
-          <textarea
+          <RichTextEditor
             value={form.body}
-            onChange={(e) => setForm({ ...form, body: e.target.value })}
-            required
-            rows={8}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            onChange={(val) => setForm({ ...form, body: val })}
+            placeholder="Compose your email..."
+            minHeight="150px"
           />
         </div>
 

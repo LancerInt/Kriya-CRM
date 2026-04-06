@@ -136,7 +136,11 @@ export default function QuotationsPage() {
 
   const columns = [
     { key: "quotation_number", label: "Number", render: (row) => (
-      <button onClick={() => handleOpenQuotation(row)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.quotation_number || `Q-${row.id?.slice(0, 8)}`}</button>
+      <div className="flex items-center gap-1">
+        <button onClick={() => handleOpenQuotation(row)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.quotation_number || `Q-${row.id?.slice(0, 8)}`}</button>
+        {row.version > 1 && <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">v{row.version}</span>}
+        {row.parent_number && <span className="text-[10px] text-gray-400">from {row.parent_number}</span>}
+      </div>
     )},
     { key: "client_name", label: "Account" },
     { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
@@ -163,6 +167,16 @@ export default function QuotationsPage() {
             <button onClick={() => { handleAction(generatePI, row.id, "PI generated"); }} className="text-xs text-purple-600 hover:text-purple-700 font-medium">Generate PI</button>
             <button onClick={() => handleAction(convertToOrder, row.id, "Converted to order")} className="text-xs text-green-600 hover:text-green-700 font-medium">Create Order</button>
           </>
+        )}
+        {["draft", "sent", "approved"].includes(row.status) && (
+          <button onClick={async () => {
+            try {
+              const res = await api.post(`/quotations/quotations/${row.id}/revise/`);
+              toast.success(`Revision v${res.data.version} created`);
+              dispatch(fetchQuotations());
+              handleOpenQuotation(res.data);
+            } catch (err) { toast.error(getErrorMessage(err, "Failed to revise")); }
+          }} className="text-xs text-amber-600 hover:text-amber-700 font-medium">Revise</button>
         )}
       </div>
     )},

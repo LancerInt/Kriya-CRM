@@ -7,14 +7,41 @@ import api from "@/lib/axios";
  * Editable Quotation — Kriya Biosys Quotation template.
  * All fields are editable. Clearing a field keeps it empty (no snap-back).
  */
-export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtForm, qtItems, setQtItems, onSave, onSend, onPreview, sending }) {
+export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtForm, qtItems, setQtItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const initialized = useRef(null);
   const [products, setProducts] = useState([]);
+  const [logoSrc, setLogoSrc] = useState("/logo.png");
+  const [sealSrc, setSealSrc] = useState("/seal.png");
+  const [signSrc, setSignSrc] = useState("/sign.png");
+  const [showLogo, setShowLogo] = useState(true);
+  const [showSeal, setShowSeal] = useState(true);
+  const [showSign, setShowSign] = useState(true);
+
+  const handleImageReplace = (setter) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) setter(URL.createObjectURL(file));
+    };
+    input.click();
+  };
 
   // Fetch products for price auto-populate
   useEffect(() => {
     if (open && products.length === 0) {
       api.get("/products/").then((r) => setProducts(r.data.results || r.data)).catch(() => {});
+    }
+    // Restore image state from display_overrides or reset to defaults
+    if (open && qtForm) {
+      const ov = qtForm.display_overrides || qtForm || {};
+      setShowLogo(ov._hide_logo !== true);
+      setShowSeal(ov._hide_seal !== true);
+      setShowSign(ov._hide_sign !== true);
+      setLogoSrc(ov._custom_logo || "/logo.png");
+      setSealSrc(ov._custom_seal || "/seal.png");
+      setSignSrc(ov._custom_sign || "/sign.png");
     }
   }, [open]);
 
@@ -72,10 +99,12 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   const set = (key, val) => setQtForm({ ...qtForm, [key]: val });
 
   const calcAmount = (item) => {
-    const qty = parseFloat(item.quantity);
-    const price = parseFloat(item.unit_price);
-    if (!qty || !price) return null;
-    return qty * price;
+    const qty = parseFloat(item.quantity) || 0;
+    const price = parseFloat(item.unit_price) || 0;
+    if (qty && price) return qty * price;
+    if (price && !qty) return price; // show price as amount when no quantity
+    if (item.total_price && parseFloat(item.total_price) > 0) return parseFloat(item.total_price);
+    return null;
   };
 
   const validAmounts = qtItems.map(calcAmount).filter(v => v !== null);
@@ -126,7 +155,29 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
 
         {/* ── HEADER ── */}
         <div className="flex items-start justify-between mb-3">
-          <img src="/logo.png" alt="Kriya" style={{ height: "50px", width: "auto" }} />
+          <div>
+            {showLogo ? (
+              <div className="relative group inline-block">
+                <img src={logoSrc} alt="Kriya" style={{ height: "50px", width: "auto" }} />
+                <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5">
+                  <button type="button" onClick={() => handleImageReplace(setLogoSrc)} className="w-5 h-5 bg-blue-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-blue-600" title="Replace">↺</button>
+                  <button type="button" onClick={() => setShowLogo(false)} className="w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-red-600" title="Remove">×</button>
+                </div>
+              </div>
+            ) : (
+              <label className="w-16 h-14 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) { setLogoSrc(URL.createObjectURL(f)); setShowLogo(true); } }}>
+                <span className="text-lg text-gray-400">+</span>
+                <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files[0]; if (f) { setLogoSrc(URL.createObjectURL(f)); setShowLogo(true); } }} />
+              </label>
+            )}
+            {qt.version > 1 && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold">Version {qt.version}</span>
+                {qt.parent_number && <span className="text-xs text-gray-400">Revised from {qt.parent_number}</span>}
+              </div>
+            )}
+          </div>
           <div className="flex items-center justify-center px-6 py-4" style={{ backgroundColor: "#558b2f", minWidth: "170px" }}>
             <span className="text-white text-center leading-tight" style={{ fontSize: "30px", fontWeight: "normal", fontFamily: "'Montserrat', sans-serif" }}>QUOTATION</span>
           </div>
@@ -259,9 +310,37 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
           </div>
           <div className="text-center flex flex-col items-center" style={{ minWidth: "180px" }}>
             <p className="font-bold text-sm mb-1">For Kriya Biosys Private Limited</p>
-            <div className="flex items-end gap-1">
-              <img src="/seal.png" alt="Seal" style={{ height: "55px" }} />
-              <img src="/sign.png" alt="Signature" style={{ height: "35px" }} />
+            <div className="flex items-end gap-2">
+              {showSeal ? (
+                <div className="relative group inline-block">
+                  <img src={sealSrc} alt="Seal" style={{ height: "55px" }} />
+                  <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5">
+                    <button type="button" onClick={() => handleImageReplace(setSealSrc)} className="w-5 h-5 bg-blue-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-blue-600" title="Replace">↺</button>
+                    <button type="button" onClick={() => setShowSeal(false)} className="w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-red-600" title="Remove">×</button>
+                  </div>
+                </div>
+              ) : (
+                <label className="w-14 h-10 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                  onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) { setSealSrc(URL.createObjectURL(f)); setShowSeal(true); } }}>
+                  <span className="text-lg text-gray-400">+</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files[0]; if (f) { setSealSrc(URL.createObjectURL(f)); setShowSeal(true); } }} />
+                </label>
+              )}
+              {showSign ? (
+                <div className="relative group inline-block">
+                  <img src={signSrc} alt="Signature" style={{ height: "35px" }} />
+                  <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5">
+                    <button type="button" onClick={() => handleImageReplace(setSignSrc)} className="w-5 h-5 bg-blue-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-blue-600" title="Replace">↺</button>
+                    <button type="button" onClick={() => setShowSign(false)} className="w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center hover:bg-red-600" title="Remove">×</button>
+                  </div>
+                </div>
+              ) : (
+                <label className="w-14 h-10 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                  onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) { setSignSrc(URL.createObjectURL(f)); setShowSign(true); } }}>
+                  <span className="text-lg text-gray-400">+</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files[0]; if (f) { setSignSrc(URL.createObjectURL(f)); setShowSign(true); } }} />
+                </label>
+              )}
             </div>
             <p className="text-sm mt-1">Authorised Signature</p>
           </div>
@@ -280,10 +359,20 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
           <div className="flex gap-2">
-            <button onClick={onSave} className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50">Save Draft</button>
+            <button onClick={() => {
+              // Persist image visibility/custom sources into display_overrides before saving
+              setQtForm(prev => ({
+                ...prev,
+                _hide_logo: !showLogo, _hide_seal: !showSeal, _hide_sign: !showSign,
+                _custom_logo: logoSrc !== "/logo.png" ? logoSrc : undefined,
+                _custom_seal: sealSrc !== "/seal.png" ? sealSrc : undefined,
+                _custom_sign: signSrc !== "/sign.png" ? signSrc : undefined,
+              }));
+              setTimeout(() => onSave(), 50);
+            }} className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50">Save Draft</button>
             <button onClick={onPreview} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Preview PDF</button>
             <button onClick={onSend} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {sending ? "Sending..." : "Send Quotation"}
+              {sending ? "Sending..." : (sendLabel || "Send Quotation")}
             </button>
           </div>
         </div>

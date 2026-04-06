@@ -10,7 +10,7 @@ import { getErrorMessage } from "@/lib/errorHandler";
  * Matches the new design with Freight, Insurance, Discount, Grand Total.
  * ALL existing calculation logic is PRESERVED — only UI structure is updated.
  */
-export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, piItems, setPiItems, onSave, onSend, onPreview, sending }) {
+export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, piItems, setPiItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const piInit = useRef(null);
   const [products, setProducts] = useState([]);
 
@@ -313,7 +313,7 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
             <button onClick={onSave} className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50">Save Draft</button>
             <button onClick={onPreview} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Preview PDF</button>
             <button onClick={onSend} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {sending ? "Sending..." : "Send PI"}
+              {sending ? "Sending..." : (sendLabel || "Send PI")}
             </button>
           </div>
         </div>

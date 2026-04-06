@@ -92,3 +92,53 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'destroy']:
             return [IsAdminOrManager()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=True, methods=['post'], url_path='assign-shadow')
+    def assign_shadow(self, request, pk=None):
+        """Assign a shadow executive to this executive. Shadow gets access to all their clients."""
+        from .models import ExecutiveShadow
+        executive = self.get_object()
+        shadow_id = request.data.get('shadow_id')
+        if not shadow_id:
+            return Response({'error': 'shadow_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            shadow_user = User.objects.get(id=shadow_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Shadow user not found'}, status=status.HTTP_404_NOT_FOUND)
+        if executive == shadow_user:
+            return Response({'error': 'Cannot shadow yourself'}, status=status.HTTP_400_BAD_REQUEST)
+        obj, created = ExecutiveShadow.objects.get_or_create(
+            executive=executive, shadow=shadow_user,
+            defaults={'assigned_by': request.user}
+        )
+        if created:
+            from notifications.helpers import notify
+            notify(
+                title=f'Shadow access granted',
+                message=f'{shadow_user.full_name} now has shadow access to all of {executive.full_name}\'s clients.',
+                notification_type='system', link='/settings',
+                actor=request.user, extra_users=[executive, shadow_user],
+            )
+        return Response({'status': 'assigned', 'created': created})
+
+    @action(detail=True, methods=['post'], url_path='remove-shadow')
+    def remove_shadow(self, request, pk=None):
+        """Remove a shadow executive assignment."""
+        from .models import ExecutiveShadow
+        executive = self.get_object()
+        shadow_id = request.data.get('shadow_id')
+        deleted, _ = ExecutiveShadow.objects.filter(executive=executive, shadow_id=shadow_id).delete()
+        return Response({'status': 'removed', 'deleted': deleted})
+
+    @action(detail=True, methods=['get'], url_path='shadows')
+    def shadows(self, request, pk=None):
+        """Get all shadow assignments for this executive."""
+        from .models import ExecutiveShadow
+        executive = self.get_object()
+        # Who shadows this executive
+        shadows = ExecutiveShadow.objects.filter(executive=executive).select_related('shadow')
+        shadow_list = [{'id': str(s.shadow.id), 'name': s.shadow.full_name, 'role': s.shadow.role, 'assigned_at': s.assigned_at.isoformat()} for s in shadows]
+        # Who this executive shadows
+        shadowing = ExecutiveShadow.objects.filter(shadow=executive).select_related('executive')
+        shadowing_list = [{'id': str(s.executive.id), 'name': s.executive.full_name, 'role': s.executive.role, 'assigned_at': s.assigned_at.isoformat()} for s in shadowing]
+        return Response({'shadows': shadow_list, 'shadowing': shadowing_list})

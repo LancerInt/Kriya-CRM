@@ -16,6 +16,10 @@ import toast from "react-hot-toast";
 import { sendWithUndo } from "@/lib/undoSend";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
+import PIEditorModal from "@/components/finance/PIEditorModal";
+import EmailChips from "@/components/ui/EmailChips";
+import RichTextEditor from "@/components/ui/RichTextEditor";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -461,6 +465,11 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
   const [draftForm, setDraftForm] = useState({ subject: "", body: "", cc: "" });
+  const [attachQt, setAttachQt] = useState(null); // quotation object for attach editor
+  const [attachQtForm, setAttachQtForm] = useState({});
+  const [attachQtItems, setAttachQtItems] = useState([]);
+  const [attachPi, setAttachPi] = useState(null);
+  const [attachMode, setAttachMode] = useState(null); // 'quote' | 'pi' | null
   const [sendingDraft, setSendingDraft] = useState(false);
   const [adminManagerEmails, setAdminManagerEmails] = useState("");
   const [filterType, setFilterType] = useState("all");
@@ -516,11 +525,18 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
 
+  // Convert plain text to HTML for rich editor
+  const textToHtml = (text) => {
+    if (!text) return "";
+    if (text.includes("<p>") || text.includes("<br>") || text.includes("<div>")) return text; // already HTML
+    return text.split("\n\n").map(p => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("");
+  };
+
   const openDraft = async (draftId) => {
     try {
       const res = await api.get(`/communications/drafts/${draftId}/`);
       setDraft(res.data);
-      setDraftForm({ subject: res.data.subject, body: res.data.body, cc: res.data.cc || adminManagerEmails });
+      setDraftForm({ subject: res.data.subject, body: textToHtml(res.data.body), cc: res.data.cc || adminManagerEmails });
       setDraftAttachments([]);
       setSavedAttachments(res.data.attachments || []);
       setLastSavedAt(res.data.last_saved_at);
@@ -917,36 +933,21 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">CC</label>
-              <input
-                type="text"
+              <EmailChips
                 value={draftForm.cc}
-                onChange={(e) => setDraftForm({ ...draftForm, cc: e.target.value })}
-                placeholder="email1@example.com, email2@example.com"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none ${
-                  draftForm.cc && !draftForm.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))
-                    ? "border-red-300 bg-red-50" : "border-gray-300"
-                }`}
+                onChange={(val) => setDraftForm({ ...draftForm, cc: val })}
+                placeholder="Add CC recipients..."
               />
-              {draftForm.cc && draftForm.cc.includes(",") && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {draftForm.cc.split(",").filter((e) => e.trim()).map((email, i) => {
-                    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-                    return (
-                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full ${valid ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
-                        {email.trim()}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {draftForm.cc && !draftForm.cc.split(",").every((e) => !e.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) && (
-                <p className="text-xs text-red-500 mt-1">Invalid email(s). Separate multiple with commas.</p>
-              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
-              <textarea value={draftForm.body} onChange={(e) => setDraftForm({ ...draftForm, body: e.target.value })} rows={10} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm" />
+              <RichTextEditor
+                value={draftForm.body}
+                onChange={(val) => setDraftForm({ ...draftForm, body: val })}
+                placeholder="Compose your reply..."
+                minHeight="180px"
+              />
             </div>
 
             {/* Attachments */}
@@ -1000,6 +1001,125 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               <p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p>
             )}
 
+            {/* Smart Generate Buttons — open editor, then attach */}
+            {(() => {
+              const draftText = `${draftForm.subject || ""} ${draftForm.body || ""} ${draft?.communication?.subject || ""}`.toLowerCase();
+              const wantsQuote = /quotation|quote|pricing|price list|rate card|rates/i.test(draftText);
+              const wantsPI = /proforma invoice|proforma|performa|\bPI\b|send PI|need PI/i.test(draftText);
+              if (!wantsQuote && !wantsPI) return null;
+
+              const openQuoteEditor = async () => {
+                try {
+                  const res = await api.post("/quotations/quotations/create-blank/", { client_id: clientId });
+                  const qt = res.data;
+                  // Try to fetch client-specific product price from the email context
+                  const emailText = `${draft?.communication?.subject || ""} ${draft?.communication?.body || ""} ${draftForm.subject || ""} ${draftForm.body || ""}`.replace(/<[^>]+>/g, " ");
+                  let items = qt.items || [];
+                  try {
+                    // Get products and try to match from email text
+                    const prodRes = await api.get("/products/");
+                    const products = prodRes.data.results || prodRes.data;
+                    const textLower = emailText.toLowerCase();
+                    const matched = products.find(p =>
+                      textLower.includes(p.name.toLowerCase()) ||
+                      (p.client_brand_names && p.client_brand_names.split(",").some(b => textLower.includes(b.trim().toLowerCase())))
+                    );
+                    if (matched) {
+                      // Get client-specific price
+                      let price = matched.base_price;
+                      let clientProductName = "";
+                      try {
+                        const priceRes = await api.get(`/clients/${clientId}/product-price/`, { params: { product_id: matched.id } });
+                        if (priceRes.data.unit_price) price = priceRes.data.unit_price;
+                        if (priceRes.data.client_product_name) clientProductName = priceRes.data.client_product_name;
+                      } catch {}
+                      // Extract quantity from text
+                      // Extract quantity — try multiple patterns
+                      let qty = 0, unit = matched.unit || "KG";
+                      const qtyPatterns = [
+                        /(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)/i,
+                        /quantity[:\s]*(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)?/i,
+                        /(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)/i,
+                      ];
+                      for (const pat of qtyPatterns) {
+                        const m = emailText.match(pat);
+                        if (m) { qty = parseFloat(m[1].replace(/,/g, "")); if (m[2]) unit = m[2].toUpperCase(); break; }
+                      }
+                      const priceNum = parseFloat(price || 0);
+                      items = [{
+                        ...items[0],
+                        product_name: matched.name,
+                        client_product_name: clientProductName || matched.client_brand_names?.split(",")[0]?.trim() || "",
+                        quantity: qty || "",
+                        unit: unit,
+                        unit_price: priceNum,
+                        total_price: qty * priceNum,
+                      }];
+                    }
+                  } catch {}
+                  setAttachQt(qt);
+                  setAttachQtForm(qt);
+                  setAttachQtItems(items);
+                  setAttachMode("quote");
+                  toast.success(`Quotation ${qt.quotation_number} created — edit and attach`);
+                } catch { toast.error("Failed to create quotation"); }
+              };
+
+              const openPiEditor = async () => {
+                try {
+                  const res = await api.post("/finance/pi/create-standalone/", { client_id: clientId });
+                  const pi = res.data;
+                  // Try to fill product from email context
+                  const emailText = `${draft?.communication?.subject || ""} ${draft?.communication?.body || ""} ${draftForm.subject || ""} ${draftForm.body || ""}`.replace(/<[^>]+>/g, " ");
+                  let piData = { ...pi };
+                  try {
+                    const prodRes = await api.get("/products/");
+                    const products = prodRes.data.results || prodRes.data;
+                    const textLower = emailText.toLowerCase();
+                    const matched = products.find(p =>
+                      textLower.includes(p.name.toLowerCase()) ||
+                      (p.client_brand_names && p.client_brand_names.split(",").some(b => textLower.includes(b.trim().toLowerCase())))
+                    );
+                    if (matched && pi.items?.length > 0) {
+                      let price = matched.base_price;
+                      try {
+                        const priceRes = await api.get(`/clients/${clientId}/product-price/`, { params: { product_id: matched.id } });
+                        if (priceRes.data.unit_price) price = priceRes.data.unit_price;
+                      } catch {}
+                      const qtyMatch = emailText.match(/(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs)/i);
+                      const qty = qtyMatch ? parseFloat(qtyMatch[1].replace(",", "")) : 0;
+                      piData.items = [{
+                        ...pi.items[0],
+                        product_name: matched.name,
+                        quantity: qty || "",
+                        unit: qtyMatch ? qtyMatch[2].toUpperCase() : matched.unit || "Ltrs",
+                        unit_price: price,
+                        total_price: qty * parseFloat(price || 0),
+                      }];
+                    }
+                  } catch {}
+                  setAttachPi(piData);
+                  setAttachMode("pi");
+                  toast.success(`PI ${pi.invoice_number} created — edit and attach`);
+                } catch { toast.error("Failed to create PI"); }
+              };
+
+              return (
+                <div className="flex gap-2 py-1">
+                  {wantsQuote && (
+                    <button onClick={openQuoteEditor} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100">
+                      📋 Generate Quotation
+                    </button>
+                  )}
+                  {wantsPI && (
+                    <button onClick={openPiEditor} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100">
+                      📄 Generate PI
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="flex items-center justify-between pt-2 border-t border-gray-200">
               <div className="flex gap-2">
                 <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
@@ -1023,6 +1143,94 @@ function CommunicationsTab({ clientId, activeTab, client }) {
           </div>
         )}
       </Modal>
+
+      {/* Quotation Editor for Attach */}
+      <QuotationEditorModal
+        open={attachMode === "quote" && !!attachQt}
+        onClose={() => { setAttachMode(null); setAttachQt(null); }}
+        qt={attachQt} qtForm={attachQtForm} setQtForm={setAttachQtForm}
+        qtItems={attachQtItems} setQtItems={setAttachQtItems}
+        onSave={async () => {
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            const res = await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            setAttachQt(res.data); setAttachQtForm(res.data); setAttachQtItems(res.data.items || []);
+            toast.success("Quotation saved");
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+        }}
+        onPreview={async () => {
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            const res = await api.get(`/quotations/quotations/${attachQt.id}/generate-pdf/`, { responseType: "blob" });
+            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+            const title = `Quotation ${attachQt.quotation_number}`;
+            const w = window.open("", "_blank");
+            if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+          } catch { toast.error("Failed to preview"); }
+        }}
+        onSend={async () => {
+          // "Attach" instead of "Send" — save, generate PDF, attach to draft
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            const pdfRes = await api.get(`/quotations/quotations/${attachQt.id}/generate-pdf/`, { responseType: "blob" });
+            const filename = `Quotation_${attachQt.quotation_number.replace(/\//g, "-")}.pdf`;
+            const file = new File([pdfRes.data], filename, { type: "application/pdf" });
+            setDraftAttachments(prev => [...prev, file]);
+            toast.success(`${filename} attached to draft`);
+            setAttachMode(null); setAttachQt(null);
+          } catch { toast.error("Failed to attach quotation"); }
+        }}
+        sending={false}
+        sendLabel="Attach to Email"
+      />
+
+      {/* PI Editor for Attach */}
+      {attachMode === "pi" && attachPi && (
+        <PIEditorModal
+          open={true}
+          onClose={() => { setAttachMode(null); setAttachPi(null); }}
+          pi={attachPi} piForm={attachPi} setPiForm={setAttachPi}
+          piItems={attachPi.items || []} setPiItems={(items) => setAttachPi(prev => ({ ...prev, items }))}
+          onSave={async () => {
+            try {
+              const res = await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, items: attachPi.items || [] });
+              setAttachPi(res.data);
+              toast.success("PI saved");
+            } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+          }}
+          onPreview={async () => {
+            try {
+              await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, items: attachPi.items || [] });
+              const res = await api.get(`/finance/pi/${attachPi.id}/generate-pdf/`, { responseType: "blob" });
+              const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+              const title = `PI ${attachPi.invoice_number}`;
+              const w = window.open("", "_blank");
+              if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+            } catch { toast.error("Failed to preview"); }
+          }}
+          onSend={async () => {
+            try {
+              await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, items: attachPi.items || [] });
+              const pdfRes = await api.get(`/finance/pi/${attachPi.id}/generate-pdf/`, { responseType: "blob" });
+              const filename = `PI_${attachPi.invoice_number.replace(/\//g, "-")}.pdf`;
+              const file = new File([pdfRes.data], filename, { type: "application/pdf" });
+              setDraftAttachments(prev => [...prev, file]);
+              toast.success(`${filename} attached to draft`);
+              setAttachMode(null); setAttachPi(null);
+            } catch { toast.error("Failed to attach PI"); }
+          }}
+          sending={false}
+          sendLabel="Attach to Email"
+        />
+      )}
     </>
   );
 }
@@ -1167,7 +1375,12 @@ function QuotationsTab({ clientId, activeTab }) {
   ];
 
   const quotationColumns = [
-    { key: "quotation_number", label: "Number", render: (row) => <span className="font-medium">{row.quotation_number}</span> },
+    { key: "quotation_number", label: "Number", render: (row) => (
+      <div className="flex items-center gap-1">
+        <span className="font-medium">{row.quotation_number}</span>
+        {row.version > 1 && <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">v{row.version}</span>}
+      </div>
+    )},
     { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },

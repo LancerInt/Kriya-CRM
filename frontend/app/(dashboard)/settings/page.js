@@ -981,6 +981,132 @@ function UserManagementTab() {
   );
 }
 
+function ShadowAssignmentsTab() {
+  const [executives, setExecutives] = useState([]);
+  const [shadows, setShadows] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [assigning, setAssigning] = useState(null); // executive id being assigned
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/auth/users/", { params: { role: "executive" } });
+      const execs = (res.data.results || res.data).filter(u => u.role === "executive");
+      setExecutives(execs);
+      // Load shadow assignments for each executive
+      const shadowData = {};
+      for (const exec of execs) {
+        try {
+          const sr = await api.get(`/auth/users/${exec.id}/shadows/`);
+          shadowData[exec.id] = sr.data;
+        } catch { shadowData[exec.id] = { shadows: [], shadowing: [] }; }
+      }
+      setShadows(shadowData);
+    } catch { toast.error("Failed to load executives"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadData(); }, []);
+
+  const handleAssign = async (executiveId, shadowId) => {
+    try {
+      await api.post(`/auth/users/${executiveId}/assign-shadow/`, { shadow_id: shadowId });
+      toast.success("Shadow assigned");
+      setAssigning(null);
+      loadData();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to assign")); }
+  };
+
+  const handleRemove = async (executiveId, shadowId) => {
+    if (!confirm("Remove this shadow assignment?")) return;
+    try {
+      await api.post(`/auth/users/${executiveId}/remove-shadow/`, { shadow_id: shadowId });
+      toast.success("Shadow removed");
+      loadData();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to remove")); }
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+        <p className="font-medium">Executive Shadow Assignments</p>
+        <p className="mt-1 text-amber-700">When you assign Executive A as shadow of Executive B, A gets full access to ALL of B's clients' emails, WhatsApp messages, and communications.</p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="text-left px-4 py-3 font-medium text-gray-700">Executive</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-700">Shadowed By</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-700">Shadows (has access to)</th>
+              <th className="text-right px-4 py-3 font-medium text-gray-700">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {executives.map((exec) => {
+              const data = shadows[exec.id] || { shadows: [], shadowing: [] };
+              return (
+                <tr key={exec.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                        {(exec.full_name || "?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">{exec.full_name}</p>
+                        <p className="text-xs text-gray-400">{exec.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {data.shadows.length === 0 && <span className="text-xs text-gray-400">None</span>}
+                      {data.shadows.map((s) => (
+                        <span key={s.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                          {s.name}
+                          <button onClick={() => handleRemove(exec.id, s.id)} className="hover:text-red-600">&times;</button>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {data.shadowing.length === 0 && <span className="text-xs text-gray-400">None</span>}
+                      {data.shadowing.map((s) => (
+                        <span key={s.id} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">{s.name}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {assigning === exec.id ? (
+                      <div className="flex items-center gap-2 justify-end">
+                        <select onChange={(e) => { if (e.target.value) handleAssign(exec.id, e.target.value); }} className="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none">
+                          <option value="">Select shadow...</option>
+                          {executives.filter(e => e.id !== exec.id && !data.shadows.some(s => s.id === e.id)).map(e => (
+                            <option key={e.id} value={e.id}>{e.full_name}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => setAssigning(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setAssigning(exec.id)} className="px-3 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+                        + Assign Shadow
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const user = useSelector((state) => state.auth.user);
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
@@ -989,6 +1115,7 @@ export default function SettingsPage() {
   const tabs = [
     { key: "profile", label: "My Profile" },
     ...(isAdminOrManager ? [{ key: "users", label: "User Management" }] : []),
+    ...(isAdminOrManager ? [{ key: "shadows", label: "Shadow Assignments" }] : []),
     { key: "email", label: "Email Accounts" },
     { key: "whatsapp", label: "WhatsApp Config" },
     { key: "meetings", label: "Meeting Platforms" },
@@ -1019,6 +1146,7 @@ export default function SettingsPage() {
 
       {activeTab === "profile" && <ProfileTab />}
       {activeTab === "users" && isAdminOrManager && <UserManagementTab />}
+      {activeTab === "shadows" && isAdminOrManager && <ShadowAssignmentsTab />}
       {activeTab === "email" && <EmailAccountsTab />}
       {activeTab === "whatsapp" && <WhatsAppConfigTab />}
       {activeTab === "meetings" && <MeetingPlatformsTab />}

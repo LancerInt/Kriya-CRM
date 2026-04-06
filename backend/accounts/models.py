@@ -30,3 +30,26 @@ class User(AbstractUser):
     @property
     def full_name(self):
         return self.get_full_name() or self.username
+
+
+class ExecutiveShadow(models.Model):
+    """
+    Executive-level shadow assignment.
+    When executive A is shadow of executive B, A can see ALL of B's clients'
+    emails, WhatsApp messages, and communications.
+    """
+    id = models.AutoField(primary_key=True)
+    executive = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shadowing',
+                                  help_text='The executive who is being shadowed (primary)')
+    shadow = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shadow_of',
+                               help_text='The shadow executive who gets access')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='+')
+
+    class Meta:
+        db_table = 'executive_shadows'
+        unique_together = ('executive', 'shadow')
+        ordering = ['-assigned_at']
+
+    def __str__(self):
+        return f'{self.shadow.full_name} shadows {self.executive.full_name}'

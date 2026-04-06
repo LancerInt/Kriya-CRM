@@ -178,6 +178,80 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         )
         return Response(QuotationSerializer(q).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='revise')
+    def revise(self, request, pk=None):
+        """Create a new version of this quotation, copying all items."""
+        original = self.get_object()
+        from .models import generate_quotation_number
+
+        new_version = original.version + 1
+        q = Quotation.objects.create(
+            quotation_number=generate_quotation_number(),
+            client=original.client,
+            inquiry=original.inquiry,
+            version=new_version,
+            parent=original,
+            currency=original.currency,
+            delivery_terms=original.delivery_terms,
+            payment_terms=original.payment_terms,
+            payment_terms_detail=original.payment_terms_detail,
+            freight_terms=original.freight_terms,
+            country_of_origin=original.country_of_origin,
+            country_of_final_destination=original.country_of_final_destination,
+            port_of_loading=original.port_of_loading,
+            port_of_discharge=original.port_of_discharge,
+            vessel_flight_no=original.vessel_flight_no,
+            final_destination=original.final_destination,
+            packaging_details=original.packaging_details,
+            display_overrides=original.display_overrides,
+            validity_days=original.validity_days,
+            notes=original.notes,
+            created_by=request.user,
+        )
+        total = 0
+        for item in original.items.all():
+            QuotationItem.objects.create(
+                quotation=q, product=item.product,
+                product_name=item.product_name,
+                client_product_name=item.client_product_name,
+                description=item.description,
+                quantity=item.quantity, unit=item.unit,
+                unit_price=item.unit_price, total_price=item.total_price,
+            )
+            total += float(item.total_price)
+        q.subtotal = total
+        q.total = total
+        q.save(update_fields=['subtotal', 'total'])
+
+        # Mark original as superseded
+        if original.status in ['draft', 'sent', 'approved']:
+            original.status = 'expired'
+            original.save(update_fields=['status'])
+
+        notify(
+            title=f'Quotation revised: {q.quotation_number} (v{new_version})',
+            message=f'{request.user.full_name} created revision v{new_version} from {original.quotation_number}.',
+            notification_type='system', link='/quotations',
+            actor=request.user, client=q.client,
+        )
+        return Response(QuotationSerializer(q).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='versions')
+    def versions(self, request, pk=None):
+        """Get all versions of this quotation (including itself)."""
+        q = self.get_object()
+        # Find the root (original) quotation
+        root = q
+        while root.parent:
+            root = root.parent
+        # Get all versions: root + all revisions
+        all_versions = [root] + list(Quotation.objects.filter(parent=root).order_by('version'))
+        # Also check if current q has revisions
+        revisions_of_q = list(Quotation.objects.filter(parent=q).order_by('version'))
+        all_ids = set([root.id] + [r.id for r in all_versions] + [r.id for r in revisions_of_q] + [q.id])
+        all_qs = Quotation.objects.filter(id__in=all_ids).order_by('version')
+        return Response(QuotationSerializer(all_qs, many=True).data)
+
     @action(detail=True, methods=['post'], url_path='save-with-items')
     def save_with_items(self, request, pk=None):
         """Save quotation fields + replace all items in one request."""
