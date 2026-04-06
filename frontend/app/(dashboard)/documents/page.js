@@ -28,6 +28,8 @@ export default function DocumentsPage() {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadName, setUploadName] = useState("");
   const [search, setSearch] = useState("");
+  const [allFiles, setAllFiles] = useState([]); // all files across all folders for search
+  const [searchResults, setSearchResults] = useState(null); // null = not searching
   const [renaming, setRenaming] = useState(null);
   const [renameVal, setRenameVal] = useState("");
   const [preview, setPreview] = useState(null); // file object for preview
@@ -74,7 +76,11 @@ export default function DocumentsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadContents(null); }, []);
+  const loadAllFiles = () => {
+    api.get("/documents/").then(r => setAllFiles(r.data.results || r.data)).catch(() => {});
+  };
+
+  useEffect(() => { loadContents(null); loadAllFiles(); }, []);
 
   const navigateToFolder = (folder) => {
     if (folder) {
@@ -123,13 +129,13 @@ export default function DocumentsPage() {
     try {
       await api.post("/documents/", fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success(`${file.name} uploaded`);
-      loadContents(currentFolder);
+      loadContents(currentFolder); loadAllFiles();
     } catch { toast.error(`Failed to upload ${file.name}`); }
   };
 
   const handleDeleteFile = async (id) => {
     if (!confirm("Delete this file?")) return;
-    try { await api.delete(`/documents/${id}/`); loadContents(currentFolder); toast.success("Deleted"); }
+    try { await api.delete(`/documents/${id}/`); loadContents(currentFolder); loadAllFiles(); toast.success("Deleted"); }
     catch { toast.error("Failed to delete"); }
   };
 
@@ -159,8 +165,13 @@ export default function DocumentsPage() {
     return () => document.removeEventListener("paste", handler);
   }, [currentFolder]);
 
-  const filteredFolders = search ? folders.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : folders;
-  const filteredFiles = search ? files.filter(f => (f.name || f.filename || "").toLowerCase().includes(search.toLowerCase())) : files;
+  // When searching, search ALL files globally; otherwise show current folder contents
+  const isSearching = search.trim().length > 0;
+  const q = search.toLowerCase();
+  const filteredFolders = isSearching ? [] : folders;
+  const filteredFiles = isSearching
+    ? allFiles.filter(f => (f.name || "").toLowerCase().includes(q) || (f.filename || "").toLowerCase().includes(q) || (f.folder_name || "").toLowerCase().includes(q))
+    : files;
 
   return (
     <div onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop} className="relative min-h-[60vh]">
@@ -195,7 +206,8 @@ export default function DocumentsPage() {
       </div>
 
       {/* Search */}
-      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search files and folders..." className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 mb-4" />
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search all files across all folders..." className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 mb-4" />
+      {isSearching && <p className="text-xs text-gray-400 mb-3">Showing {filteredFiles.length} result{filteredFiles.length !== 1 ? "s" : ""} for "{search}"</p>}
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
@@ -247,7 +259,7 @@ export default function DocumentsPage() {
                       ) : (
                         <p className="text-sm font-medium text-gray-800 mt-1 truncate" title={f.name}>{f.name}</p>
                       )}
-                      <p className="text-[10px] text-gray-400">{fmtSize(f.file_size)}</p>
+                      <p className="text-[10px] text-gray-400">{fmtSize(f.file_size)}{isSearching && f.folder_name ? ` · 📁 ${f.folder_name}` : ""}</p>
                       <p className="text-[10px] text-gray-400">{f.created_at ? format(new Date(f.created_at), "MMM d, yyyy") : ""}</p>
                     </div>
                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">

@@ -1428,8 +1428,37 @@ function TasksTab({ clientId, activeTab, client }) {
 // ── Quotations Tab ──
 function QuotationsTab({ clientId, activeTab }) {
   const { data: inquiries, loading: loadingInq } = useTabData(clientId, "/quotations/inquiries/", activeTab, "quotations");
-  const { data: quotations, loading: loadingQt, reload } = useTabData(clientId, "/quotations/quotations/", activeTab, "quotations");
+  const { data: quotations, loading: loadingQt, reload: reloadQt } = useTabData(clientId, "/quotations/quotations/", activeTab, "quotations");
+  const [piList, setPiList] = useState([]);
+  const [loadingPi, setLoadingPi] = useState(false);
   const [subTab, setSubTab] = useState("inquiries");
+
+  // Open quotation editor
+  const [editQt, setEditQt] = useState(null);
+  const [editQtForm, setEditQtForm] = useState({});
+  const [editQtItems, setEditQtItems] = useState([]);
+  const [qtSending, setQtSending] = useState(false);
+
+  // Open PI editor
+  const [editPi, setEditPi] = useState(null);
+  const [editPiForm, setEditPiForm] = useState({});
+  const [editPiItems, setEditPiItems] = useState([]);
+  const [piSending, setPiSending] = useState(false);
+
+  // Load PIs
+  useEffect(() => {
+    if (activeTab === "quotations") {
+      setLoadingPi(true);
+      api.get("/finance/pi/", { params: { client: clientId } }).then(r => setPiList(r.data.results || r.data)).catch(() => {}).finally(() => setLoadingPi(false));
+    }
+  }, [activeTab, clientId]);
+
+  const openQuotation = (row) => {
+    setEditQt(row); setEditQtForm({ ...row, ...row.display_overrides }); setEditQtItems(row.items || []);
+  };
+  const openPI = (row) => {
+    setEditPi(row); setEditPiForm(row); setEditPiItems(row.items || []);
+  };
 
   const inquiryColumns = [
     { key: "product_name", label: "Product", render: (row) => row.product_name || "General" },
@@ -1439,10 +1468,21 @@ function QuotationsTab({ clientId, activeTab }) {
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
   ];
 
+  const viewPdf = async (type, id, number) => {
+    try {
+      const url = type === "qt" ? `/quotations/quotations/${id}/generate-pdf/` : `/finance/pi/${id}/generate-pdf/`;
+      const res = await api.get(url, { responseType: "blob" });
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const title = type === "qt" ? `Quotation ${number}` : `PI ${number}`;
+      const w = window.open("", "_blank");
+      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+    } catch { toast.error("Failed to load PDF"); }
+  };
+
   const quotationColumns = [
     { key: "quotation_number", label: "Number", render: (row) => (
       <div className="flex items-center gap-1">
-        <span className="font-medium">{row.quotation_number}</span>
+        <button onClick={() => row.status === "draft" || row.status === "pending_approval" || row.status === "approved" ? openQuotation(row) : viewPdf("qt", row.id, row.quotation_number)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.quotation_number}</button>
         {row.version > 1 && <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">v{row.version}</span>}
       </div>
     )},
@@ -1451,17 +1491,111 @@ function QuotationsTab({ clientId, activeTab }) {
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
   ];
 
+  const piColumns = [
+    { key: "invoice_number", label: "Number", render: (row) => (
+      <button onClick={() => row.status === "draft" ? openPI(row) : viewPdf("pi", row.id, row.invoice_number)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.invoice_number}</button>
+    )},
+    { key: "total", label: "Value", render: (row) => row.total ? `${row.currency || "USD"} ${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
+    { key: "invoice_date", label: "Date", render: (row) => fmtDate(row.invoice_date) },
+  ];
+
   return (
     <>
       <div className="flex gap-2 mb-4">
         <button onClick={() => setSubTab("inquiries")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "inquiries" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Inquiries ({inquiries.length})</button>
         <button onClick={() => setSubTab("quotations")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "quotations" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Quotations ({quotations.length})</button>
+        <button onClick={() => setSubTab("pi")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "pi" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Proforma Invoices ({piList.length})</button>
       </div>
-      {subTab === "inquiries" ? (
+      {subTab === "inquiries" && (
         <DataTable columns={inquiryColumns} data={inquiries} loading={loadingInq} emptyTitle="No inquiries" emptyDescription="No inquiries from this client" />
-      ) : (
-        <DataTable columns={quotationColumns} data={quotations} loading={loadingQt} emptyTitle="No quotations" emptyDescription="No quotations for this client" />
       )}
+      {subTab === "quotations" && (
+        <DataTable columns={quotationColumns} data={quotations} loading={loadingQt} emptyTitle="No quotations" emptyDescription="No quotations for this client"
+          onRowClick={(row) => ["draft", "pending_approval", "approved"].includes(row.status) ? openQuotation(row) : viewPdf("qt", row.id, row.quotation_number)} />
+      )}
+      {subTab === "pi" && (
+        <DataTable columns={piColumns} data={piList} loading={loadingPi} emptyTitle="No proforma invoices" emptyDescription="No PIs for this client"
+          onRowClick={(row) => row.status === "draft" ? openPI(row) : viewPdf("pi", row.id, row.invoice_number)} />
+      )}
+
+      {/* Quotation Editor */}
+      <QuotationEditorModal
+        open={!!editQt} onClose={() => { setEditQt(null); reloadQt(); }}
+        qt={editQt || {}} qtForm={editQtForm} setQtForm={setEditQtForm}
+        qtItems={editQtItems} setQtItems={setEditQtItems}
+        onSave={async () => {
+          if (!editQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(editQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            const res = await api.post(`/quotations/quotations/${editQt.id}/save-with-items/`, { ...editQtForm, display_overrides, items: editQtItems });
+            setEditQt(res.data); setEditQtForm({ ...res.data, ...res.data.display_overrides }); setEditQtItems(res.data.items || []);
+            toast.success("Quotation saved");
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+        }}
+        onPreview={async () => {
+          if (!editQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(editQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/quotations/quotations/${editQt.id}/save-with-items/`, { ...editQtForm, display_overrides, items: editQtItems });
+            const res = await api.get(`/quotations/quotations/${editQt.id}/generate-pdf/`, { responseType: "blob" });
+            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+            const title = `Quotation ${editQt.quotation_number}`;
+            const w = window.open("", "_blank");
+            if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+          } catch { toast.error("Failed to preview"); }
+        }}
+        onSend={async () => {
+          if (!editQt) return;
+          setQtSending(true);
+          try {
+            await api.post(`/quotations/quotations/${editQt.id}/send-to-client/`, { send_via: "email" });
+            toast.success("Quotation sent!"); setEditQt(null); reloadQt();
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
+          finally { setQtSending(false); }
+        }}
+        sending={qtSending}
+      />
+
+      {/* PI Editor */}
+      <PIEditorModal
+        open={!!editPi} onClose={() => { setEditPi(null); api.get("/finance/pi/", { params: { client: clientId } }).then(r => setPiList(r.data.results || r.data)).catch(() => {}); }}
+        pi={editPi || {}} piForm={editPiForm} setPiForm={setEditPiForm}
+        piItems={editPiItems} setPiItems={setEditPiItems}
+        onSave={async () => {
+          if (!editPi) return;
+          try {
+            const res = await api.post(`/finance/pi/${editPi.id}/save-with-items/`, { ...editPiForm, items: editPiItems });
+            setEditPi(res.data); setEditPiForm(res.data); setEditPiItems(res.data.items || []);
+            toast.success("PI saved");
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+        }}
+        onPreview={async () => {
+          if (!editPi) return;
+          try {
+            await api.post(`/finance/pi/${editPi.id}/save-with-items/`, { ...editPiForm, items: editPiItems });
+            const res = await api.get(`/finance/pi/${editPi.id}/generate-pdf/`, { responseType: "blob" });
+            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+            const title = `PI ${editPi.invoice_number}`;
+            const w = window.open("", "_blank");
+            if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+          } catch { toast.error("Failed to preview"); }
+        }}
+        onSend={async () => {
+          if (!editPi) return;
+          setPiSending(true);
+          try {
+            await api.post(`/finance/pi/${editPi.id}/save-with-items/`, { ...editPiForm, items: editPiItems });
+            const res = await api.post(`/finance/pi/${editPi.id}/send-email/`);
+            toast.success(`PI sent to ${res.data.sent_to}`); setEditPi(null);
+            api.get("/finance/pi/", { params: { client: clientId } }).then(r => setPiList(r.data.results || r.data)).catch(() => {});
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
+          finally { setPiSending(false); }
+        }}
+        sending={piSending}
+      />
     </>
   );
 }
