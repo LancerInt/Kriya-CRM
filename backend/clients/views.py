@@ -55,10 +55,19 @@ class ClientViewSet(viewsets.ModelViewSet):
             )
             # For executives, add client_role annotation
             if user.role == 'executive':
+                from accounts.models import ExecutiveShadow
+                shadowed_exec_ids = list(
+                    ExecutiveShadow.objects.filter(shadow=user).values_list('executive_id', flat=True)
+                )
+                whens = [
+                    When(primary_executive=user, then=Value('primary')),
+                    When(shadow_executive=user, then=Value('shadow')),
+                ]
+                if shadowed_exec_ids:
+                    whens.append(When(primary_executive_id__in=shadowed_exec_ids, then=Value('shadow')))
                 qs = qs.annotate(
                     client_role=Case(
-                        When(primary_executive=user, then=Value('primary')),
-                        When(shadow_executive=user, then=Value('shadow')),
+                        *whens,
                         default=Value('assigned'),
                         output_field=CharField(),
                     )

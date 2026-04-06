@@ -107,6 +107,12 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Shadow user not found'}, status=status.HTTP_404_NOT_FOUND)
         if executive == shadow_user:
             return Response({'error': 'Cannot shadow yourself'}, status=status.HTTP_400_BAD_REQUEST)
+        # Only one shadow allowed per executive
+        if ExecutiveShadow.objects.filter(executive=executive).exists():
+            return Response({'error': 'This executive already has a shadow assigned. Remove the existing one first.'}, status=status.HTTP_400_BAD_REQUEST)
+        # An executive can only shadow one other executive
+        if ExecutiveShadow.objects.filter(shadow=shadow_user).exists():
+            return Response({'error': f'{shadow_user.full_name} is already shadowing another executive. Remove that assignment first.'}, status=status.HTTP_400_BAD_REQUEST)
         obj, created = ExecutiveShadow.objects.get_or_create(
             executive=executive, shadow=shadow_user,
             defaults={'assigned_by': request.user}

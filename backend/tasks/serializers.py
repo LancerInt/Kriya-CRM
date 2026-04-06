@@ -12,7 +12,7 @@ class TaskSerializer(serializers.ModelSerializer):
         model = Task
         fields = ['id', 'title', 'description', 'client', 'client_name', 'linked_type',
                   'linked_id', 'owner', 'owner_name', 'created_by', 'creator_name',
-                  'due_date', 'priority', 'status', 'is_auto_generated', 'is_overdue',
+                  'due_date', 'priority', 'status', 'status_note', 'is_auto_generated', 'is_overdue',
                   'completed_at', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_by']
         extra_kwargs = {'owner': {'required': False}}

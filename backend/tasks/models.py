@@ -27,6 +27,7 @@ class Task(TimeStampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     is_auto_generated = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
+    status_note = models.CharField(max_length=500, blank=True, help_text='Custom status update text')
 
     class Meta:
         db_table = 'tasks'

@@ -1082,19 +1082,45 @@ function ShadowAssignmentsTab() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     {assigning === exec.id ? (
-                      <div className="flex items-center gap-2 justify-end">
-                        <select onChange={(e) => { if (e.target.value) handleAssign(exec.id, e.target.value); }} className="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none">
-                          <option value="">Select shadow...</option>
-                          {executives.filter(e => e.id !== exec.id && !data.shadows.some(s => s.id === e.id)).map(e => (
-                            <option key={e.id} value={e.id}>{e.full_name}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => setAssigning(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                      <div className="inline-block text-left w-56 bg-white border border-gray-200 rounded-xl shadow-lg">
+                        <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-700">Select Shadow</span>
+                          <button onClick={() => setAssigning(null)} className="text-gray-400 hover:text-gray-600 text-sm">&times;</button>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto py-1">
+                          {(() => {
+                            // Get all executives already shadowing someone
+                            const alreadyShadowing = new Set();
+                            Object.values(shadows).forEach(s => s.shadows?.forEach(sh => alreadyShadowing.add(sh.id)));
+                            const available = executives.filter(e =>
+                              e.id !== exec.id &&
+                              !data.shadows.some(s => s.id === e.id) &&
+                              !alreadyShadowing.has(e.id)
+                            );
+                            if (available.length === 0) return <p className="text-xs text-gray-400 text-center py-3">No executives available</p>;
+                            return available.map(e => (
+                              <button key={e.id} onClick={() => handleAssign(exec.id, e.id)}
+                                className="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-indigo-50 transition-colors">
+                                <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                                  {(e.full_name || "?")[0].toUpperCase()}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-gray-800">{e.full_name}</p>
+                                  <p className="text-[10px] text-gray-400">{e.email}</p>
+                                </div>
+                              </button>
+                            ));
+                          })()}
+                        </div>
                       </div>
                     ) : (
-                      <button onClick={() => setAssigning(exec.id)} className="px-3 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
-                        + Assign Shadow
-                      </button>
+                      data.shadows.length === 0 ? (
+                        <button onClick={() => setAssigning(exec.id)} className="px-3 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+                          + Assign Shadow
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-gray-400">1 shadow max</span>
+                      )
                     )}
                   </td>
                 </tr>

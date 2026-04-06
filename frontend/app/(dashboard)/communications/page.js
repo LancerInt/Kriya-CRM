@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchCommunications, createCommunication } from "@/store/slices/communicationSlice";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
@@ -35,22 +35,26 @@ const CLASSIFICATION_LABELS = {
 const FILTER_TABS = [
   { key: "all", label: "All" },
   { key: "email", label: "Emails" },
+  { key: "unread_email", label: "Unread Emails", color: "text-blue-600" },
   { key: "whatsapp", label: "WhatsApp" },
+  { key: "unread_whatsapp", label: "Unread WhatsApp", color: "text-green-600" },
   { key: "call", label: "Calls" },
   { key: "note", label: "Notes" },
+  { key: "drafts", label: "Drafts" },
   { key: "unmatched", label: "Unmatched" },
 ];
 
 export default function CommunicationsPage() {
   const dispatch = useDispatch();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { list, loading } = useSelector((state) => state.communications);
   const [showModal, setShowModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [clients, setClients] = useState([]);
   const [form, setForm] = useState({ client: "", comm_type: "email", direction: "inbound", subject: "", content: "" });
-  const [filterTab, setFilterTab] = useState("all");
+  const [filterTab, setFilterTab] = useState(searchParams?.get("tab") || "all");
   const [assignModal, setAssignModal] = useState(null);
   const [assignClient, setAssignClient] = useState("");
   const [showAddClient, setShowAddClient] = useState(false);
@@ -75,7 +79,13 @@ export default function CommunicationsPage() {
 
   const filteredList = useMemo(() => {
     let filtered = list;
-    if (filterTab === "unmatched") {
+    if (filterTab === "unread_email") {
+      filtered = filtered.filter((item) => !item.is_read && item.comm_type === "email" && item.is_client_mail);
+    } else if (filterTab === "unread_whatsapp") {
+      filtered = filtered.filter((item) => !item.is_read && item.comm_type === "whatsapp" && item.is_client_mail);
+    } else if (filterTab === "drafts") {
+      filtered = filtered.filter((item) => item.draft_id && item.draft_status === "draft");
+    } else if (filterTab === "unmatched") {
       filtered = filtered.filter((item) => !item.is_client_mail);
       if (unmatchedCategory !== "all") {
         filtered = filtered.filter((item) => item.classification === unmatchedCategory);
@@ -341,7 +351,7 @@ export default function CommunicationsPage() {
                 filterTab === tab.key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
-              {tab.label}{tab.key === "unmatched" && unmatchedCount > 0 ? ` (${unmatchedCount})` : ""}
+              {tab.label}{tab.key === "unmatched" && unmatchedCount > 0 ? ` (${unmatchedCount})` : ""}{tab.key === "drafts" ? ` (${list.filter(i => i.draft_id && i.draft_status === "draft").length})` : ""}{tab.key === "unread_email" ? ` (${list.filter(i => !i.is_read && i.comm_type === "email" && i.is_client_mail).length})` : ""}{tab.key === "unread_whatsapp" ? ` (${list.filter(i => !i.is_read && i.comm_type === "whatsapp" && i.is_client_mail).length})` : ""}
             </button>
           ))}
         </div>

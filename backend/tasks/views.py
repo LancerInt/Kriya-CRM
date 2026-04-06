@@ -48,6 +48,37 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'overdue': qs.filter(status__in=['pending', 'in_progress'], due_date__lt=now).count(),
         })
 
+    @action(detail=True, methods=['post'], url_path='update-status')
+    def update_status(self, request, pk=None):
+        """Update task status with optional custom note."""
+        task = self.get_object()
+        new_status = request.data.get('status', '').strip()
+        status_note = request.data.get('status_note', '').strip()
+
+        valid_statuses = ['pending', 'in_progress', 'completed', 'cancelled']
+        if new_status and new_status not in valid_statuses:
+            from rest_framework import status as http_status
+            return Response({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        if new_status:
+            task.status = new_status
+            if new_status == 'completed':
+                task.completed_at = timezone.now()
+        if status_note:
+            task.status_note = status_note
+        task.save()
+
+        extra = [task.created_by] if task.created_by else []
+        if task.owner:
+            extra.append(task.owner)
+        notify(
+            title=f'Task updated: {task.title}',
+            message=f'{request.user.full_name} updated status to "{new_status or task.status}"{" — " + status_note if status_note else ""}.',
+            notification_type='task', link='/tasks',
+            actor=request.user, client=task.client, extra_users=extra,
+        )
+        return Response(TaskSerializer(task).data)
+
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         task = self.get_object()

@@ -18,6 +18,7 @@ import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import PIEditorModal from "@/components/finance/PIEditorModal";
+import ModernSelect from "@/components/ui/ModernSelect";
 import EmailChips from "@/components/ui/EmailChips";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 
@@ -761,9 +762,9 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       <div className="flex items-center justify-between gap-2 mb-4">
         {/* Filters */}
         <div className="flex items-center gap-2">
-          {["all", "email", "whatsapp", "call", "note"].map(t => (
-            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-xs font-medium rounded-full ${filterType === t ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-              {t === "all" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
+          {["all", "email", "whatsapp", "call", "note", "drafts"].map(t => (
+            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-xs font-medium rounded-full ${filterType === t ? (t === "drafts" ? "bg-purple-600 text-white" : "bg-indigo-600 text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {t === "all" ? "All" : t === "drafts" ? `Drafts (${data.filter(r => r.draft_id && r.draft_status === "draft").length})` : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
           <input value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} placeholder="Search subject, email..." className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 w-44" />
@@ -776,6 +777,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         </div>
       </div>
       <DataTable columns={columns} data={data.filter(row => {
+        if (filterType === "drafts") return row.draft_id && row.draft_status === "draft";
         if (filterType !== "all" && row.comm_type !== filterType) return false;
         if (filterSearch) {
           const q = filterSearch.toLowerCase();
@@ -1281,14 +1283,40 @@ function TasksTab({ clientId, activeTab, client }) {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to complete task")); }
   };
 
+  const handleUpdateStatus = async (taskId, status, note) => {
+    try {
+      await api.post(`/tasks/${taskId}/update-status/`, { status, status_note: note || "" });
+      toast.success("Status updated");
+      reload();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+  };
+
   const columns = [
-    { key: "title", label: "Task", render: (row) => <span className="font-medium">{row.title}</span> },
+    { key: "title", label: "Task", render: (row) => (
+      <div>
+        <span className="font-medium">{row.title}</span>
+        {row.status_note && <p className="text-[10px] text-gray-400 mt-0.5">{row.status_note}</p>}
+      </div>
+    )},
     { key: "owner_name", label: "Assigned To", render: (row) => <span className="text-sm">{row.owner_name || "\u2014"}</span> },
+    { key: "creator_name", label: "Assigned By", render: (row) => <span className="text-sm text-gray-500">{row.creator_name || "\u2014"}</span> },
     { key: "priority", label: "Priority", render: (row) => <StatusBadge status={row.priority} /> },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
+    { key: "status", label: "Status", render: (row) => (
+      <div onClick={e => e.stopPropagation()}>
+        <ModernSelect value={row.status} onChange={(v) => handleUpdateStatus(row.id, v)} size="xs" options={[
+          { value: "pending", label: "Pending", color: "#d97706", dot: true },
+          { value: "in_progress", label: "In Progress", color: "#2563eb", dot: true },
+          { value: "completed", label: "Completed", color: "#059669", dot: true },
+          { value: "cancelled", label: "Cancelled", color: "#dc2626", dot: true },
+        ]} />
+      </div>
+    )},
     { key: "due_date", label: "Due Date", render: (row) => fmtDate(row.due_date) },
-    { key: "actions", label: "", render: (row) => row.status !== "completed" && (
-      <button onClick={(e) => { e.stopPropagation(); handleComplete(row.id); }} className="text-xs text-green-600 hover:text-green-700 font-medium">Complete</button>
+    { key: "actions", label: "", render: (row) => row.status !== "completed" && row.status !== "cancelled" && (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <input placeholder="Add note..." onKeyDown={(e) => { if (e.key === "Enter" && e.target.value.trim()) { handleUpdateStatus(row.id, row.status, e.target.value.trim()); e.target.value = ""; } }}
+          className="text-xs px-2 py-1 border border-gray-200 rounded-lg outline-none w-28 focus:ring-1 focus:ring-indigo-400" />
+      </div>
     )},
   ];
 
@@ -1310,30 +1338,50 @@ function TasksTab({ clientId, activeTab, client }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assign To *</label>
-            {isExecutive ? (
-              <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                <option value="">Select assignee</option>
-                {/* Secondary owner */}
-                {client?.shadow_executive && users.filter((u) => u.id === client.shadow_executive).map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Secondary Owner)</option>
-                ))}
-                {/* Managers */}
-                {users.filter((u) => u.role === "manager").map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Manager)</option>
-                ))}
-                {/* Self */}
-                {users.filter((u) => u.id === currentUser?.id).map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} (Self)</option>
-                ))}
-              </select>
-            ) : (
-              <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                <option value="">Select team member</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.first_name} {u.last_name} ({u.role})</option>
-                ))}
-              </select>
-            )}
+            {(() => {
+              let assignees = [];
+              if (currentUser?.role === "admin" || currentUser?.role === "manager") {
+                // Admin/Manager: show all users
+                assignees = users.map(u => ({ ...u, tag: u.role }));
+              } else {
+                // Executive: show self + shadow executive of this client
+                const self = users.find(u => u.id === currentUser?.id);
+                if (self) assignees.push({ ...self, tag: "Self" });
+                // Client's shadow executive
+                if (client?.shadow_executive) {
+                  const shadow = users.find(u => u.id === client.shadow_executive);
+                  if (shadow && shadow.id !== currentUser?.id) assignees.push({ ...shadow, tag: "Shadow Executive" });
+                }
+                // Client's primary executive (if not self)
+                if (client?.primary_executive) {
+                  const primary = users.find(u => u.id === client.primary_executive);
+                  if (primary && primary.id !== currentUser?.id && !assignees.some(a => a.id === primary.id)) assignees.push({ ...primary, tag: "Primary Executive" });
+                }
+              }
+              return (
+                <div className="space-y-1">
+                  {assignees.map(u => (
+                    <label key={u.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border transition-colors ${form.owner === u.id ? "border-indigo-400 bg-indigo-50" : "border-gray-200 hover:bg-gray-50"}`}>
+                      <input type="radio" name="task_owner" value={u.id} checked={form.owner === u.id} onChange={() => setForm({ ...form, owner: u.id })} className="text-indigo-600" />
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shrink-0">
+                        {(u.full_name || u.first_name || "?")[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800">{u.full_name || `${u.first_name} ${u.last_name}`}</p>
+                        <p className="text-[10px] text-gray-400">{u.email}</p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                        u.tag === "Self" ? "bg-blue-50 text-blue-600" :
+                        u.tag === "admin" ? "bg-red-50 text-red-600" :
+                        u.tag === "manager" ? "bg-purple-50 text-purple-600" :
+                        u.tag === "Shadow Executive" ? "bg-amber-50 text-amber-600" :
+                        "bg-green-50 text-green-600"
+                      }`}>{u.tag === "Self" ? "You" : u.tag?.charAt(0).toUpperCase() + u.tag?.slice(1)}</span>
+                    </label>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1349,6 +1397,23 @@ function TasksTab({ clientId, activeTab, client }) {
               <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
               <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Attachments</label>
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+              📎 Add Files
+              <input type="file" multiple onChange={(e) => setForm({ ...form, attachments: [...(form.attachments || []), ...Array.from(e.target.files)] })} className="hidden" />
+            </label>
+            {form.attachments?.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {form.attachments.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
+                    <span>{f.name} ({(f.size / 1024).toFixed(1)} KB)</span>
+                    <button type="button" onClick={() => setForm({ ...form, attachments: form.attachments.filter((_, idx) => idx !== i) })} className="text-red-400 hover:text-red-600">&times;</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">{submitting ? "Creating..." : "Create Task"}</button>

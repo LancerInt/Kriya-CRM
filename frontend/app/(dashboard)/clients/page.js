@@ -7,6 +7,7 @@ import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
+import ModernSelect from "@/components/ui/ModernSelect";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -56,18 +57,14 @@ export default function ClientsPage() {
     )},
     { key: "country", label: "Country" },
     { key: "status", label: "Status", render: (row) => (
-      <select
-        value={row.status}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => handleStatusChange(row.id, e.target.value, e)}
-        className="text-xs font-medium px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-transparent"
-        style={{ color: row.status === "active" ? "#059669" : row.status === "prospect" ? "#d97706" : row.status === "on_hold" ? "#7c3aed" : "#6b7280" }}
-      >
-        <option value="active">Active</option>
-        <option value="prospect">Prospect</option>
-        <option value="on_hold">On Hold</option>
-        <option value="inactive">Inactive</option>
-      </select>
+      <div onClick={e => e.stopPropagation()}>
+        <ModernSelect value={row.status} onChange={(v) => handleStatusChange(row.id, v)} size="xs" options={[
+          { value: "active", label: "Active", color: "#059669", dot: true },
+          { value: "prospect", label: "Prospect", color: "#d97706", dot: true },
+          { value: "on_hold", label: "On Hold", color: "#7c3aed", dot: true },
+          { value: "inactive", label: "Inactive", color: "#6b7280", dot: true },
+        ]} />
+      </div>
     )},
     { key: "contact_count", label: "Contacts", render: (row) => row.contact_count || 0 },
     { key: "primary_executive_name", label: "Account Owner", render: (row) => row.primary_executive_name || "-" },
