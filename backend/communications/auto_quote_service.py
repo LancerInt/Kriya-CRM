@@ -246,16 +246,15 @@ def _generate_draft_quotation(quote_request):
     except (ValueError, TypeError):
         pass
 
-    # Match extracted product name to Product master
+    # Match extracted product name to Product master — auto-create if missing
     client_product_name = qr.extracted_product or 'Product TBD'
     company_product_name = client_product_name
     matched_product = None
 
     if qr.extracted_product:
-        matched_product = _match_product(qr.extracted_product)
+        matched_product, _created = _match_or_create_product(qr.extracted_product)
         if matched_product:
             company_product_name = str(matched_product)  # includes concentration
-        # If no match, both names stay the same — executive can fix later
 
     # Get client-specific price, fallback to product base price
     unit_price = _get_client_price(qr.client, matched_product)
@@ -272,6 +271,195 @@ def _generate_draft_quotation(quote_request):
     )
 
     return quotation
+
+
+def resolve_line_item_from_email(client, communication):
+    """Run AI extraction over an email and resolve a complete line-item payload.
+
+    Used by both Quotation and Proforma Invoice "create from email" endpoints so
+    they share the exact same field-population rules:
+
+    - product/quantity → AI-extracted from the email body+subject
+    - Product is auto-created in the Products master if missing
+    - product_name (company name) → from Product master (includes concentration)
+    - client_product_name → first entry of Product.client_brand_names if set,
+      otherwise the raw text the client used in their email
+    - unit_price + currency → ClientPriceList for this client first, then the
+      Product master base_price as fallback
+    - unit → ClientPriceList.unit, then Product.unit, then 'KG'
+
+    Returns a dict with keys: product (Product or None), product_name,
+    client_product_name, quantity, unit, unit_price, currency, description,
+    destination_country, destination_port, delivery_terms.
+    Returns None if there is nothing useful to extract.
+    """
+    import re as _re
+    from .quote_request_parser import extract_with_ai
+
+    if not communication:
+        return None
+
+    text = (communication.subject or '') + '\n' + (communication.body or '')
+    text = _re.sub(r'<[^>]+>', ' ', text)
+    fields = extract_with_ai(text) or {}
+
+    out = {
+        'product': None,
+        'product_name': '',
+        'client_product_name': '',
+        'quantity': 0,
+        'unit': 'KG',
+        'unit_price': 0,
+        'currency': (client.preferred_currency if client else 'USD') or 'USD',
+        'description': fields.get('packaging', '') or '',
+        'destination_country': fields.get('destination_country', '') or '',
+        'destination_port': fields.get('destination_port', '') or '',
+        'delivery_terms': fields.get('delivery_terms', '') or '',
+    }
+
+    extracted_product = (fields.get('product') or '').strip()
+    if extracted_product:
+        # Default both names to the raw email text — overwritten below if we
+        # successfully match against the Product master
+        out['product_name'] = extracted_product
+        out['client_product_name'] = extracted_product
+
+        matched, _was_created = _match_or_create_product(extracted_product)
+        if matched:
+            out['product'] = matched
+            # Company product name comes straight from Product.name on the
+            # Product master page (no concentration suffix).
+            out['product_name'] = matched.name
+            out['unit'] = matched.unit or out['unit']
+
+            # client_product_name from Product master's client_brand_names list.
+            # Prefer the brand that the email actually mentioned; otherwise fall
+            # back to the first one in the list.
+            if matched.client_brand_names:
+                brands = [b.strip() for b in matched.client_brand_names.split(',') if b.strip()]
+                extracted_lower = extracted_product.lower()
+                chosen = next(
+                    (b for b in brands if b.lower() in extracted_lower or extracted_lower in b.lower()),
+                    brands[0] if brands else '',
+                )
+                if chosen:
+                    out['client_product_name'] = chosen
+
+            # Price from this client's ClientPriceList — try several lookup
+            # strategies because the price list often stores the product under a
+            # slightly different name (with/without concentration, brand alias,
+            # client's own name, etc.). Falls back to product master base_price.
+            if client:
+                from clients.models import ClientPriceList
+                base_qs = ClientPriceList.objects.filter(client=client, is_deleted=False)
+
+                cp = None
+                # 1) FK match
+                cp = base_qs.filter(product=matched).first()
+                # 2) Exact product_name match (case-insensitive)
+                if not cp:
+                    cp = base_qs.filter(product_name__iexact=matched.name).first()
+                # 3) Match by name + concentration ("Neem Oil 0.3%")
+                if not cp and matched.concentration:
+                    full_name = f'{matched.name} {matched.concentration}'.strip()
+                    cp = base_qs.filter(product_name__iexact=full_name).first()
+                    if not cp:
+                        cp = base_qs.filter(product_name__icontains=matched.name).filter(
+                            product_name__icontains=matched.concentration
+                        ).first()
+                # 4) Loose contains match on the product name
+                if not cp:
+                    cp = base_qs.filter(product_name__icontains=matched.name).first()
+                # 5) Match by what the client calls it (any of: extracted text,
+                #    Product master client_brand_names, ClientPriceList.client_product_name)
+                if not cp:
+                    cp = base_qs.filter(client_product_name__iexact=extracted_product).first()
+                if not cp and matched.client_brand_names:
+                    for brand in matched.client_brand_names.split(','):
+                        b = brand.strip()
+                        if not b:
+                            continue
+                        cp = base_qs.filter(
+                            models.Q(client_product_name__iexact=b) | models.Q(product_name__iexact=b)
+                        ).first()
+                        if cp:
+                            break
+
+                if cp:
+                    out['unit_price'] = float(cp.unit_price)
+                    out['currency'] = cp.currency or out['currency']
+                    out['unit'] = cp.unit or out['unit']
+                    if cp.client_product_name:
+                        out['client_product_name'] = cp.client_product_name
+                elif matched.base_price:
+                    out['unit_price'] = float(matched.base_price)
+                    out['currency'] = matched.currency or out['currency']
+
+    # Quantity (best-effort)
+    qty_str = str(fields.get('quantity') or '').replace(',', '').strip()
+    if qty_str:
+        try:
+            out['quantity'] = float(_re.sub(r'[^\d.]', '', qty_str) or 0)
+        except (ValueError, TypeError):
+            pass
+
+    # Unit override from extraction (only if more specific than default)
+    if fields.get('unit'):
+        out['unit'] = fields['unit']
+
+    # If we extracted nothing meaningful, signal "no data" to caller
+    if not extracted_product and not out['quantity'] and not out['destination_country']:
+        return None
+    return out
+
+
+def _match_or_create_product(extracted_name):
+    """Match an extracted product name to the Product master, or create a new
+    placeholder Product if no match is found.
+
+    When auto-creating:
+    - The company **product name** (Product.name) is left BLANK so it shows up
+      as a placeholder row in the Products page. An executive/admin/manager
+      will edit it later and fill in the proper internal name.
+    - The exact text the client used in the email is stored in
+      **client_brand_names** so future emails using the same wording will match
+      this product (and future quotations/PIs auto-fill correctly even before
+      the executive has cleaned up the row).
+
+    Returns: (Product instance, created: bool)
+    """
+    from products.models import Product
+
+    if not extracted_name or not extracted_name.strip():
+        return None, False
+
+    matched = _match_product(extracted_name)
+    if matched:
+        # If this client wording isn't in the product's brand names yet, add it
+        # so the next email with the same wording matches faster.
+        raw = extracted_name.strip()
+        existing_brands = [b.strip().lower() for b in (matched.client_brand_names or '').split(',') if b.strip()]
+        if raw.lower() not in existing_brands:
+            new_brands = (matched.client_brand_names + ', ' if matched.client_brand_names else '') + raw
+            matched.client_brand_names = new_brands
+            matched.save(update_fields=['client_brand_names'])
+        return matched, False
+
+    # No match — create a placeholder Product. Name is left blank for the
+    # executive to fill in. The client's wording is captured in client_brand_names.
+    raw = extracted_name.strip()
+    product = Product.objects.create(
+        name='',
+        client_brand_names=raw,
+        description=f'Auto-created from client email request ("{raw}"). '
+                    f'Please set the company product name.',
+        base_price=0,
+        currency='USD',
+        unit='KG',
+        is_active=True,
+    )
+    logger.info(f'Auto-created placeholder Product (brand="{raw}") — needs executive review')
+    return product, True
 
 
 def _match_product(extracted_name):

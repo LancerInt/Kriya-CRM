@@ -255,12 +255,21 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='create-standalone')
     def create_standalone(self, request):
-        """Create a standalone PI (not from an order) for a client."""
+        """Create a standalone PI (not from an order) for a client.
+
+        Optionally accepts ``communication_id`` — when provided, the first line
+        item is auto-filled from the email body using AI extraction:
+        product (matched/created in the Products tab), client product name
+        (from Product master client_brand_names), quantity (if mentioned),
+        and unit price (from this client's ClientPriceList, falling back to
+        the Product master base price).
+        """
         from .models import ProformaInvoiceItem
         from .pi_service import DEFAULT_BANK
         from datetime import date as dt_date
 
         client_id = request.data.get('client_id')
+        communication_id = request.data.get('communication_id')
         if not client_id:
             return Response({'error': 'client_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -270,12 +279,79 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         except Client.DoesNotExist:
             return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # ── Resolve the line item from the source email up-front ──
+        # Works for both new and previously-generated drafts: every click
+        # re-runs the AI extractor against the original email.
+        line = None
+        if communication_id:
+            try:
+                from communications.models import Communication
+                from communications.auto_quote_service import resolve_line_item_from_email
+                comm = Communication.objects.filter(id=communication_id).first()
+                if comm:
+                    line = resolve_line_item_from_email(client, comm)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f'PI pre-fill failed: {e}')
+
+        # ── Reuse / repair an existing PI tied to this communication ──
+        # The auto-PI pipeline may have already created a PI for this email.
+        # If empty, repair it in-place using the freshly-resolved line so
+        # previously-generated drafts get the same auto-fill new ones do.
+        if communication_id:
+            try:
+                existing_pi = ProformaInvoice.objects.filter(
+                    source_communication_id=communication_id,
+                    is_deleted=False,
+                ).order_by('-created_at').first()
+                if existing_pi:
+                    # Only treat as "already populated" if a real price is set —
+                    # otherwise repair stale rows (name only, price 0) in-place.
+                    has_real_item = existing_pi.items.exclude(product_name='').filter(unit_price__gt=0).exists()
+                    if has_real_item:
+                        # Patch any items that are missing description_of_goods
+                        # (the company product name from the Product master). This
+                        # back-fills earlier PIs that were saved before the field
+                        # mapping fix without losing any other manual edits.
+                        if line and line.get('product_name'):
+                            for it in existing_pi.items.filter(description_of_goods=''):
+                                it.description_of_goods = line['product_name']
+                                it.save(update_fields=['description_of_goods'])
+                        return Response(ProformaInvoiceSerializer(existing_pi).data, status=status.HTTP_200_OK)
+                    if line:
+                        existing_pi.items.all().delete()
+                        qty = line['quantity']
+                        price = line['unit_price']
+                        # PI mapping (different from Quotation):
+                        #   product_name        = client brand name (Product Details col)
+                        #   description_of_goods = company product name (Description col)
+                        ProformaInvoiceItem.objects.create(
+                            pi=existing_pi,
+                            product_name=line['client_product_name'] or line['product_name'],
+                            client_product_name=line['client_product_name'],
+                            description_of_goods=line['product_name'],
+                            packages_description=line['description'],
+                            quantity=qty, unit=line['unit'] or 'Ltrs',
+                            unit_price=price, total_price=qty * price,
+                        )
+                        if line.get('currency'):
+                            existing_pi.currency = line['currency']
+                        if line.get('destination_country') and not existing_pi.country_of_final_destination:
+                            existing_pi.country_of_final_destination = line['destination_country']
+                        existing_pi.total = qty * price
+                        existing_pi.save()
+                        return Response(ProformaInvoiceSerializer(existing_pi).data, status=status.HTTP_200_OK)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f'Linked PI repair failed: {e}')
+
         count = ProformaInvoice.objects.count() + 1
         today = dt_date.today()
         invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
 
         pi = ProformaInvoice.objects.create(
             client=client,
+            source_communication_id=communication_id if communication_id else None,
             invoice_number=invoice_number,
             invoice_date=today,
             created_by=request.user,
@@ -286,20 +362,37 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
             client_phone=client.phone_number or '',
             country_of_origin='India',
-            country_of_final_destination=client.country or '',
-            currency=client.preferred_currency or 'USD',
+            country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
+            port_of_discharge=(line or {}).get('destination_port') or '',
+            currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
             bank_details=DEFAULT_BANK,
         )
 
-        # Add one blank item
-        ProformaInvoiceItem.objects.create(
-            pi=pi,
-            product_name='',
-            quantity=0,
-            unit='Ltrs',
-            unit_price=0,
-            total_price=0,
-        )
+        if line:
+            qty = line['quantity']
+            price = line['unit_price']
+            # PI mapping (different from Quotation):
+            #   product_name        = client brand name (Product Details col)
+            #   description_of_goods = company product name (Description col)
+            ProformaInvoiceItem.objects.create(
+                pi=pi,
+                product_name=line['client_product_name'] or line['product_name'],
+                client_product_name=line['client_product_name'],
+                description_of_goods=line['product_name'],
+                packages_description=line['description'],
+                quantity=qty,
+                unit=line['unit'] or 'Ltrs',
+                unit_price=price,
+                total_price=qty * price,
+            )
+            # Update PI total
+            pi.total = qty * price
+            pi.save(update_fields=['total'])
+        else:
+            ProformaInvoiceItem.objects.create(
+                pi=pi, product_name='',
+                quantity=0, unit='Ltrs', unit_price=0, total_price=0,
+            )
 
         return Response(ProformaInvoiceSerializer(pi).data, status=status.HTTP_201_CREATED)
 

@@ -575,22 +575,21 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const handleSendDraft = async () => {
     setSendingDraft(true);
     try {
-      // Save draft edits first (before closing modal)
-      await api.patch(`/communications/drafts/${draft.id}/`, draftForm);
+      // Save draft edits first
+      await api.patch(`/communications/drafts/${draft.id}/`, {
+        subject: draftForm.subject,
+        body: draftForm.body,
+        cc: draftForm.cc,
+      });
 
-      // Build FormData now while file refs are still valid
-      let fd = null;
+      // Upload any frontend attachments to the draft before sending
       if (draftAttachments.length > 0) {
-        fd = new FormData();
-        fd.append("to", draft.to_email);
+        const fd = new FormData();
         fd.append("subject", draftForm.subject);
-        fd.append("body", draftForm.body.replace(/\n/g, '<br>'));
-        if (draftForm.cc) fd.append("cc", draftForm.cc);
-        const accounts = await api.get("/communications/email-accounts/");
-        const account = accounts.data.results?.[0] || accounts.data[0];
-        if (account) fd.append("email_account", account.id);
-        if (draft.client) fd.append("client", draft.client);
+        fd.append("body", draftForm.body);
+        fd.append("cc", draftForm.cc || "");
         draftAttachments.forEach(file => fd.append("attachments", file));
+        await api.post(`/communications/drafts/${draft.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
 
       const draftId = draft.id;
@@ -601,12 +600,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
       sendWithUndo(
         async () => {
-          if (fd) {
-            await api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            await api.post(`/communications/drafts/${draftId}/send/`);
-          } else {
-            await api.post(`/communications/drafts/${draftId}/send/`);
-          }
+          // Draft send endpoint includes ALL saved attachments (DB + just-uploaded)
+          await api.post(`/communications/drafts/${draftId}/send/`);
         },
         {
           preview: { to: draft.to_email, cc: draftForm.cc, subject: draftForm.subject, body: draftForm.body },
@@ -1012,56 +1007,18 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
               const openQuoteEditor = async () => {
                 try {
-                  const res = await api.post("/quotations/quotations/create-blank/", { client_id: clientId });
+                  // Pass the source communication so the backend can AI-extract
+                  // product, quantity, destination, etc. and pre-fill the line item.
+                  // `draft.communication` is the PK (UUID string), not a nested object.
+                  const commId = draft?.communication || draft?.communication_id || null;
+                  const res = await api.post("/quotations/quotations/create-blank/", {
+                    client_id: clientId,
+                    communication_id: commId,
+                  });
                   const qt = res.data;
-                  // Try to fetch client-specific product price from the email context
-                  const emailText = `${draft?.communication?.subject || ""} ${draft?.communication?.body || ""} ${draftForm.subject || ""} ${draftForm.body || ""}`.replace(/<[^>]+>/g, " ");
-                  let items = qt.items || [];
-                  try {
-                    // Get products and try to match from email text
-                    const prodRes = await api.get("/products/");
-                    const products = prodRes.data.results || prodRes.data;
-                    const textLower = emailText.toLowerCase();
-                    const matched = products.find(p =>
-                      textLower.includes(p.name.toLowerCase()) ||
-                      (p.client_brand_names && p.client_brand_names.split(",").some(b => textLower.includes(b.trim().toLowerCase())))
-                    );
-                    if (matched) {
-                      // Get client-specific price
-                      let price = matched.base_price;
-                      let clientProductName = "";
-                      try {
-                        const priceRes = await api.get(`/clients/${clientId}/product-price/`, { params: { product_id: matched.id } });
-                        if (priceRes.data.unit_price) price = priceRes.data.unit_price;
-                        if (priceRes.data.client_product_name) clientProductName = priceRes.data.client_product_name;
-                      } catch {}
-                      // Extract quantity from text
-                      // Extract quantity — try multiple patterns
-                      let qty = 0, unit = matched.unit || "KG";
-                      const qtyPatterns = [
-                        /(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)/i,
-                        /quantity[:\s]*(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)?/i,
-                        /(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs|pcs|drums)/i,
-                      ];
-                      for (const pat of qtyPatterns) {
-                        const m = emailText.match(pat);
-                        if (m) { qty = parseFloat(m[1].replace(/,/g, "")); if (m[2]) unit = m[2].toUpperCase(); break; }
-                      }
-                      const priceNum = parseFloat(price || 0);
-                      items = [{
-                        ...items[0],
-                        product_name: matched.name,
-                        client_product_name: clientProductName || matched.client_brand_names?.split(",")[0]?.trim() || "",
-                        quantity: qty || "",
-                        unit: unit,
-                        unit_price: priceNum,
-                        total_price: qty * priceNum,
-                      }];
-                    }
-                  } catch {}
                   setAttachQt(qt);
                   setAttachQtForm(qt);
-                  setAttachQtItems(items);
+                  setAttachQtItems(qt.items || []);
                   setAttachMode("quote");
                   toast.success(`Quotation ${qt.quotation_number} created — edit and attach`);
                 } catch { toast.error("Failed to create quotation"); }
@@ -1069,52 +1026,51 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
               const openPiEditor = async () => {
                 try {
-                  const res = await api.post("/finance/pi/create-standalone/", { client_id: clientId });
+                  // Pass the source communication so the backend can AI-extract
+                  // product, quantity, client product name, and price from the email.
+                  // `draft.communication` is the PK (UUID string), not a nested object.
+                  const commId = draft?.communication || draft?.communication_id || null;
+                  const res = await api.post("/finance/pi/create-standalone/", {
+                    client_id: clientId,
+                    communication_id: commId,
+                  });
                   const pi = res.data;
-                  // Try to fill product from email context
-                  const emailText = `${draft?.communication?.subject || ""} ${draft?.communication?.body || ""} ${draftForm.subject || ""} ${draftForm.body || ""}`.replace(/<[^>]+>/g, " ");
-                  let piData = { ...pi };
-                  try {
-                    const prodRes = await api.get("/products/");
-                    const products = prodRes.data.results || prodRes.data;
-                    const textLower = emailText.toLowerCase();
-                    const matched = products.find(p =>
-                      textLower.includes(p.name.toLowerCase()) ||
-                      (p.client_brand_names && p.client_brand_names.split(",").some(b => textLower.includes(b.trim().toLowerCase())))
-                    );
-                    if (matched && pi.items?.length > 0) {
-                      let price = matched.base_price;
-                      try {
-                        const priceRes = await api.get(`/clients/${clientId}/product-price/`, { params: { product_id: matched.id } });
-                        if (priceRes.data.unit_price) price = priceRes.data.unit_price;
-                      } catch {}
-                      const qtyMatch = emailText.match(/(\d[\d,]*\.?\d*)\s*(kg|mt|ltr|ltrs|litre|litres|ton|tons|kgs)/i);
-                      const qty = qtyMatch ? parseFloat(qtyMatch[1].replace(",", "")) : 0;
-                      piData.items = [{
-                        ...pi.items[0],
-                        product_name: matched.name,
-                        quantity: qty || "",
-                        unit: qtyMatch ? qtyMatch[2].toUpperCase() : matched.unit || "Ltrs",
-                        unit_price: price,
-                        total_price: qty * parseFloat(price || 0),
-                      }];
-                    }
-                  } catch {}
-                  setAttachPi(piData);
+                  setAttachPi(pi);
                   setAttachMode("pi");
                   toast.success(`PI ${pi.invoice_number} created — edit and attach`);
                 } catch { toast.error("Failed to create PI"); }
               };
 
+              // Disable each button if a matching attachment is already on the
+              // draft (saved on the server OR just-uploaded but not yet saved).
+              // We match by filename prefix because that's what the backend uses
+              // when it auto-generates and attaches the PDFs.
+              const allAttachmentNames = [
+                ...savedAttachments.map(a => (a.filename || "").toLowerCase()),
+                ...draftAttachments.map(a => (a.name || "").toLowerCase()),
+              ];
+              const hasQuoteAttached = allAttachmentNames.some(n => n.startsWith("quotation_"));
+              const hasPiAttached = allAttachmentNames.some(n => n.startsWith("pi_"));
+
               return (
                 <div className="flex gap-2 py-1">
                   {wantsQuote && (
-                    <button onClick={openQuoteEditor} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100">
+                    <button
+                      onClick={openQuoteEditor}
+                      disabled={hasQuoteAttached}
+                      title={hasQuoteAttached ? "A quotation is already attached" : ""}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal-50"
+                    >
                       📋 Generate Quotation
                     </button>
                   )}
                   {wantsPI && (
-                    <button onClick={openPiEditor} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100">
+                    <button
+                      onClick={openPiEditor}
+                      disabled={hasPiAttached}
+                      title={hasPiAttached ? "A proforma invoice is already attached" : ""}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-50"
+                    >
                       📄 Generate PI
                     </button>
                   )}

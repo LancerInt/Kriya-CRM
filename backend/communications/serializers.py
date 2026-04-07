@@ -125,6 +125,14 @@ class EmailDraftSerializer(serializers.ModelSerializer):
     original_direction = serializers.CharField(source='communication.direction', read_only=True, default='')
     attachments = DraftAttachmentSerializer(many=True, read_only=True)
 
+    def to_representation(self, instance):
+        # Convert legacy markdown-style bodies (with **bold** and plain newlines)
+        # into Quill-compatible HTML on read, so existing drafts render correctly.
+        data = super().to_representation(instance)
+        from .ai_email_service import _markdown_to_html
+        data['body'] = _markdown_to_html(data.get('body') or '')
+        return data
+
     class Meta:
         model = EmailDraft
         fields = ['id', 'client', 'client_name', 'communication', 'original_subject',

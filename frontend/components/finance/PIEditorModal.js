@@ -84,6 +84,26 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
   const addItem = () => setPiItems([...piItems, { id: `new-${Date.now()}`, product_name: "", client_product_name: "", packages_description: "", description_of_goods: "", quantity: "", unit: "Ltrs", unit_price: "", total_price: 0 }]);
   const removeItem = (i) => setPiItems(piItems.filter((_, idx) => idx !== i));
 
+  // Tab inside a cell textarea inserts a real tab character instead of moving
+  // focus to the next field. Other keys (space, caps, enter, etc.) work as
+  // normal — the textarea's value already preserves them and onChange will
+  // propagate the update to React state, the preview, and the saved PDF.
+  const handleCellKeyDown = (e) => {
+    if (e.key === "Tab" && !e.shiftKey) {
+      e.preventDefault();
+      const ta = e.target;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const newValue = ta.value.substring(0, start) + "\t" + ta.value.substring(end);
+      // Use the native setter so React picks up the change properly
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(ta, newValue);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      // Restore cursor position right after the inserted tab
+      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
+    }
+  };
+
   // ── Additional totals (UI placeholders bound to piForm) ──
   const freight = parseFloat(piForm._freight) || 0;
   const insurance = parseFloat(piForm._insurance) || 0;
@@ -216,9 +236,9 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
           <tbody>
             {piItems.map((item, i) => (
               <tr key={item.id || i}>
-                <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} placeholder="Client's product name" /></td>
-                <td className="border border-gray-400 p-0"><input value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} className={ic} placeholder="Company product name" /></td>
-                <td className="border border-gray-400 p-0"><input value={item.packages_description} onChange={(e) => updateItem(i, "packages_description", e.target.value)} className={ic} /></td>
+                <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans"} placeholder="Client's product name" onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
+                <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans"} placeholder="Company product name" onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
+                <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.packages_description} onChange={(e) => updateItem(i, "packages_description", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans"} onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
                 <td className="border border-gray-400 p-0"><input type="number" value={item.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} className={icr} /></td>
                 <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={item.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className={icr} /></td>
                 <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)) ? `$${((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)).toLocaleString(undefined, {minimumFractionDigits: 2})}` : "$0.00"}</td>

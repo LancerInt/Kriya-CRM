@@ -179,12 +179,11 @@ def _generate_draft_for_email(communication):
     )
     logger.info(f'AI draft generated for email: {communication.subject}')
 
-    # Auto-attach quotation/PI PDF if keywords detected
-    if communication.client:
-        try:
-            _auto_attach_documents(draft, communication)
-        except Exception as e:
-            logger.error(f'Auto-attach failed for draft {draft.id}: {e}')
+    # NOTE: Quotation/PI PDFs are NOT auto-attached to the AI draft.
+    # The user opens the AI Draft modal and clicks "Generate Quotation" /
+    # "Generate PI" — those buttons open the editor with values pre-filled
+    # from the email (via resolve_line_item_from_email), let the user edit
+    # and preview, then attach the final PDF and send.
 
 
 def _auto_attach_documents(draft, communication):
@@ -209,8 +208,7 @@ def _auto_attach_documents(draft, communication):
         try:
             from quotations.models import Quotation, QuotationItem, generate_quotation_number
             from quotations.quotation_service import generate_quotation_pdf
-            from communications.auto_quote_service import _get_client_price, _match_product
-            from communications.quote_request_parser import extract_quote_fields
+            from communications.auto_quote_service import resolve_line_item_from_email
 
             # Check if there's an existing quotation for this client that was sent
             # If revision keywords detected, create a new version from the latest sent quotation
@@ -269,30 +267,27 @@ def _auto_attach_documents(draft, communication):
                 logger.info(f'Auto-attached revised quotation {q.quotation_number} v{new_version} to draft {draft.id}')
                 return  # Don't create a new quotation if we revised
 
-            # Extract product info from email
-            fields = extract_quote_fields(text)
-            product_name = fields.get('product', '')
-            qty = 0
-            try:
-                qty = float(fields.get('quantity', 0)) if fields.get('quantity') else 0
-            except (ValueError, TypeError):
-                pass
-
-            matched_product = _match_product(product_name) if product_name else None
-            unit_price = _get_client_price(client, matched_product)
+            # Resolve a complete line item from the email using the shared helper
+            line = resolve_line_item_from_email(client, communication) or {}
+            qty = line.get('quantity', 0)
+            unit_price = line.get('unit_price', 0)
 
             q = Quotation.objects.create(
                 quotation_number=generate_quotation_number(),
-                client=client, currency=client.preferred_currency or 'USD',
+                client=client,
+                currency=line.get('currency') or client.preferred_currency or 'USD',
                 delivery_terms='FOB', country_of_origin='India',
-                country_of_final_destination=client.country or '',
+                country_of_final_destination=line.get('destination_country') or client.country or '',
+                port_of_discharge=line.get('destination_port') or '',
                 created_by=communication.user,
             )
             QuotationItem.objects.create(
                 quotation=q,
-                product=matched_product,
-                product_name=str(matched_product) if matched_product else (product_name or 'Product TBD'),
-                quantity=qty, unit=fields.get('unit', 'KG'),
+                product=line.get('product'),
+                product_name=line.get('product_name') or 'Product TBD',
+                client_product_name=line.get('client_product_name', ''),
+                description=line.get('description', ''),
+                quantity=qty, unit=line.get('unit') or 'KG',
                 unit_price=unit_price, total_price=qty * unit_price,
             )
             q.subtotal = qty * unit_price
@@ -313,20 +308,12 @@ def _auto_attach_documents(draft, communication):
         try:
             from finance.models import ProformaInvoice, ProformaInvoiceItem
             from finance.pi_service import generate_pi_pdf, DEFAULT_BANK, _number_to_words
-            from communications.auto_quote_service import _get_client_price, _match_product
-            from communications.quote_request_parser import extract_quote_fields
+            from communications.auto_quote_service import resolve_line_item_from_email
             from datetime import date
 
-            fields = extract_quote_fields(text)
-            product_name = fields.get('product', '')
-            qty = 0
-            try:
-                qty = float(fields.get('quantity', 0)) if fields.get('quantity') else 0
-            except (ValueError, TypeError):
-                pass
-
-            matched_product = _match_product(product_name) if product_name else None
-            unit_price = _get_client_price(client, matched_product)
+            line = resolve_line_item_from_email(client, communication) or {}
+            qty = line.get('quantity', 0)
+            unit_price = line.get('unit_price', 0)
 
             count = ProformaInvoice.objects.count() + 1
             today = date.today()
@@ -338,15 +325,19 @@ def _auto_attach_documents(draft, communication):
                 client_tax_number=client.tax_number or '',
                 client_address=client.address or '',
                 country_of_origin='India',
-                country_of_final_destination=client.country or '',
-                currency=client.preferred_currency or 'USD',
+                country_of_final_destination=line.get('destination_country') or client.country or '',
+                currency=line.get('currency') or client.preferred_currency or 'USD',
                 bank_details=DEFAULT_BANK,
             )
             line_total = qty * unit_price
+            # PI mapping: product_name=client brand, description_of_goods=company name
             ProformaInvoiceItem.objects.create(
                 pi=pi,
-                product_name=str(matched_product) if matched_product else (product_name or 'Product TBD'),
-                quantity=qty, unit=fields.get('unit', 'Ltrs'),
+                product_name=line.get('client_product_name') or line.get('product_name') or 'Product TBD',
+                client_product_name=line.get('client_product_name', ''),
+                description_of_goods=line.get('product_name') or '',
+                packages_description=line.get('description', ''),
+                quantity=qty, unit=line.get('unit') or 'Ltrs',
                 unit_price=unit_price, total_price=line_total,
             )
             pi.total = line_total

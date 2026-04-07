@@ -283,12 +283,15 @@ def generate_quotation_pdf(q):
 
         # Wrap text columns in Paragraph so long text wraps to next line
         _bs = ParagraphStyle('bs', fontSize=10, leading=12, fontName=_br)
+        # "Product Details" column shows the client's name for the product
+        # (what the client called it in their email); fall back to description.
+        details_text = item.client_product_name or item.description or ''
         data.append([
-            Paragraph(item.product_name or '', _bs),
-            Paragraph(item.description or '', _bs),
-            f'{qty:,.0f} {item.unit}' if qty else '-.--',
-            f'{prefix}{price:,.2f}' if price else '-.--',
-            f'{prefix}{amount:,.2f}' if amount else '-.--',
+            Paragraph(item.product_name or '-', _bs),
+            Paragraph(details_text or '-', _bs),
+            f'{qty:,.0f} {item.unit}' if qty else '-',
+            f'{prefix}{price:,.2f}' if price else '-',
+            f'{prefix}{amount:,.2f}' if amount else '-',
         ])
 
     it = Table(data, colWidths=TCW)
@@ -316,7 +319,7 @@ def generate_quotation_pdf(q):
     amounts = [float(i.quantity or 0) * float(i.unit_price or 0) for i in q.items.all()]
     valid_amounts = [a for a in amounts if a > 0]
     total_val = sum(valid_amounts) if valid_amounts else 0
-    total_display = f'{prefix}{total_val:,.2f}' if total_val else '-.--'
+    total_display = f'{prefix}{total_val:,.2f}' if total_val else '-'
     tot = Table([
         ['', '', '', Paragraph('<b>Total</b>', ts_g),
          Paragraph(f'<b>{total_display}</b>', ts_g)]

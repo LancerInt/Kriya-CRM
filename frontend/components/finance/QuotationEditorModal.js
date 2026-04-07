@@ -10,6 +10,7 @@ import api from "@/lib/axios";
 export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtForm, qtItems, setQtItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const initialized = useRef(null);
   const [products, setProducts] = useState([]);
+  const [clientPriceList, setClientPriceList] = useState([]);
   const [logoSrc, setLogoSrc] = useState("/logo.png");
   const [sealSrc, setSealSrc] = useState("/seal.png");
   const [signSrc, setSignSrc] = useState("/sign.png");
@@ -32,6 +33,12 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   useEffect(() => {
     if (open && products.length === 0) {
       api.get("/products/").then((r) => setProducts(r.data.results || r.data)).catch(() => {});
+    }
+    // Fetch this client's price list — used to auto-fill price for the specific client
+    if (open && qt?.client) {
+      api.get(`/clients/price-list/?client=${qt.client}`)
+        .then((r) => setClientPriceList(r.data.results || r.data || []))
+        .catch(() => setClientPriceList([]));
     }
     // Restore image state from display_overrides or reset to defaults
     if (open && qtForm) {
@@ -110,9 +117,17 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   const validAmounts = qtItems.map(calcAmount).filter(v => v !== null);
   const total = validAmounts.length > 0 ? validAmounts.reduce((s, v) => s + v, 0) : null;
 
+  // Look up a price for a product name. Priority:
+  //   1) This client's price list (ClientPriceList) — client-specific pricing
+  //   2) Products tab base_price — global fallback
   const _findProductPrice = (productName) => {
-    if (!productName || products.length === 0) return null;
+    if (!productName) return null;
     const nameLower = productName.toLowerCase();
+    // 1) client-specific price list
+    const cp = clientPriceList.find((p) => (p.product_name || "").toLowerCase() === nameLower);
+    if (cp) return { price: cp.unit_price, unit: cp.unit, currency: cp.currency };
+    // 2) global product master
+    if (products.length === 0) return null;
     const match = products.find((p) => {
       const full = `${p.name}${p.concentration ? ` (${p.concentration})` : ""}`.toLowerCase();
       return full === nameLower || p.name.toLowerCase() === nameLower;
@@ -128,7 +143,8 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
       const price = parseFloat(field === "unit_price" ? value : items[i].unit_price) || 0;
       items[i].total_price = qty * price;
     }
-    // Auto-populate price from product master when product_name changes (only if price is empty)
+    // Auto-populate price from client price list / product master when product_name changes
+    // Only fills empty fields — never overwrites a manual entry
     if (field === "product_name") {
       const match = _findProductPrice(value);
       if (match && !parseFloat(items[i].unit_price)) {
@@ -136,6 +152,11 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
         items[i].unit = match.unit || items[i].unit;
         const qty = parseFloat(items[i].quantity) || 0;
         items[i].total_price = qty * parseFloat(match.price);
+      }
+      // Auto-fill the client's name for this product from the client price list
+      if (!items[i].client_product_name) {
+        const cp = clientPriceList.find((p) => (p.product_name || "").toLowerCase() === value.toLowerCase());
+        if (cp && cp.client_product_name) items[i].client_product_name = cp.client_product_name;
       }
     }
     setQtItems(items);
@@ -273,12 +294,19 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
               const amt = calcAmount(item);
               return (
                 <tr key={item.id || i}>
-                  <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} placeholder="Company product name" /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.client_product_name != null ? item.client_product_name : ""} onChange={(e) => updateItem(i, "client_product_name", e.target.value)} className={ic} placeholder="Client's name for this product" /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" value={parseFloat(item.quantity) ? item.quantity : ""} onChange={(e) => updateItem(i, "quantity", e.target.value)} placeholder="-.--" className={icr + " w-20"} /></td>
+                  <td className="border border-gray-400 p-0">
+                    <input
+                      value={item.product_name}
+                      onChange={(e) => updateItem(i, "product_name", e.target.value)}
+                      className={ic}
+                      placeholder="-"
+                    />
+                  </td>
+                  <td className="border border-gray-400 p-0"><input value={item.client_product_name != null ? item.client_product_name : ""} onChange={(e) => updateItem(i, "client_product_name", e.target.value)} className={ic} placeholder="-" /></td>
+                  <td className="border border-gray-400 p-0"><input type="number" value={parseFloat(item.quantity) ? item.quantity : ""} onChange={(e) => updateItem(i, "quantity", e.target.value)} placeholder="-" className={icr + " w-20"} /></td>
                   <td className="border border-gray-400 p-0"><input value={item.unit || ""} onChange={(e) => updateItem(i, "unit", e.target.value)} className={ic + " text-center w-16"} placeholder="KG" /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={parseFloat(item.unit_price) ? item.unit_price : ""} onChange={(e) => updateItem(i, "unit_price", e.target.value)} placeholder="-.--" className={icr + " w-24"} /></td>
-                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{amt !== null ? amt.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "-.--"}</td>
+                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={parseFloat(item.unit_price) ? item.unit_price : ""} onChange={(e) => updateItem(i, "unit_price", e.target.value)} placeholder="-" className={icr + " w-24"} /></td>
+                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{amt !== null ? amt.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "-"}</td>
                   <td className="border border-gray-400 p-0 text-center"><button onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600">&times;</button></td>
                 </tr>
               );
@@ -296,7 +324,7 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
           <tbody>
             <tr>
               <td className="text-right font-bold p-1" style={{ color: "#558b2f" }}>Total</td>
-              <td className="text-right font-bold p-1 w-28" style={{ color: "#558b2f" }}>{total !== null ? `$ ${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "-.--"}</td>
+              <td className="text-right font-bold p-1 w-28" style={{ color: "#558b2f" }}>{total !== null ? `$ ${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "-"}</td>
             </tr>
           </tbody>
         </table>

@@ -140,8 +140,14 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='create-blank')
     def create_blank(self, request):
-        """Create a blank quotation for a client."""
+        """Create a blank quotation for a client.
+
+        If `communication_id` is provided, the first line item is pre-filled from
+        the email context using AI extraction (product, quantity, unit) plus the
+        client's price list / Products tab for pricing.
+        """
         client_id = request.data.get('client_id')
+        communication_id = request.data.get('communication_id')
         if not client_id:
             return Response({'error': 'client_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         from clients.models import Client
@@ -150,26 +156,106 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         except Client.DoesNotExist:
             return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # ── Resolve the line item from the source email up-front ──
+        # This works for BOTH new and previously-generated drafts: any time the
+        # button is clicked we re-run the AI extractor against the original email.
+        line = None
+        comm = None
+        if communication_id:
+            try:
+                from communications.models import Communication
+                from communications.auto_quote_service import resolve_line_item_from_email
+                comm = Communication.objects.filter(id=communication_id).first()
+                if comm:
+                    line = resolve_line_item_from_email(client, comm)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f'Quotation pre-fill failed: {e}')
+
+        # ── Reuse / repair an existing quotation linked to this communication ──
+        # If the auto-pipeline already created a Quotation for this email:
+        #   - Has real items → just return it (preserves quote number, manual edits).
+        #   - Empty items → repair it in-place using the freshly-extracted line so
+        #     previously-generated drafts get the same auto-fill new ones do, and
+        #     we don't accumulate orphan empty quotations.
+        if communication_id:
+            try:
+                from communications.models import QuoteRequest
+                qr = QuoteRequest.objects.filter(
+                    source_communication_id=communication_id,
+                    linked_quotation__isnull=False,
+                    linked_quotation__is_deleted=False,
+                ).select_related('linked_quotation').first()
+                if qr and qr.linked_quotation:
+                    existing = qr.linked_quotation
+                    # Only treat as "already populated" if at least one item has
+                    # BOTH a product name AND a non-zero unit price. Stale rows
+                    # from earlier parser runs (name only, price 0) get repaired.
+                    has_real_item = existing.items.exclude(product_name='').filter(unit_price__gt=0).exists()
+                    if has_real_item:
+                        return Response(QuotationSerializer(existing).data, status=status.HTTP_200_OK)
+                    # Empty linked quotation → repair in-place from the resolved line
+                    if line:
+                        existing.items.all().delete()
+                        qty = line['quantity']
+                        price = line['unit_price']
+                        QuotationItem.objects.create(
+                            quotation=existing,
+                            product=line['product'],
+                            product_name=line['product_name'],
+                            client_product_name=line['client_product_name'],
+                            description=line['description'],
+                            quantity=qty, unit=line['unit'],
+                            unit_price=price, total_price=qty * price,
+                        )
+                        update_fields = []
+                        if line.get('currency'):
+                            existing.currency = line['currency']; update_fields.append('currency')
+                        if line.get('destination_country') and not existing.country_of_final_destination:
+                            existing.country_of_final_destination = line['destination_country']; update_fields.append('country_of_final_destination')
+                        if line.get('destination_port') and not existing.port_of_discharge:
+                            existing.port_of_discharge = line['destination_port']; update_fields.append('port_of_discharge')
+                        existing.subtotal = qty * price
+                        existing.total = qty * price
+                        update_fields += ['subtotal', 'total']
+                        existing.save(update_fields=update_fields)
+                        return Response(QuotationSerializer(existing).data, status=status.HTTP_200_OK)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f'Linked quotation repair failed: {e}')
+
         from .models import generate_quotation_number
+        delivery = (line or {}).get('delivery_terms', '')
         q = Quotation.objects.create(
             quotation_number=generate_quotation_number(),
             client=client,
-            currency=client.preferred_currency or 'USD',
-            delivery_terms='FOB',
+            currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
+            delivery_terms=delivery if delivery in dict(Quotation.DELIVERY_CHOICES) else 'FOB',
             country_of_origin='India',
-            country_of_final_destination=client.country or '',
+            country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
+            port_of_discharge=(line or {}).get('destination_port') or '',
             created_by=request.user,
         )
-        # Add one blank item
-        QuotationItem.objects.create(
-            quotation=q,
-            product_name='',
-            description='',
-            quantity=0,
-            unit='KG',
-            unit_price=0,
-            total_price=0,
-        )
+        # Add the (pre-filled or blank) first item
+        if line:
+            qty = line['quantity']
+            price = line['unit_price']
+            QuotationItem.objects.create(
+                quotation=q,
+                product=line['product'],
+                product_name=line['product_name'],
+                client_product_name=line['client_product_name'],
+                description=line['description'],
+                quantity=qty,
+                unit=line['unit'],
+                unit_price=price,
+                total_price=qty * price,
+            )
+        else:
+            QuotationItem.objects.create(
+                quotation=q, product_name='', description='',
+                quantity=0, unit='KG', unit_price=0, total_price=0,
+            )
         notify(
             title=f'Quotation created: {q.quotation_number}',
             message=f'{request.user.full_name} created a quotation for {client.company_name}.',

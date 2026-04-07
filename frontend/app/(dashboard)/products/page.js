@@ -76,9 +76,15 @@ export default function ProductsPage() {
 
   const columns = [
     { key: "name", label: "Product", render: (row) => (
-      <div>
-        <span className="font-medium text-gray-900">{row.name}</span>
-        {row.concentration && <span className="text-xs text-gray-400 ml-1">({row.concentration})</span>}
+      <div className="flex items-center gap-2">
+        {row.name ? (
+          <>
+            <span className="font-medium text-gray-900">{row.name}</span>
+            {row.concentration && <span className="text-xs text-gray-400 ml-1">({row.concentration})</span>}
+          </>
+        ) : (
+          <span className="italic text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-xs font-medium">Needs review — set product name</span>
+        )}
       </div>
     )},
     { key: "hsn_code", label: "HSN Code", render: (row) => row.hsn_code || "\u2014" },

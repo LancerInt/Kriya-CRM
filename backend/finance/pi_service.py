@@ -317,9 +317,37 @@ def generate_pi_pdf(pi):
 
     hdr = ['Product Details', 'No. & Kind of Packages', 'Description of Goods', 'Quantity', 'Price/Ltr', 'Amount']
     data = [hdr]
+    # Wrap text columns in Paragraph so long content wraps to the next line
+    # instead of overflowing. Whitespace (multiple spaces, tabs) and explicit
+    # line breaks (Shift+Enter / Enter from the editor) are all preserved by
+    # converting them to non-breaking spaces and <br/> markers — ReportLab's
+    # Paragraph collapses whitespace by default, so we substitute beforehand.
+    import html as _html
+    import re as _re
+    _cell_style = ParagraphStyle('pi_cell', fontSize=7, leading=9, fontName=_br)
+
+    def _wrap(text):
+        if not text:
+            return Paragraph('', _cell_style)
+        s = _html.escape(text)
+        # Preserve tabs as 4 non-breaking spaces
+        s = s.replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
+        # Preserve runs of multiple spaces (single space stays normal so word
+        # wrapping still works for ordinary text)
+        s = _re.sub(r' {2,}', lambda m: '&nbsp;' * len(m.group(0)), s)
+        # Preserve line breaks
+        s = s.replace('\r\n', '\n').replace('\n', '<br/>')
+        return Paragraph(s, _cell_style)
+
     for item in pi.items.all():
-        data.append([item.product_name, item.packages_description, item.description_of_goods,
-                     f'{item.quantity:,.0f} {item.unit}'.strip(), f'{item.unit_price:,.2f}', f'{item.total_price:,.2f}'])
+        data.append([
+            _wrap(item.product_name),
+            _wrap(item.packages_description),
+            _wrap(item.description_of_goods),
+            f'{item.quantity:,.0f} {item.unit}'.strip(),
+            f'{item.unit_price:,.2f}',
+            f'{item.total_price:,.2f}',
+        ])
 
     it = Table(data, colWidths=CW)
     it.setStyle(TableStyle([

@@ -3,10 +3,40 @@ AI Email Reply Service — generates draft replies for incoming client emails.
 Uses the configured AI provider (Groq/Gemini/etc.) from agents app.
 Falls back to template-based reply if no AI is configured.
 """
+import html
 import logging
 import re
 
 logger = logging.getLogger(__name__)
+
+
+def _markdown_to_html(text):
+    """Convert plain text (with **bold** markers and newlines) into Quill-compatible HTML.
+
+    The AI is instructed to use **double-asterisks** for bold; the rich-text editor
+    on the frontend (Quill) does not understand markdown, so we convert it here so
+    the user sees properly bolded HTML instead of literal asterisks.
+    """
+    if not text:
+        return ''
+    # If the body already looks like HTML (has tags), leave it alone.
+    if re.search(r'<(p|br|strong|b|div|span)\b', text, re.IGNORECASE):
+        return text
+    # Escape HTML special chars so we don't accidentally render unintended markup.
+    escaped = html.escape(text)
+    # Convert **bold** → <strong>bold</strong>
+    escaped = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', escaped, flags=re.DOTALL)
+    # Also handle single *italic* → <em>italic</em> (but avoid touching list bullets)
+    escaped = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<em>\1</em>', escaped)
+    # Build paragraphs: blank line = paragraph break; single newline = <br>
+    paragraphs = re.split(r'\n\s*\n', escaped)
+    parts = []
+    for p in paragraphs:
+        p = p.strip('\n')
+        if not p:
+            continue
+        parts.append('<p>' + p.replace('\n', '<br>') + '</p>')
+    return ''.join(parts) if parts else f'<p>{escaped}</p>'
 
 
 def generate_email_reply(communication):
@@ -20,6 +50,27 @@ def generate_email_reply(communication):
     original_body = _clean_html(communication.body or '')
     thread_context = _get_thread_context(communication)
 
+    # Fetch product/price context for the AI
+    product_context = ""
+    if communication.client:
+        try:
+            from clients.models import ClientPriceList
+            from products.models import Product
+            prices = ClientPriceList.objects.filter(client=communication.client, is_deleted=False)[:10]
+            if prices.exists():
+                price_lines = [f"- {p.product_name}: {p.currency} {p.unit_price}/{p.unit}" + (f" (client calls it: {p.client_product_name})" if p.client_product_name else "") for p in prices]
+                product_context = f"\nClient's Price List:\n" + "\n".join(price_lines)
+            # Match product from email text
+            email_text = f"{original_subject} {original_body}".lower()
+            for product in Product.objects.filter(is_deleted=False):
+                if product.name.lower() in email_text or (product.client_brand_names and any(b.strip().lower() in email_text for b in product.client_brand_names.split(",") if b.strip())):
+                    client_price = prices.filter(product_name__iexact=product.name).first()
+                    price_val = f"{client_price.currency} {client_price.unit_price}/{client_price.unit}" if client_price else f"USD {product.base_price}/{product.unit}"
+                    product_context += f"\nMatched Product: {product.name} ({product.concentration}) - Price: {price_val}"
+                    break
+        except Exception:
+            pass
+
     # Build the prompt
     prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
 Write a reply email to the following client email.
@@ -29,14 +80,17 @@ Contact: {contact_name}
 Original Subject: {original_subject}
 Original Email:
 {original_body[:1000]}
-
+{product_context}
 {f"Previous conversation context:{chr(10)}{thread_context}" if thread_context else ""}
 
 RULES:
 - Professional, concise, and friendly tone
 - Address the client's query or interest directly
-- If they inquire about products, mention we'll share details/quotation
-- If they mention pricing, say we'll prepare a competitive quotation
+- **Bold the key answers** to client's questions using **double asterisks**
+- For example: product name, price, quantity, delivery terms, payment terms — bold these
+- If they inquire about products, mention the SPECIFIC product name and its price in **bold**
+- If product price is available, write it as **USD 1,800/MT** (bold with currency)
+- If they ask about delivery, bold the delivery terms like **FOB Chennai**
 - If they mention samples, offer to arrange sample dispatch
 - If they confirm an order, acknowledge and outline next steps
 - Sign off as "Kriya Biosys Private Limited"
@@ -53,6 +107,9 @@ RULES:
 
     # Ensure proper greeting and sign-off
     reply_body = _ensure_greeting_signoff(reply_body, contact_name)
+
+    # Convert AI markdown (**bold**, newlines) into HTML so Quill renders it correctly
+    reply_body = _markdown_to_html(reply_body)
 
     # Build reply subject
     reply_subject = original_subject
@@ -258,6 +315,16 @@ def refine_email_body(body, action, contact_name=''):
     if not instruction:
         return body
 
+    # If body is HTML (from prior generation), convert to plain text first so the
+    # greeting/sign-off regexes below still work.
+    if re.search(r'<(p|br|strong|b|div)\b', body or '', re.IGNORECASE):
+        body = re.sub(r'<\s*br\s*/?>', '\n', body, flags=re.IGNORECASE)
+        body = re.sub(r'</\s*p\s*>', '\n\n', body, flags=re.IGNORECASE)
+        body = re.sub(r'<strong>(.*?)</strong>', r'**\1**', body, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r'<b>(.*?)</b>', r'**\1**', body, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r'<[^>]+>', '', body)
+        body = html.unescape(body).strip()
+
     # Extract greeting (Dear ...,) from the original body if present
     greeting = ''
     clean_body = body
@@ -304,4 +371,4 @@ RULES:
     parts.append(result)
     parts.append("Best regards,\nKriya Biosys Private Limited")
 
-    return '\n\n'.join(parts)
+    return _markdown_to_html('\n\n'.join(parts))

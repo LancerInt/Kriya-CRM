@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import Communication, EmailAccount, WhatsAppConfig, EmailDraft, QuoteRequest
+from .models import Communication, EmailAccount, WhatsAppConfig, EmailDraft, QuoteRequest, DraftAttachment
 from .serializers import (
     CommunicationSerializer,
     EmailAccountSerializer,
@@ -382,11 +382,18 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         """Send the draft email to the client."""
+        import re as _re
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
         draft = self.get_object()
 
         if draft.status != 'draft':
             return Response({'error': 'Only drafts can be sent'}, status=status.HTTP_400_BAD_REQUEST)
-        if not draft.body.strip():
+
+        # Validate body — strip HTML tags to check there's actual content
+        plain_body = _re.sub(r'<[^>]+>', '', draft.body or '').strip()
+        if not plain_body:
             return Response({'error': 'Email body cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
         if not draft.subject.strip():
             return Response({'error': 'Subject is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -398,19 +405,48 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         if not email_account:
             email_account = EmailAccount.objects.filter(is_active=True).first()
         if not email_account:
-            return Response({'error': 'No email account configured'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'No email account configured. Add one in Settings → Email Accounts.'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        # Send email with CC
+        # Collect saved attachments from DraftAttachment
+        from io import BytesIO
+        attachments = []
+        for att in draft.attachments.all():
+            if att.file:
+                try:
+                    f = BytesIO(att.file.read())
+                    f.name = att.filename
+                    attachments.append(f)
+                except Exception as e:
+                    _log.warning(f'Could not read attachment {att.filename}: {e}')
+
+        # Convert any legacy markdown-style content (**bold**, plain newlines) into
+        # HTML so the recipient sees real bold text, not literal asterisks.
+        from .ai_email_service import _markdown_to_html
+        outgoing_html = _markdown_to_html(draft.body)
+
+        # Clean CC: strip whitespace, drop empty/invalid entries
+        cc_clean = ''
+        if draft.cc:
+            cc_parts = [c.strip() for c in draft.cc.split(',') if c.strip() and '@' in c]
+            cc_clean = ','.join(cc_parts)
+
+        # Send email with CC and attachments
         try:
             EmailService.send_email(
                 email_account=email_account,
-                to=draft.to_email,
+                to=draft.to_email.strip(),
                 subject=draft.subject,
-                body_html=draft.body.replace('\n', '<br>'),
-                cc=draft.cc if draft.cc else None,
+                body_html=outgoing_html,
+                cc=cc_clean or None,
+                attachments=attachments if attachments else None,
             )
         except Exception as e:
-            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            _log.exception(f'Failed to send draft {draft.id}')
+            return Response(
+                {'error': f'Failed to send: {str(e)}', 'detail': type(e).__name__},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         # Update draft
         from django.utils import timezone
@@ -506,6 +542,85 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             return Response(EmailDraftSerializer(draft).data)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='backfill-quotes')
+    def backfill_quotes(self, request):
+        """Run the auto-quote pipeline on existing inbound emails.
+
+        For every eligible inbound email this:
+          1) detects quote intent + AI-extracts product/quantity,
+          2) auto-creates the Product if it isn't in the master list yet,
+          3) creates the QuoteRequest + linked Quotation,
+          4) attaches the Quotation PDF to the existing AI draft.
+
+        Body params (all optional):
+          - client_id: restrict to one client
+          - limit: cap how many to process (default 200)
+          - reattach: bool — re-attach PDF even if a quote attachment already exists
+        """
+        from django.core.files.base import ContentFile
+        from django.db import transaction
+        from .auto_quote_service import process_communication_for_quote
+        from quotations.quotation_service import generate_quotation_pdf
+
+        client_id = request.data.get('client_id')
+        limit = int(request.data.get('limit') or 200)
+        reattach = bool(request.data.get('reattach'))
+
+        qs = Communication.objects.filter(
+            comm_type='email', direction='inbound', is_deleted=False
+        ).order_by('-created_at')
+        if client_id:
+            qs = qs.filter(client_id=client_id)
+
+        # Skip those already linked to a quotation
+        already = set(
+            QuoteRequest.objects.filter(
+                source_communication__in=qs, linked_quotation__isnull=False,
+            ).values_list('source_communication_id', flat=True)
+        )
+        targets = [c for c in qs if c.id not in already][:limit]
+
+        processed = attached = skipped = errors = 0
+        for comm in targets:
+            try:
+                with transaction.atomic():
+                    qr = process_communication_for_quote(comm)
+                    if not qr:
+                        skipped += 1
+                        continue
+                    processed += 1
+                    if not qr.linked_quotation:
+                        continue
+
+                    draft = EmailDraft.objects.filter(communication=comm).first()
+                    if not draft:
+                        continue
+                    has_attachment = draft.attachments.filter(
+                        filename__icontains='Quotation_'
+                    ).exists()
+                    if has_attachment and not reattach:
+                        continue
+
+                    pdf_buffer = generate_quotation_pdf(qr.linked_quotation)
+                    pdf_bytes = pdf_buffer.read()
+                    fname = f'Quotation_{qr.linked_quotation.quotation_number.replace("/", "-")}.pdf'
+                    att = DraftAttachment(draft=draft, filename=fname, file_size=len(pdf_bytes))
+                    att.file.save(fname, ContentFile(pdf_bytes), save=True)
+                    attached += 1
+            except Exception as e:
+                errors += 1
+                import logging
+                logging.getLogger(__name__).warning(f'Backfill failed on comm {comm.id}: {e}')
+
+        return Response({
+            'targets': len(targets),
+            'already_linked': len(already),
+            'processed': processed,
+            'attached': attached,
+            'skipped_no_intent': skipped,
+            'errors': errors,
+        })
 
 
 class WhatsAppConfigViewSet(viewsets.ModelViewSet):
