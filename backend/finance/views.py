@@ -109,6 +109,69 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             qs = qs.filter(client__in=client_ids)
         return qs
 
+    def list(self, request, *args, **kwargs):
+        # Lazy back-fills run on every list call:
+        #   1) link legacy PIs to the inbound email they were created from
+        #   2) flip status to 'sent' if that email's draft has been sent
+        try:
+            self._backfill_source_communication()
+            self._backfill_sent_status()
+        except Exception:
+            pass
+        return super().list(request, *args, **kwargs)
+
+    def _backfill_source_communication(self):
+        """For legacy PIs (created before source_communication was tracked),
+        infer the source by finding the most recent inbound email for the
+        same client that was created before the PI itself.
+        """
+        from communications.models import Communication
+        legacy = self.get_queryset().filter(source_communication__isnull=True).only(
+            'id', 'client_id', 'created_at'
+        )
+        for pi in legacy:
+            if not pi.client_id:
+                continue
+            comm = Communication.objects.filter(
+                client_id=pi.client_id,
+                comm_type='email', direction='inbound', is_deleted=False,
+                created_at__lte=pi.created_at,
+            ).order_by('-created_at').first()
+            if comm:
+                ProformaInvoice.objects.filter(id=pi.id).update(source_communication=comm)
+
+    def _backfill_sent_status(self):
+        from communications.models import EmailDraft
+        draft_pis = self.get_queryset().filter(
+            status='draft', source_communication__isnull=False,
+        )
+        # Find which of those source_communications have a sent draft
+        sent_comm_ids = set(
+            EmailDraft.objects.filter(
+                communication__in=[p.source_communication_id for p in draft_pis],
+                status='sent',
+            ).values_list('communication_id', flat=True)
+        )
+        if sent_comm_ids:
+            ProformaInvoice.objects.filter(
+                id__in=[p.id for p in draft_pis if p.source_communication_id in sent_comm_ids]
+            ).update(status='sent')
+
+    @action(detail=False, methods=['get'], url_path='count')
+    def count_for_user(self, request):
+        """Count of DRAFT proforma invoices the current user can see (role-filtered).
+
+        Used by the header badge — same role filtering as the list endpoint
+        so executives only see counts for their own clients' PIs.
+        """
+        # Run the same lazy back-fill so the count matches the list page
+        try:
+            self._backfill_sent_status()
+        except Exception:
+            pass
+        count = self.get_queryset().filter(status='draft').count()
+        return Response({'count': count})
+
     @action(detail=True, methods=['post'], url_path='save-with-items')
     def save_with_items(self, request, pk=None):
         """Save PI fields + replace all items in one request."""

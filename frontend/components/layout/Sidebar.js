@@ -35,9 +35,7 @@ const navItems = [
   { name: "Tasks", href: "/tasks", icon: HiOutlineClipboardDocumentList },
   { name: "Leads", href: "/pipeline", icon: HiOutlineFunnel },
   { name: "Products", href: "/products", icon: HiOutlineCube },
-  { name: "Quotes", href: "/quotations", icon: HiOutlineDocumentText },
-  { name: "Inquiries", href: "/quote-requests", icon: HiOutlineInboxArrowDown },
-  { name: "Proforma Invoices", href: "/proforma-invoices", icon: HiOutlineDocumentDuplicate },
+  // Quotes, Inquiries & Proforma Invoices moved to header (icons next to refresh/notifications)
   { name: "Sales Orders", href: "/orders", icon: HiOutlineShoppingCart },
   { name: "Shipments", href: "/shipments", icon: HiOutlineTruck },
   { name: "Quality", href: "/quality", icon: HiOutlineShieldCheck },

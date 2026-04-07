@@ -4,7 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/navigation";
 import { logout } from "@/store/slices/authSlice";
 import api from "@/lib/axios";
-import { HiOutlineBars3, HiOutlineBell, HiOutlineUser, HiOutlineArrowPath } from "react-icons/hi2";
+import { HiOutlineBars3, HiOutlineBell, HiOutlineUser, HiOutlineArrowPath, HiOutlineInboxArrowDown, HiOutlineDocumentDuplicate } from "react-icons/hi2";
 import toast from "react-hot-toast";
 
 export default function Header({ onMenuClick }) {
@@ -15,6 +15,8 @@ export default function Header({ onMenuClick }) {
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [inquiryCount, setInquiryCount] = useState(0);
+  const [piCount, setPiCount] = useState(0);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -39,9 +41,15 @@ export default function Header({ onMenuClick }) {
   const fetchUnread = () => {
     api.get("/notifications/unread-count/").then(r => setUnreadCount(r.data.count || 0)).catch(() => {});
   };
+  // Poll Inquiries (new) and Proforma Invoice (draft) counts — role-filtered server-side
+  const fetchHeaderCounts = () => {
+    api.get("/communications/quote-requests/count/").then(r => setInquiryCount(r.data.count || 0)).catch(() => {});
+    api.get("/finance/pi/count/").then(r => setPiCount(r.data.count || 0)).catch(() => {});
+  };
   useEffect(() => {
     fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
+    fetchHeaderCounts();
+    const interval = setInterval(() => { fetchUnread(); fetchHeaderCounts(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -86,6 +94,34 @@ export default function Header({ onMenuClick }) {
       <div className="flex-1" />
 
       <div className="flex items-center gap-2">
+        {/* Proforma Invoices — icon only, badge with role-filtered draft count */}
+        <button
+          onClick={() => { router.push("/proforma-invoices"); fetchHeaderCounts(); }}
+          className="relative p-2 rounded-lg hover:bg-gray-100"
+          title="Proforma Invoices"
+        >
+          <HiOutlineDocumentDuplicate className="w-5 h-5 text-gray-600" />
+          {piCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-purple-500 rounded-full">
+              {piCount > 99 ? "99+" : piCount}
+            </span>
+          )}
+        </button>
+
+        {/* Inquiries (Quote Requests) — icon only, badge with role-filtered new count */}
+        <button
+          onClick={() => { router.push("/quote-requests"); fetchHeaderCounts(); }}
+          className="relative p-2 rounded-lg hover:bg-gray-100"
+          title="Inquiries"
+        >
+          <HiOutlineInboxArrowDown className="w-5 h-5 text-gray-600" />
+          {inquiryCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-orange-500 rounded-full">
+              {inquiryCount > 99 ? "99+" : inquiryCount}
+            </span>
+          )}
+        </button>
+
         {/* Sync button */}
         <button
           onClick={() => runSync(false)}

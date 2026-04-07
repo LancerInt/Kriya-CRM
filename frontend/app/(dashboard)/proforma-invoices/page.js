@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -11,6 +12,7 @@ import { format } from "date-fns";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 
 export default function ProformaInvoicesPage() {
+  const router = useRouter();
   const [piList, setPiList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
@@ -136,6 +138,23 @@ export default function ProformaInvoicesPage() {
     finally { setPiSending(false); }
   };
 
+  // ── Edit & Send: open the client's AI Draft modal so the PI flows through
+  // the same email pipeline. Always navigates — the client page resolves the
+  // right communication server-side (source_communication if set, otherwise
+  // the latest inbound email for the client).
+  const handleEditAndSend = (piData) => {
+    if (!piData.client) {
+      _openPIEditor(piData.id);
+      return;
+    }
+    if (piData.source_communication) {
+      router.push(`/clients/${piData.client}?openDraftFor=${piData.source_communication}`);
+    } else {
+      // No source_communication — let the client page resolve via the PI id
+      router.push(`/clients/${piData.client}?openPI=${piData.id}`);
+    }
+  };
+
   // ── Convert PI to Order ──
   const handleConvertToOrder = async (piData) => {
     try {
@@ -230,7 +249,14 @@ export default function ProformaInvoicesPage() {
                   {!piData.order && (
                     <button onClick={(e) => { e.stopPropagation(); handleConvertToOrder(piData); }} className="text-xs bg-blue-600 text-white px-3 py-1 rounded font-medium hover:bg-blue-700">Convert to Order</button>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); _openPIEditor(piData.id); }} className="text-xs bg-teal-600 text-white px-3 py-1 rounded font-medium hover:bg-teal-700">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (piData.status === "draft") handleEditAndSend(piData);
+                      else _openPIEditor(piData.id);
+                    }}
+                    className="text-xs bg-teal-600 text-white px-3 py-1 rounded font-medium hover:bg-teal-700"
+                  >
                     {piData.status === "draft" ? "Edit & Send" : "View"}
                   </button>
                 </div>
@@ -301,8 +327,15 @@ export default function ProformaInvoicesPage() {
                 {!selectedPI.order && (
                   <button onClick={() => handleConvertToOrder(selectedPI)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Convert to Order</button>
                 )}
-                <button onClick={() => { setShowReview(false); _openPIEditor(selectedPI.id); }} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">
-                  {selectedPI.status === "draft" ? "Edit PI" : "View PI"}
+                <button
+                  onClick={() => {
+                    setShowReview(false);
+                    if (selectedPI.status === "draft") handleEditAndSend(selectedPI);
+                    else _openPIEditor(selectedPI.id);
+                  }}
+                  className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700"
+                >
+                  {selectedPI.status === "draft" ? "Edit & Send" : "View PI"}
                 </button>
               </div>
             </div>

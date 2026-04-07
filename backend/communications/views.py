@@ -296,6 +296,40 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         result['total'] = total
         return Response(result)
 
+    @action(detail=True, methods=['post'], url_path='generate-draft')
+    def generate_draft(self, request, pk=None):
+        """Generate (or return existing) AI draft reply for this communication.
+
+        Used by the AI Draft auto-open flow when navigating from the PI or
+        Inquiries page — if no draft exists yet for the email, one is created
+        on the fly and returned so the modal can open it.
+        """
+        comm = self.get_object()
+        existing = EmailDraft.objects.filter(communication=comm, is_deleted=False).order_by('-created_at').first()
+        if existing:
+            return Response(EmailDraftSerializer(existing).data)
+
+        from .ai_email_service import generate_email_reply
+        from .services import get_client_email_recipients
+        try:
+            reply = generate_email_reply(comm)
+            cc = ''
+            if comm.client:
+                _to, _, cc = get_client_email_recipients(comm.client, source_communication=comm)
+            draft = EmailDraft.objects.create(
+                client=comm.client,
+                communication=comm,
+                subject=reply['subject'],
+                body=reply['body'],
+                to_email=comm.external_email or '',
+                cc=cc,
+                generated_by_ai=True,
+                created_by=request.user,
+            )
+            return Response(EmailDraftSerializer(draft).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class EmailAccountViewSet(viewsets.ModelViewSet):
     serializer_class = EmailAccountSerializer
@@ -453,6 +487,36 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.status = 'sent'
         draft.sent_at = timezone.now()
         draft.save(update_fields=['status', 'sent_at'])
+
+        # Mark the linked QuoteRequest + Quotation as sent so the Inquiries
+        # page shows "Mail Sent" instead of "Enter Rates" for this row.
+        try:
+            qr = QuoteRequest.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+            ).select_related('linked_quotation').first()
+            if qr:
+                if qr.linked_quotation and qr.linked_quotation.status != 'sent':
+                    qr.linked_quotation.status = 'sent'
+                    qr.linked_quotation.sent_at = timezone.now()
+                    qr.linked_quotation.sent_via = 'email'
+                    qr.linked_quotation.save(update_fields=['status', 'sent_at', 'sent_via'])
+                if qr.status != 'converted':
+                    qr.status = 'converted'
+                    qr.save(update_fields=['status'])
+        except Exception as e:
+            _log.warning(f'Could not update QuoteRequest status for sent draft {draft.id}: {e}')
+
+        # Mark any linked Proforma Invoice as sent too
+        try:
+            from finance.models import ProformaInvoice
+            ProformaInvoice.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+                status='draft',
+            ).update(status='sent')
+        except Exception as e:
+            _log.warning(f'Could not update PI status for sent draft {draft.id}: {e}')
 
         # Create outgoing Communication record
         Communication.objects.create(
@@ -648,6 +712,16 @@ class QuoteRequestViewSet(viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(Q(client__in=client_ids) | Q(assigned_to=user))
         return qs
+
+    @action(detail=False, methods=['get'], url_path='count')
+    def count_for_user(self, request):
+        """Count of NEW inquiries the current user can see (role-filtered).
+
+        Used by the header badge — same role filtering as the list endpoint
+        so executives only see counts for their own assigned/visible inquiries.
+        """
+        count = self.get_queryset().filter(status='new').count()
+        return Response({'count': count})
 
     @action(detail=True, methods=['post'], url_path='generate-draft-quote')
     def generate_draft_quote(self, request, pk=None):

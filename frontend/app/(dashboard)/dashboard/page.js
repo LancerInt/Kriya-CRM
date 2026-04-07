@@ -92,7 +92,7 @@ function DashboardContent({ s, router, label }) {
           <div className="w-10 h-10 rounded-full bg-purple-200 flex items-center justify-center"><span className="text-lg">✏️</span></div>
           <div><p className="text-2xl font-bold text-purple-800">{s.draft_emails || 0}</p><p className="text-xs text-purple-600">Pending AI Drafts</p></div>
         </div>
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-orange-100" onClick={() => router.push("/quotations")}>
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-orange-200 flex items-center justify-center"><span className="text-lg">📋</span></div>
           <div><p className="text-2xl font-bold text-orange-800">{s.quotations_summary?.pending_approval || 0}</p><p className="text-xs text-orange-600">Pending Approval</p></div>
         </div>
@@ -146,7 +146,6 @@ function DashboardContent({ s, router, label }) {
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-800">Quotations</h2>
-            <button onClick={() => router.push("/quotations")} className="text-xs text-indigo-600 font-medium">View All</button>
           </div>
           <div className="grid grid-cols-4 gap-3 mb-4">
             {[

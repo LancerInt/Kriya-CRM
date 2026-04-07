@@ -8,6 +8,9 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { sendWithUndo } from "@/lib/undoSend";
+import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
+import PIEditorModal from "@/components/finance/PIEditorModal";
+import RichTextEditor from "@/components/ui/RichTextEditor";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -87,6 +90,13 @@ export default function CommunicationDetailPage() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [savedAttachments, setSavedAttachments] = useState([]);
+
+  // Quotation/PI editor state — same as the AI Draft modal flow on the client page
+  const [attachQt, setAttachQt] = useState(null);
+  const [attachQtForm, setAttachQtForm] = useState({});
+  const [attachQtItems, setAttachQtItems] = useState([]);
+  const [attachPi, setAttachPi] = useState(null);
+  const [attachMode, setAttachMode] = useState(null); // 'quote' | 'pi' | null
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -314,26 +324,52 @@ export default function CommunicationDetailPage() {
       {comm.comm_type === "email" && thread.length > 0 && thread[thread.length - 1].direction === "inbound" && (
         <div className="mt-6">
           {!showReply ? (
-            <button onClick={() => {
+            <button onClick={async () => {
               const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
-              const subj = comm.subject || "";
-              setReplySubject(subj.startsWith("Re:") ? subj : `Re: ${subj}`);
-              // Build CC from client contacts + admin/manager
-              if (comm.client) {
-                api.get(`/clients/${comm.client}/`).then(r => {
+              setShowReply(true);
+
+              // Auto-load AI draft body + subject + cc + attachments. If no
+              // draft exists yet for this email, generate one on the fly.
+              let draft = null;
+              try {
+                const drafts = await api.get(`/communications/drafts/`, { params: { communication: lastInbound.id } });
+                const list = drafts.data?.results || drafts.data || [];
+                draft = list.find(d => d.status === "draft") || list[0] || null;
+                if (!draft) {
+                  try {
+                    const r = await api.post(`/communications/${lastInbound.id}/generate-draft/`);
+                    draft = r.data;
+                  } catch {}
+                }
+              } catch {}
+
+              if (draft) {
+                setReplySubject(draft.subject || (comm.subject?.startsWith("Re:") ? comm.subject : `Re: ${comm.subject || ""}`));
+                setReplyBody(draft.body || "");
+                if (draft.cc) setReplyCc(draft.cc);
+                setReplyDraftId(draft.id);
+                setSavedAttachments(draft.attachments || []);
+                setLastSavedAt(draft.last_saved_at);
+              } else {
+                const subj = comm.subject || "";
+                setReplySubject(subj.startsWith("Re:") ? subj : `Re: ${subj}`);
+              }
+
+              // Build CC from client contacts + admin/manager (only if draft didn't supply one)
+              if (comm.client && !draft?.cc) {
+                try {
+                  const r = await api.get(`/clients/${comm.client}/`);
                   const contacts = r.data.contacts || [];
                   const toEmail = lastInbound.external_email || "";
                   const otherEmails = contacts.map(c => c.email).filter(e => e && e.toLowerCase() !== toEmail.toLowerCase());
-                  api.get("/auth/users/").then(ur => {
-                    const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
-                    const allCc = [...otherEmails];
-                    admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
-                    setReplyCc(allCc.join(", "));
-                  }).catch(() => {});
-                }).catch(() => {});
+                  const ur = await api.get("/auth/users/");
+                  const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
+                  const allCc = [...otherEmails];
+                  admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
+                  setReplyCc(allCc.join(", "));
+                } catch {}
               }
               if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
-              setShowReply(true);
             }} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
               Reply to this conversation
@@ -373,10 +409,15 @@ export default function CommunicationDetailPage() {
                   <input value={replySubject} onChange={(e) => setReplySubject(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                 </div>
 
-                {/* Body */}
+                {/* Body — rich text editor (same as AI Draft modal) */}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Body</label>
-                  <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)} rows={8} placeholder="Write your reply..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono" />
+                  <RichTextEditor
+                    value={replyBody}
+                    onChange={(val) => setReplyBody(val)}
+                    placeholder="Write your reply..."
+                    minHeight="200px"
+                  />
                 </div>
 
                 {/* Attachments */}
@@ -426,46 +467,74 @@ export default function CommunicationDetailPage() {
                 <div className="px-5"><p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p></div>
               )}
 
-              {/* Smart Generate Buttons — generate doc + attach PDF to reply */}
+              {/* Smart Generate Buttons — open editor (pre-filled from email),
+                  let user edit/preview, then attach the final PDF.
+                  Same flow as the AI Draft modal on the client page. */}
               {(() => {
                 const allText = thread.map(m => `${m.subject || ""} ${m.body || ""}`).join(" ").toLowerCase();
                 const wantsQuote = /quotation|quote|pricing|price list|rate card|rates/i.test(allText);
                 const wantsPI = /proforma invoice|proforma|performa|PI\b|send PI|need PI/i.test(allText);
                 if ((!wantsQuote && !wantsPI) || !comm.client) return null;
 
-                const generateAndAttach = async (type) => {
+                // Disable each button if a matching PDF is already attached
+                const allNames = [
+                  ...savedAttachments.map(a => (a.filename || "").toLowerCase()),
+                  ...attachments.map(a => (a.name || "").toLowerCase()),
+                ];
+                const hasQuoteAttached = allNames.some(n => n.startsWith("quotation_"));
+                const hasPiAttached = allNames.some(n => n.startsWith("pi_"));
+
+                const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+
+                const openQuoteEditor = async () => {
                   try {
-                    let docId, pdfUrl, filename;
-                    if (type === "quote") {
-                      const res = await api.post("/quotations/quotations/create-blank/", { client_id: comm.client });
-                      docId = res.data.id;
-                      filename = `Quotation_${res.data.quotation_number.replace(/\//g, "-")}.pdf`;
-                      pdfUrl = `/quotations/quotations/${docId}/generate-pdf/`;
-                      toast.success(`Quotation ${res.data.quotation_number} created`);
-                    } else {
-                      const res = await api.post("/finance/pi/create-standalone/", { client_id: comm.client });
-                      docId = res.data.id;
-                      filename = `PI_${res.data.invoice_number.replace(/\//g, "-")}.pdf`;
-                      pdfUrl = `/finance/pi/${docId}/generate-pdf/`;
-                      toast.success(`PI ${res.data.invoice_number} created`);
-                    }
-                    const pdfRes = await api.get(pdfUrl, { responseType: "blob" });
-                    const file = new File([pdfRes.data], filename, { type: "application/pdf" });
-                    setAttachments(prev => [...prev, file]);
-                    toast.success(`${filename} attached to reply`);
-                  } catch { toast.error(`Failed to generate ${type === "quote" ? "quotation" : "PI"}`); }
+                    // Pass the source communication so the backend AI-extracts
+                    // product/quantity/price and pre-fills the line item.
+                    const res = await api.post("/quotations/quotations/create-blank/", {
+                      client_id: comm.client,
+                      communication_id: lastInbound.id,
+                    });
+                    const qt = res.data;
+                    setAttachQt(qt);
+                    setAttachQtForm(qt);
+                    setAttachQtItems(qt.items || []);
+                    setAttachMode("quote");
+                    toast.success(`Quotation ${qt.quotation_number} created — edit and attach`);
+                  } catch { toast.error("Failed to create quotation"); }
+                };
+
+                const openPiEditor = async () => {
+                  try {
+                    const res = await api.post("/finance/pi/create-standalone/", {
+                      client_id: comm.client,
+                      communication_id: lastInbound.id,
+                    });
+                    setAttachPi(res.data);
+                    setAttachMode("pi");
+                    toast.success(`PI ${res.data.invoice_number} created — edit and attach`);
+                  } catch { toast.error("Failed to create PI"); }
                 };
 
                 return (
                   <div className="px-5 py-2 flex gap-2">
                     {wantsQuote && (
-                      <button onClick={() => generateAndAttach("quote")} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100">
-                        📋 Generate &amp; Attach Quotation
+                      <button
+                        onClick={openQuoteEditor}
+                        disabled={hasQuoteAttached}
+                        title={hasQuoteAttached ? "A quotation is already attached" : ""}
+                        className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-teal-50 hover:bg-teal-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal-50"
+                      >
+                        📋 Generate Quotation
                       </button>
                     )}
                     {wantsPI && (
-                      <button onClick={() => generateAndAttach("pi")} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100">
-                        📄 Generate &amp; Attach PI
+                      <button
+                        onClick={openPiEditor}
+                        disabled={hasPiAttached}
+                        title={hasPiAttached ? "A proforma invoice is already attached" : ""}
+                        className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-50"
+                      >
+                        📄 Generate PI
                       </button>
                     )}
                   </div>
@@ -511,29 +580,54 @@ export default function CommunicationDetailPage() {
                   </button>
                 </div>
                 <button onClick={async () => {
-                  const toEmail = ([...thread].reverse().find(m => m.direction === "inbound") || comm).external_email;
+                  const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+                  const toEmail = lastInbound.external_email;
                   if (!toEmail) { toast.error("No recipient email"); return; }
                   if (!replyBody.trim()) { toast.error("Write a reply first"); return; }
-                  if (!selectedAccount) { toast.error("Select an email account"); return; }
 
-                  const fd = new FormData();
-                  fd.append("email_account", selectedAccount);
-                  fd.append("to", toEmail);
-                  fd.append("subject", replySubject);
-                  fd.append("body", replyBody);
-                  if (replyCc) fd.append("cc", replyCc);
-                  if (comm.client) fd.append("client", comm.client);
-                  attachments.forEach(f => fd.append("attachments", f));
-
-                  setShowReply(false);
-                  sendWithUndo(
-                    () => api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } }),
-                    {
-                      preview: { to: toEmail, cc: replyCc, subject: replySubject, body: replyBody },
-                      onSent: () => { setReplyBody(""); setAttachments([]); loadThread(); toast.success("Reply sent!"); },
-                      onError: (err) => toast.error(getErrorMessage(err, "Failed to send")),
+                  // Route through the EmailDraft.send endpoint so the same
+                  // post-send hooks fire (markdown→HTML conversion, marking
+                  // QuoteRequest/Quotation/ProformaInvoice as sent, etc.).
+                  try {
+                    let draftId = replyDraftId;
+                    if (!draftId) {
+                      // Create a draft first
+                      const created = await api.post("/communications/drafts/", {
+                        communication: lastInbound.id,
+                        client: comm.client || null,
+                        subject: replySubject,
+                        body: replyBody,
+                        to_email: toEmail,
+                        cc: replyCc,
+                      });
+                      draftId = created.data.id;
+                      setReplyDraftId(draftId);
                     }
-                  );
+                    // Save current state + any new attachments
+                    const fd = new FormData();
+                    fd.append("subject", replySubject);
+                    fd.append("body", replyBody);
+                    fd.append("cc", replyCc || "");
+                    attachments.forEach(f => fd.append("attachments", f));
+                    await api.post(`/communications/drafts/${draftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+
+                    setShowReply(false);
+                    sendWithUndo(
+                      () => api.post(`/communications/drafts/${draftId}/send/`),
+                      {
+                        preview: { to: toEmail, cc: replyCc, subject: replySubject, body: replyBody },
+                        onSent: () => {
+                          setReplyBody(""); setReplyCc(""); setAttachments([]); setSavedAttachments([]);
+                          setReplyDraftId(null); setLastSavedAt(null);
+                          loadThread();
+                          toast.success("Reply sent!");
+                        },
+                        onError: (err) => toast.error(getErrorMessage(err, "Failed to send")),
+                      }
+                    );
+                  } catch (err) {
+                    toast.error(getErrorMessage(err, "Failed to send"));
+                  }
                 }} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                   Send Reply
                 </button>
@@ -542,6 +636,100 @@ export default function CommunicationDetailPage() {
           )}
         </div>
       )}
+
+      {/* Quotation Editor Modal — same flow as the AI Draft modal on client page */}
+      <QuotationEditorModal
+        open={attachMode === "quote" && !!attachQt}
+        onClose={() => { setAttachMode(null); setAttachQt(null); }}
+        qt={attachQt} qtForm={attachQtForm} setQtForm={setAttachQtForm}
+        qtItems={attachQtItems} setQtItems={setAttachQtItems}
+        sendLabel="Attach to Reply"
+        onSave={async () => {
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            const res = await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            setAttachQt(res.data); setAttachQtForm(res.data); setAttachQtItems(res.data.items || []);
+            toast.success("Quotation saved");
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+        }}
+        onPreview={async () => {
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            const res = await api.get(`/quotations/quotations/${attachQt.id}/generate-pdf/`, { responseType: "blob" });
+            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+            const w = window.open("", "_blank");
+            if (w) { w.document.write(`<html><body style="margin:0"><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+          } catch { toast.error("Failed to preview"); }
+        }}
+        onSend={async () => {
+          // "Attach to Reply" — save, generate PDF, push it into reply attachments
+          if (!attachQt) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
+            const pdfRes = await api.get(`/quotations/quotations/${attachQt.id}/generate-pdf/`, { responseType: "blob" });
+            const filename = `Quotation_${attachQt.quotation_number.replace(/\//g, "-")}.pdf`;
+            const file = new File([pdfRes.data], filename, { type: "application/pdf" });
+            setAttachments(prev => [...prev, file]);
+            setAttachMode(null); setAttachQt(null);
+            toast.success(`${filename} attached to reply`);
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to attach")); }
+        }}
+      />
+
+      {/* PI Editor Modal */}
+      <PIEditorModal
+        open={attachMode === "pi" && !!attachPi}
+        onClose={() => { setAttachMode(null); setAttachPi(null); }}
+        pi={attachPi}
+        piForm={attachPi || {}}
+        setPiForm={(updater) => setAttachPi(typeof updater === "function" ? updater(attachPi) : updater)}
+        piItems={attachPi?.items || []}
+        setPiItems={(items) => setAttachPi(prev => ({ ...prev, items: typeof items === "function" ? items(prev?.items || []) : items }))}
+        sendLabel="Attach to Reply"
+        onSave={async () => {
+          if (!attachPi) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachPi).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            const res = await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, display_overrides, items: attachPi.items });
+            setAttachPi(res.data);
+            toast.success("PI saved");
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to save")); }
+        }}
+        onPreview={async () => {
+          if (!attachPi) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachPi).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, display_overrides, items: attachPi.items });
+            const res = await api.get(`/finance/pi/${attachPi.id}/generate-pdf/`, { responseType: "blob" });
+            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+            const w = window.open("", "_blank");
+            if (w) { w.document.write(`<html><body style="margin:0"><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+          } catch { toast.error("Failed to preview"); }
+        }}
+        onSend={async () => {
+          if (!attachPi) return;
+          try {
+            const display_overrides = {};
+            Object.entries(attachPi).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
+            await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, display_overrides, items: attachPi.items });
+            const pdfRes = await api.get(`/finance/pi/${attachPi.id}/generate-pdf/`, { responseType: "blob" });
+            const filename = `PI_${attachPi.invoice_number.replace(/\//g, "-")}.pdf`;
+            const file = new File([pdfRes.data], filename, { type: "application/pdf" });
+            setAttachments(prev => [...prev, file]);
+            setAttachMode(null); setAttachPi(null);
+            toast.success(`${filename} attached to reply`);
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to attach")); }
+        }}
+      />
     </div>
   );
 }

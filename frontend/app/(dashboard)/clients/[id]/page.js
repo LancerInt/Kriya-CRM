@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
@@ -544,6 +544,83 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setShowDraftModal(true);
     } catch { toast.error("Failed to load draft"); }
   };
+
+  // Auto-open AI Draft modal when arriving from /quote-requests or
+  // /proforma-invoices. Two query-param flavours are supported:
+  //   ?openDraftFor=<communication_id>  → open the draft for that email
+  //   ?openPI=<pi_id>                   → resolve PI → its source comm → draft
+  // Once opened, strip the query param so a refresh doesn't keep re-opening it.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    const commId = searchParams.get("openDraftFor");
+    const piId = searchParams.get("openPI");
+    if (!commId && !piId) return;
+    if (showDraftModal) return;
+    autoOpenedRef.current = true;
+
+    const openDraftForComm = async (commIdToOpen) => {
+      let comm = (data || []).find((c) => String(c.id) === String(commIdToOpen));
+      if (!comm) {
+        try {
+          const r = await api.get(`/communications/${commIdToOpen}/`);
+          comm = r.data;
+        } catch { return false; }
+      }
+      if (!comm) return false;
+      if (comm.draft_id) {
+        await openDraft(comm.draft_id);
+        return true;
+      }
+      // No draft exists yet — create one on the fly
+      try {
+        const r = await api.post(`/communications/${commIdToOpen}/generate-draft/`);
+        if (r.data?.id) {
+          await openDraft(r.data.id);
+          return true;
+        }
+      } catch {}
+      return false;
+    };
+
+    (async () => {
+      try {
+        let resolvedCommId = commId;
+
+        // PI flow: fetch the PI, fall back to latest inbound for the client
+        if (piId && !resolvedCommId) {
+          try {
+            const r = await api.get(`/finance/pi/${piId}/`);
+            resolvedCommId = r.data?.source_communication || null;
+          } catch {}
+          if (!resolvedCommId) {
+            // Find the latest inbound email for this client
+            try {
+              const r = await api.get("/communications/", {
+                params: { client: clientId, comm_type: "email", direction: "inbound" },
+              });
+              const list = r.data?.results || r.data || [];
+              if (list.length > 0) resolvedCommId = list[0].id;
+            } catch {}
+          }
+        }
+
+        if (!resolvedCommId) {
+          toast.error("No related email found for this item");
+          return;
+        }
+
+        const ok = await openDraftForComm(resolvedCommId);
+        if (!ok) toast.error("Could not open AI draft for that email");
+      } catch {
+        toast.error("Could not open AI draft");
+      } finally {
+        router.replace(`/clients/${clientId}`, { scroll: false });
+      }
+    })();
+  }, [data, searchParams, showDraftModal]);
 
   const handleSaveDraft = async () => {
     if (!draft) return;
@@ -2225,11 +2302,17 @@ function DocumentsTab({ clientId, activeTab }) {
 // ── Main Page ──
 export default function ClientDetailPage() {
   const { id } = useParams();
+  const searchParams = useSearchParams();
   const [client, setClient] = useState(null);
   const [timeline, setTimeline] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  // If we arrived via ?openDraftFor=<comm_id> (Inquiries "Enter Rates")
+  // or ?openPI=<pi_id> (Proforma Invoices "Edit & Send"), start on the
+  // Communications tab so CommunicationsTab can auto-open the AI Draft modal.
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get("openDraftFor") || searchParams.get("openPI") ? "communications" : "overview"
+  );
 
   const loadClient = useCallback(() => {
     Promise.all([

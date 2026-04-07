@@ -133,6 +133,15 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
             qs = qs.filter(Q(client__in=client_ids) | Q(created_by=user))
         return qs
+
+    @action(detail=False, methods=['get'], url_path='count')
+    def count_for_user(self, request):
+        """Count of DRAFT quotations the current user can see (role-filtered).
+
+        Used by the header badge — same role filtering as the list endpoint.
+        """
+        count = self.get_queryset().filter(status='draft').count()
+        return Response({'count': count})
     def get_serializer_class(self):
         if self.action in ['create']:
             return QuotationCreateSerializer

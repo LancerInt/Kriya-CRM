@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -42,6 +43,7 @@ function stripHtml(html) {
 }
 
 export default function QuoteRequestsPage() {
+  const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedQR, setSelectedQR] = useState(null);
@@ -94,6 +96,18 @@ export default function QuoteRequestsPage() {
   const handleReview = (qr) => {
     setSelectedQR(qr);
     setShowReview(true);
+  };
+
+  // "Enter Rates" — navigate to the client's Communications tab and auto-open
+  // the AI Draft Reply modal for the source email. The Generate Quotation
+  // button inside that modal lets the user open the editor with values
+  // pre-filled from the email.
+  const handleEnterRates = (qr) => {
+    if (!qr.client) {
+      toast.error("This inquiry has no client linked yet");
+      return;
+    }
+    router.push(`/clients/${qr.client}?openDraftFor=${qr.source_communication}`);
   };
 
   const handleGenerateQuote = async (qr) => {
@@ -262,13 +276,13 @@ export default function QuoteRequestsPage() {
                     {qr.linked_quotation_status === "sent" ? (
                       <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Mail Sent</span>
                     ) : (
-                      <button onClick={(e) => { e.stopPropagation(); handleOpenQuote(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                      <button onClick={(e) => { e.stopPropagation(); handleEnterRates(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
                     )}
                   </>
                 ) : (
                   <>
                     <span className="text-xs text-gray-400">No quotation linked</span>
-                    <button onClick={(e) => { e.stopPropagation(); handleGenerateQuote(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleEnterRates(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
                   </>
                 )}
               </div>
@@ -331,7 +345,7 @@ export default function QuoteRequestsPage() {
                 {selectedQR.linked_quotation_status === "sent" ? (
                   <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg">Mail Sent</span>
                 ) : (
-                  <button onClick={() => handleOpenQuote(selectedQR)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">Open & Enter Rates</button>
+                  <button onClick={() => handleEnterRates(selectedQR)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">Open & Enter Rates</button>
                 )}
               </div>
             )}
@@ -344,12 +358,10 @@ export default function QuoteRequestsPage() {
                 )}
               </div>
               <div className="flex gap-2">
-                {!selectedQR.linked_quotation ? (
-                  <button onClick={() => handleGenerateQuote(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Generate Draft Quote</button>
-                ) : selectedQR.linked_quotation_status === "sent" ? (
+                {selectedQR.linked_quotation_status === "sent" ? (
                   <span className="px-4 py-2 bg-green-100 text-green-700 text-sm font-medium rounded-lg">Mail Sent</span>
                 ) : (
-                  <button onClick={() => handleOpenQuote(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Open & Enter Rates</button>
+                  <button onClick={() => handleEnterRates(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Open AI Draft & Enter Rates</button>
                 )}
               </div>
             </div>
