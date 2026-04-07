@@ -156,7 +156,19 @@ class EmailService:
 
     @staticmethod
     def send_email(email_account, to, subject, body_html, cc=None, bcc=None, attachments=None):
-        """Send email via SMTP. Returns Message-ID on success."""
+        """Send email via SMTP. Returns Message-ID on success.
+
+        MIME structure:
+            multipart/mixed                 (only when file attachments exist)
+              ├── text/html                 (the rendered email)
+              └── application/octet-stream  (PDF attachments, etc.)
+
+        The signature is text-only HTML — no inline images. Embedding any
+        image as a related cid: part causes Gmail to show an attachment chip
+        in the inbox preview (even with no filename + Content-Disposition:
+        inline). If you want a logo in the signature, host it at a public
+        HTTPS URL and set settings.SIGNATURE_LOGO_URL.
+        """
         from common.encryption import decrypt_value
         from email.mime.base import MIMEBase
         from email import encoders
@@ -169,7 +181,8 @@ class EmailService:
         if cc:
             msg['Cc'] = cc
 
-        msg.attach(MIMEText(body_html, 'html'))
+        # HTML body — no related multipart wrapper, no inline images
+        msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))
 
         # Attach files
         if attachments:

@@ -159,3 +159,13 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
+# Email signature logo — must be a publicly reachable HTTPS/HTTP URL so Gmail
+# can proxy it through its image cache. Embedding via cid:/data: causes Gmail
+# to show an attachment chip in the inbox preview, so we use a hosted URL.
+# Default is the raw GitHub URL of frontend/public/logo.png so it works out
+# of the box. Override via SIGNATURE_LOGO_URL env var if you move the file.
+SIGNATURE_LOGO_URL = os.getenv(
+    'SIGNATURE_LOGO_URL',
+    'https://raw.githubusercontent.com/LancerInt/Kriya-CRM/main/frontend/public/logo.png',
+)

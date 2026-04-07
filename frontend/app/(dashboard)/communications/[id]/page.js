@@ -11,6 +11,7 @@ import { sendWithUndo } from "@/lib/undoSend";
 import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import PIEditorModal from "@/components/finance/PIEditorModal";
 import RichTextEditor from "@/components/ui/RichTextEditor";
+import EmailChips from "@/components/ui/EmailChips";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -108,12 +109,135 @@ export default function CommunicationDetailPage() {
       .finally(() => setLoading(false));
   };
 
+  // Track which specific message in the thread we're replying to
+  const [replyTargetId, setReplyTargetId] = useState(null);
+  // Refs to each message card for scroll-into-view
+  const messageRefs = useRef({});
+
+  // Open the Reply form and auto-load the AI draft (subject/body/cc/attachments).
+  // `targetMsg` is the specific message the user wants to reply to. For
+  // inbound messages we look up the AI draft. For outbound messages there's
+  // no AI draft (we wrote the original) — we still open a fresh reply form
+  // so the user can compose a follow-up to themselves' last message.
+  const openReply = async (currentComm, currentThread, targetMsg = null) => {
+    const target = targetMsg
+      || [...currentThread].reverse().find(m => m.direction === "inbound")
+      || currentThread[currentThread.length - 1]
+      || currentComm;
+    setShowReply(true);
+    setReplyTargetId(target.id);
+    // Reset state in case we're switching between targets
+    setSavedAttachments([]);
+    setAttachments([]);
+    setReplyDraftId(null);
+
+    // For OUTBOUND targets (we're following up on a message we sent ourselves),
+    // ask the backend to generate AI follow-up content — a polite nudge that
+    // references the original message but uses a different tone than a reply.
+    if (target.direction === "outbound") {
+      const subj = (target.subject || currentComm.subject || "");
+      // Show an immediate placeholder so the UI doesn't look broken while AI generates
+      setReplySubject(subj.toLowerCase().startsWith("follow up") || subj.toLowerCase().startsWith("re:") ? subj : `Follow up: ${subj}`);
+      setReplyBody("");
+      try {
+        const r = await api.post(`/communications/${target.id}/generate-followup/`);
+        if (r.data?.subject) setReplySubject(r.data.subject);
+        if (r.data?.body) setReplyBody(r.data.body);
+      } catch {
+        toast.error("Could not generate follow-up content");
+      }
+      // Build CC the same way the inbound path does
+      if (currentComm.client) {
+        try {
+          const r = await api.get(`/clients/${currentComm.client}/`);
+          const contacts = r.data.contacts || [];
+          const toEmail = target.external_email || "";
+          const otherEmails = contacts.map(c => c.email).filter(e => e && e.toLowerCase() !== toEmail.toLowerCase());
+          const ur = await api.get("/auth/users/");
+          const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
+          const allCc = [...otherEmails];
+          admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
+          setReplyCc(allCc.join(", "));
+        } catch {}
+      }
+      return;
+    }
+
+    // INBOUND target — auto-load AI draft for this specific message. If no
+    // draft exists yet, generate one on the fly.
+    let draft = null;
+    try {
+      const drafts = await api.get(`/communications/drafts/`, { params: { communication: target.id } });
+      const list = drafts.data?.results || drafts.data || [];
+      draft = list.find(d => d.status === "draft") || list[0] || null;
+      if (!draft) {
+        try {
+          const r = await api.post(`/communications/${target.id}/generate-draft/`);
+          draft = r.data;
+        } catch {}
+      }
+    } catch {}
+
+    if (draft) {
+      setReplySubject(draft.subject || (target.subject?.startsWith("Re:") ? target.subject : `Re: ${target.subject || currentComm.subject || ""}`));
+      setReplyBody(draft.body || "");
+      if (draft.cc) setReplyCc(draft.cc);
+      setReplyDraftId(draft.id);
+      setSavedAttachments(draft.attachments || []);
+      setLastSavedAt(draft.last_saved_at);
+    } else {
+      const subj = (target.subject || currentComm.subject || "");
+      setReplySubject(subj.startsWith("Re:") ? subj : `Re: ${subj}`);
+    }
+
+    // Build CC from client contacts + admin/manager (only if draft didn't supply one)
+    if (currentComm.client && !draft?.cc) {
+      try {
+        const r = await api.get(`/clients/${currentComm.client}/`);
+        const contacts = r.data.contacts || [];
+        const toEmail = target.external_email || "";
+        const otherEmails = contacts.map(c => c.email).filter(e => e && e.toLowerCase() !== toEmail.toLowerCase());
+        const ur = await api.get("/auth/users/");
+        const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
+        const allCc = [...otherEmails];
+        admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
+        setReplyCc(allCc.join(", "));
+      } catch {}
+    }
+  };
+
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     loadThread();
     api.get("/communications/email-accounts/").then(r => setEmailAccounts(r.data.results || r.data)).catch(() => {});
   }, [id]);
+
+  // Clicking a mail row in the list = "I want to reply to this specific mail".
+  // After the thread loads:
+  //   1) scroll the clicked message into view (using its id from the URL)
+  //   2) if it's inbound, auto-open the reply form targeted at that message
+  const autoOpenedReplyRef = useRef(null);
+  useEffect(() => {
+    if (!comm || !thread.length) return;
+    if (autoOpenedReplyRef.current === id) return;
+
+    // Scroll the clicked message into view
+    const target = thread.find((m) => m.id === comm.id) || comm;
+    requestAnimationFrame(() => {
+      const el = messageRefs.current[target.id];
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    if (showReply) return;
+    if (comm.comm_type !== "email") return;
+    // Only auto-open the reply form when we're being asked to respond — i.e.
+    // the targeted message is inbound. For outbound targets we just scroll.
+    if (target.direction !== "inbound") return;
+    autoOpenedReplyRef.current = id;
+    if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
+    openReply(comm, thread, target);
+  }, [comm, thread, emailAccounts]);
 
   // Voice to Text
   const handleVoiceToText = () => {
@@ -157,9 +281,16 @@ export default function CommunicationDetailPage() {
 
   // Save as Draft
   const handleSaveReplyDraft = async () => {
-    const lastInbound = [...thread].reverse().find(m => m.direction === "inbound");
-    if (!lastInbound) { toast.error("No inbound message"); return; }
-    const toEmail = lastInbound.external_email || "";
+    // Same target resolution as the Send button:
+    //   1) explicit replyTargetId (user clicked Reply / Follow up)
+    //   2) latest inbound message
+    //   3) the current communication itself
+    const targetMsg =
+      (replyTargetId && thread.find(m => m.id === replyTargetId)) ||
+      [...thread].reverse().find(m => m.direction === "inbound") ||
+      comm;
+    const toEmail = targetMsg.external_email || comm.external_email || "";
+    if (!toEmail) { toast.error("No recipient email"); return; }
     setSavingDraft(true);
     try {
       if (replyDraftId) {
@@ -175,8 +306,8 @@ export default function CommunicationDetailPage() {
         setLastSavedAt(res.data.last_saved_at);
         toast.success("Draft saved");
       } else {
-        // Create new draft
-        const payload = { communication: lastInbound.id, client: comm.client || null, subject: replySubject, body: replyBody, to_email: toEmail, cc: replyCc };
+        // Create new draft tied to the message we're responding to
+        const payload = { communication: targetMsg.id, client: comm.client || null, subject: replySubject, body: replyBody, to_email: toEmail, cc: replyCc };
         const res = await api.post("/communications/drafts/", payload);
         setReplyDraftId(res.data.id);
         // Now save attachments if any
@@ -203,7 +334,7 @@ export default function CommunicationDetailPage() {
       try { await api.post(`/communications/drafts/${replyDraftId}/discard/`); } catch {}
     }
     setReplyBody(""); setReplyCc(""); setReplySubject(""); setAttachments([]); setSavedAttachments([]);
-    setReplyDraftId(null); setLastSavedAt(null); setShowReply(false);
+    setReplyDraftId(null); setLastSavedAt(null); setShowReply(false); setReplyTargetId(null);
     toast.success("Reply discarded");
   };
 
@@ -218,7 +349,9 @@ export default function CommunicationDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (!comm) return null;
 
-  const isCurrentMsg = (msg) => msg.id === comm.id;
+  // The "current" message is the one the user is actively replying to (if the
+  // reply form is open) or the one they navigated in to from the list.
+  const isCurrentMsg = (msg) => msg.id === (replyTargetId || comm.id);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -240,7 +373,11 @@ export default function CommunicationDetailPage() {
       {/* Thread */}
       <div className="space-y-4">
         {thread.map((msg, i) => (
-          <div key={msg.id} className={`bg-white rounded-xl border overflow-hidden ${isCurrentMsg(msg) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-gray-200"}`}>
+          <div
+            key={msg.id}
+            ref={(el) => { if (el) messageRefs.current[msg.id] = el; }}
+            className={`bg-white rounded-xl border overflow-hidden transition-shadow ${isCurrentMsg(msg) ? "border-indigo-400 ring-2 ring-indigo-100 shadow-md" : "border-gray-200"}`}
+          >
             {/* Message header */}
             <div className={`px-5 py-3 border-b ${msg.direction === "inbound" ? "bg-blue-50/50 border-blue-100" : "bg-green-50/50 border-green-100"}`}>
               <div className="flex items-start justify-between">
@@ -262,13 +399,32 @@ export default function CommunicationDetailPage() {
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right flex flex-col items-end gap-1">
                   <p className="text-xs text-gray-400">
                     {(() => { try { return format(new Date(msg.created_at), "MMM d, yyyy h:mm a"); } catch { return "—"; } })()}
                   </p>
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${msg.direction === "inbound" ? "text-blue-700 bg-blue-100" : "text-green-700 bg-green-100"}`}>
-                    {msg.direction === "inbound" ? "Received" : "Sent"}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${msg.direction === "inbound" ? "text-blue-700 bg-blue-100" : "text-green-700 bg-green-100"}`}>
+                      {msg.direction === "inbound" ? "Received" : "Sent"}
+                    </span>
+                    {msg.comm_type === "email" && (
+                      <button
+                        onClick={() => {
+                          if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
+                          openReply(comm, thread, msg);
+                          requestAnimationFrame(() => {
+                            const el = document.getElementById("reply-form-anchor");
+                            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          });
+                        }}
+                        className="text-[10px] font-medium px-2 py-0.5 rounded text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 flex items-center gap-1"
+                        title={msg.direction === "inbound" ? "Reply to this message" : "Follow up on this sent message"}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                        {msg.direction === "inbound" ? "Reply" : "Follow up"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -320,56 +476,16 @@ export default function CommunicationDetailPage() {
         </div>
       )}
 
-      {/* Reply Section — only show if last message in thread is inbound (awaiting reply) */}
-      {comm.comm_type === "email" && thread.length > 0 && thread[thread.length - 1].direction === "inbound" && (
+      <div id="reply-form-anchor" />
+
+      {/* Reply Section — show if last message in thread is inbound (awaiting reply)
+          OR if the user explicitly clicked Reply / Follow up on a specific message */}
+      {comm.comm_type === "email" && thread.length > 0 && (showReply || thread[thread.length - 1].direction === "inbound") && (
         <div className="mt-6">
           {!showReply ? (
-            <button onClick={async () => {
-              const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
-              setShowReply(true);
-
-              // Auto-load AI draft body + subject + cc + attachments. If no
-              // draft exists yet for this email, generate one on the fly.
-              let draft = null;
-              try {
-                const drafts = await api.get(`/communications/drafts/`, { params: { communication: lastInbound.id } });
-                const list = drafts.data?.results || drafts.data || [];
-                draft = list.find(d => d.status === "draft") || list[0] || null;
-                if (!draft) {
-                  try {
-                    const r = await api.post(`/communications/${lastInbound.id}/generate-draft/`);
-                    draft = r.data;
-                  } catch {}
-                }
-              } catch {}
-
-              if (draft) {
-                setReplySubject(draft.subject || (comm.subject?.startsWith("Re:") ? comm.subject : `Re: ${comm.subject || ""}`));
-                setReplyBody(draft.body || "");
-                if (draft.cc) setReplyCc(draft.cc);
-                setReplyDraftId(draft.id);
-                setSavedAttachments(draft.attachments || []);
-                setLastSavedAt(draft.last_saved_at);
-              } else {
-                const subj = comm.subject || "";
-                setReplySubject(subj.startsWith("Re:") ? subj : `Re: ${subj}`);
-              }
-
-              // Build CC from client contacts + admin/manager (only if draft didn't supply one)
-              if (comm.client && !draft?.cc) {
-                try {
-                  const r = await api.get(`/clients/${comm.client}/`);
-                  const contacts = r.data.contacts || [];
-                  const toEmail = lastInbound.external_email || "";
-                  const otherEmails = contacts.map(c => c.email).filter(e => e && e.toLowerCase() !== toEmail.toLowerCase());
-                  const ur = await api.get("/auth/users/");
-                  const admMgr = (ur.data.results || ur.data).filter(u => u.email && (u.role === "admin" || u.role === "manager")).map(u => u.email);
-                  const allCc = [...otherEmails];
-                  admMgr.forEach(e => { if (!allCc.includes(e) && e.toLowerCase() !== toEmail.toLowerCase()) allCc.push(e); });
-                  setReplyCc(allCc.join(", "));
-                } catch {}
-              }
+            <button onClick={() => {
               if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
+              openReply(comm, thread);
             }} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
               Reply to this conversation
@@ -378,7 +494,7 @@ export default function CommunicationDetailPage() {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-700">Reply</span>
-                <button onClick={() => setShowReply(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                <button onClick={() => { setShowReply(false); setReplyTargetId(null); }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
               </div>
 
               <div className="px-5 py-3 space-y-3">
@@ -399,7 +515,11 @@ export default function CommunicationDetailPage() {
                   </div>
                   <div className="flex-1">
                     <label className="block text-xs font-medium text-gray-500 mb-1">CC</label>
-                    <input value={replyCc} onChange={(e) => setReplyCc(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <EmailChips
+                      value={replyCc}
+                      onChange={(val) => setReplyCc(val)}
+                      placeholder="Add CC recipients..."
+                    />
                   </div>
                 </div>
 
@@ -580,8 +700,19 @@ export default function CommunicationDetailPage() {
                   </button>
                 </div>
                 <button onClick={async () => {
-                  const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
-                  const toEmail = lastInbound.external_email;
+                  // Find the message we're replying to. Priority:
+                  //   1) the explicit replyTargetId set when the user clicked
+                  //      Reply / Follow up on a specific message
+                  //   2) the latest inbound message in the thread
+                  //   3) the current communication itself (fallback)
+                  const targetMsg =
+                    (replyTargetId && thread.find(m => m.id === replyTargetId)) ||
+                    [...thread].reverse().find(m => m.direction === "inbound") ||
+                    comm;
+                  // Recipient: for inbound targets we reply to the sender,
+                  // for outbound targets (follow-ups) we send to the original
+                  // recipient — both live in `external_email`.
+                  const toEmail = targetMsg.external_email || comm.external_email;
                   if (!toEmail) { toast.error("No recipient email"); return; }
                   if (!replyBody.trim()) { toast.error("Write a reply first"); return; }
 
@@ -591,9 +722,9 @@ export default function CommunicationDetailPage() {
                   try {
                     let draftId = replyDraftId;
                     if (!draftId) {
-                      // Create a draft first
+                      // Create a draft tied to the message we're responding to
                       const created = await api.post("/communications/drafts/", {
-                        communication: lastInbound.id,
+                        communication: targetMsg.id,
                         client: comm.client || null,
                         subject: replySubject,
                         body: replyBody,

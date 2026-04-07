@@ -16,6 +16,13 @@ class User(AbstractUser):
     whatsapp = models.CharField(max_length=20, blank=True)
     department = models.CharField(max_length=100, blank=True)
     region = models.CharField(max_length=50, blank=True, default='')
+    # Email signature fields — appended to outgoing mails
+    signature_name = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text='Display name in the email signature, e.g. "Shobana C"',
+    )
+    signature_phone = models.CharField(max_length=50, blank=True, default='')
+    signature_email = models.EmailField(blank=True, default='')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

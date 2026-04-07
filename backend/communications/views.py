@@ -330,6 +330,27 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'], url_path='generate-followup')
+    def generate_followup(self, request, pk=None):
+        """Generate AI-powered FOLLOW-UP content for an outbound message that
+        the client hasn't responded to yet.
+
+        Unlike generate-draft (which writes a reply to an inbound message),
+        this writes a polite nudge for one of OUR sent emails. Returns the
+        AI-generated subject + body — the client decides whether to save it
+        as a draft or send directly.
+        """
+        comm = self.get_object()
+        from .ai_email_service import generate_followup_email
+        try:
+            reply = generate_followup_email(comm)
+            return Response({
+                'subject': reply['subject'],
+                'body': reply['body'],
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class EmailAccountViewSet(viewsets.ModelViewSet):
     serializer_class = EmailAccountSerializer
@@ -457,7 +478,12 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         # Convert any legacy markdown-style content (**bold**, plain newlines) into
         # HTML so the recipient sees real bold text, not literal asterisks.
         from .ai_email_service import _markdown_to_html
+        from .signature import append_signature
         outgoing_html = _markdown_to_html(draft.body)
+        # Append the executive's per-user signature block (Thanks and Regards,
+        # name, logo, contact info). Replaces any previous signature so we
+        # never end up with two sign-offs.
+        outgoing_html = append_signature(outgoing_html, request.user)
 
         # Clean CC: strip whitespace, drop empty/invalid entries
         cc_clean = ''
@@ -518,14 +544,16 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         except Exception as e:
             _log.warning(f'Could not update PI status for sent draft {draft.id}: {e}')
 
-        # Create outgoing Communication record
+        # Create outgoing Communication record — store the body that was
+        # actually sent (with the signature appended) so the thread view
+        # matches what the recipient received.
         Communication.objects.create(
             client=draft.client,
             user=request.user,
             comm_type='email',
             direction='outbound',
             subject=draft.subject,
-            body=draft.body,
+            body=outgoing_html,
             status='sent',
             email_account=email_account,
             external_email=draft.to_email,
@@ -767,6 +795,26 @@ class QuoteRequestViewSet(viewsets.ModelViewSet):
         return Response({'message': 'No quote intent detected'}, status=status.HTTP_200_OK)
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def signature_logo_view(request):
+    """Serve the Kriya logo as a public PNG (no auth required).
+
+    This endpoint is referenced from outgoing email signatures so Gmail's
+    image proxy can fetch it. In production, point SIGNATURE_LOGO_URL at the
+    public URL of this endpoint (or any CDN-hosted copy of the same image).
+    """
+    import os
+    from django.conf import settings
+    from django.http import FileResponse, HttpResponseNotFound
+    path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo.png')
+    if not os.path.exists(path):
+        return HttpResponseNotFound('logo not found')
+    response = FileResponse(open(path, 'rb'), content_type='image/png')
+    response['Cache-Control'] = 'public, max-age=86400'
+    return response
+
+
 @api_view(['POST'])
 def send_email_view(request):
     """Send an email and create a Communication record with optional attachments."""
@@ -787,13 +835,17 @@ def send_email_view(request):
     # Collect attachments from request.FILES
     attachments = request.FILES.getlist('attachments')
 
+    # Append the executive's per-user signature block to the outgoing body
+    from .signature import append_signature
+    outgoing_body = append_signature(data['body'], request.user)
+
     # Send the email
     try:
         message_id = EmailService.send_email(
             email_account=account,
             to=data['to'],
             subject=data['subject'],
-            body_html=data['body'],
+            body_html=outgoing_body,
             cc=data.get('cc') or None,
             bcc=data.get('bcc') or None,
             attachments=attachments or None,
@@ -813,7 +865,8 @@ def send_email_view(request):
     else:
         client, contact = ContactMatcher.match_by_email(data['to'])
 
-    # Create Communication record
+    # Create Communication record (store the signed body so the thread view
+    # matches what the recipient actually received)
     comm = Communication.objects.create(
         client=client,
         contact=contact,
@@ -821,7 +874,7 @@ def send_email_view(request):
         comm_type='email',
         direction='outbound',
         subject=data['subject'],
-        body=data['body'],
+        body=outgoing_body,
         status='sent',
         email_message_id=message_id,
         email_account=account,

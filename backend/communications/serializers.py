@@ -128,9 +128,15 @@ class EmailDraftSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         # Convert legacy markdown-style bodies (with **bold** and plain newlines)
         # into Quill-compatible HTML on read, so existing drafts render correctly.
+        # Also strip any legacy "Best regards, / Kriya Biosys ..." sign-off the
+        # old AI generator baked into the body — the per-user signature is now
+        # appended at send-time, so the editor should show the body without it.
         data = super().to_representation(instance)
         from .ai_email_service import _markdown_to_html
-        data['body'] = _markdown_to_html(data.get('body') or '')
+        from .signature import strip_signature
+        body = data.get('body') or ''
+        body = strip_signature(body)
+        data['body'] = _markdown_to_html(body)
         return data
 
     class Meta:
@@ -140,7 +146,11 @@ class EmailDraftSerializer(serializers.ModelSerializer):
                   'generated_by_ai', 'created_by', 'edited_by',
                   'sent_at', 'last_saved_at', 'draft_version',
                   'created_at', 'updated_at', 'attachments']
-        read_only_fields = ['id', 'client', 'communication', 'generated_by_ai',
+        # `client` and `communication` must be writable on create so the
+        # frontend can build a draft for any thread (replies, follow-ups,
+        # standalone composes). They were marked read-only by mistake which
+        # caused the IntegrityError on POST /communications/drafts/.
+        read_only_fields = ['id', 'generated_by_ai',
                             'created_by', 'sent_at', 'created_at', 'updated_at',
                             'last_saved_at', 'draft_version']
 

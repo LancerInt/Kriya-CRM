@@ -66,6 +66,7 @@ export default function CommunicationsPage() {
   const [unmatchedCategory, setUnmatchedCategory] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [archivePrompt, setArchivePrompt] = useState(null); // { commId, senderEmail }
+  const [followUpTick, setFollowUpTick] = useState(0); // forces age re-eval
 
   const loadData = useCallback(() => {
     dispatch(fetchCommunications());
@@ -75,6 +76,13 @@ export default function CommunicationsPage() {
     loadData();
     api.get("/clients/").then((r) => setClients(r.data.results || r.data)).catch(() => {});
     api.get("/auth/users/").then((r) => setExecutives((r.data.results || r.data).filter(u => u.role === "executive"))).catch(() => {});
+  }, []);
+
+  // Re-evaluate follow-up ages every 30s so badges update without a reload.
+  // (The 2-min testing threshold makes this freshness very visible.)
+  useEffect(() => {
+    const t = setInterval(() => setFollowUpTick((n) => n + 1), 30 * 1000);
+    return () => clearInterval(t);
   }, []);
 
   const filteredList = useMemo(() => {
@@ -97,8 +105,65 @@ export default function CommunicationsPage() {
     }
     if (filterClient) filtered = filtered.filter((item) => item.client === filterClient);
     if (filterExec) filtered = filtered.filter((item) => item.assigned_executive_id === filterExec);
+
+    // ── Follow-up detection (Gmail-style) ──
+    // For each conversation (grouped by client + external contact), find the
+    // latest message. If it's older than the threshold AND no newer reply has
+    // arrived, tag it as needing follow-up:
+    //   - latest is INBOUND  → we owe the client a reply  → kind=reply
+    //   - latest is OUTBOUND → client hasn't responded    → kind=followup
+    // Tagged rows bubble to the top, sorted by most-overdue first.
+    // TESTING: threshold is 2 minutes. Bump to days for production
+    // (e.g. FOLLOWUP_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000).
+    const FOLLOWUP_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+    if (filterTab !== "drafts" && filterTab !== "unmatched") {
+      // Group by conversation key
+      const groups = new Map();
+      filtered.forEach((item) => {
+        if (item.comm_type !== "email" && item.comm_type !== "whatsapp") return;
+        const key = (item.client || "no-client") + "::" + (item.external_email || item.external_phone || "");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      });
+      // For each group, mark only the latest message
+      const followUpById = new Map();
+      const now = Date.now();
+      groups.forEach((items) => {
+        items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const latest = items[0];
+        if (!latest?.created_at) return;
+        const ageMs = now - new Date(latest.created_at).getTime();
+        if (ageMs >= FOLLOWUP_THRESHOLD_MS) {
+          // Pick the largest unit that fits, so the badge reads naturally
+          const days = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+          const hours = Math.floor(ageMs / (1000 * 60 * 60));
+          const minutes = Math.floor(ageMs / (1000 * 60));
+          let amount, unit;
+          if (days >= 1) { amount = days; unit = days === 1 ? "day" : "days"; }
+          else if (hours >= 1) { amount = hours; unit = hours === 1 ? "hour" : "hours"; }
+          else { amount = minutes; unit = minutes === 1 ? "minute" : "minutes"; }
+          followUpById.set(latest.id, {
+            amount, unit, ageMs,
+            kind: latest.direction === "inbound" ? "reply" : "followup",
+          });
+        }
+      });
+      // Attach the tag to a copy of each row so we don't mutate Redux state
+      filtered = filtered.map((item) => {
+        const fu = followUpById.get(item.id);
+        return fu ? { ...item, _followUp: fu } : item;
+      });
+      // Sort: needs-follow-up first (most overdue at top), then by date desc
+      filtered = [...filtered].sort((a, b) => {
+        const aFU = a._followUp ? 1 : 0;
+        const bFU = b._followUp ? 1 : 0;
+        if (aFU !== bFU) return bFU - aFU;
+        if (aFU && bFU) return b._followUp.ageMs - a._followUp.ageMs;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+    }
     return filtered;
-  }, [list, filterTab, filterClient, filterExec, unmatchedCategory]);
+  }, [list, filterTab, filterClient, filterExec, unmatchedCategory, followUpTick]);
 
   const unreadCount = useMemo(() => list.filter((item) => !item.is_read && item.is_client_mail).length, [list]);
   const unmatchedEmails = useMemo(() => list.filter((item) => !item.is_client_mail), [list]);
@@ -261,7 +326,20 @@ export default function CommunicationsPage() {
     { key: "comm_type", label: "Type", render: (row) => <StatusBadge status={row.comm_type} /> },
     { key: "direction", label: "Direction", render: (row) => <span className={`text-xs font-medium ${row.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>{row.direction}</span> },
     { key: "subject", label: "Subject", render: (row) => (
-      <span className={row.is_read ? "text-gray-600" : "font-semibold text-gray-900"}>{row.subject || "\u2014"}</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={row.is_read ? "text-gray-600" : "font-semibold text-gray-900"}>{row.subject || "\u2014"}</span>
+        {row._followUp && (
+          row._followUp.kind === "reply" ? (
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-300 animate-pulse">
+              Not responded for {row._followUp.amount} {row._followUp.unit} — Reply?
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-700 border border-amber-300">
+              No reply for {row._followUp.amount} {row._followUp.unit} — Follow up?
+            </span>
+          )
+        )}
+      </div>
     )},
     { key: "client_name", label: "Account", render: (row) => row.client_name ? (
       <span className={row.is_read ? "" : "font-medium"}>{row.client_name}</span>
@@ -435,6 +513,13 @@ export default function CommunicationsPage() {
         emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
         emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
         onRowClick={(row) => router.push(`/communications/${row.id}`)}
+        rowClassName={(row) =>
+          row._followUp
+            ? row._followUp.kind === "reply"
+              ? "bg-red-50/60 hover:bg-red-50"
+              : "bg-amber-50/60 hover:bg-amber-50"
+            : ""
+        }
       />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">

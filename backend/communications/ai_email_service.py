@@ -93,7 +93,7 @@ RULES:
 - If they ask about delivery, bold the delivery terms like **FOB Chennai**
 - If they mention samples, offer to arrange sample dispatch
 - If they confirm an order, acknowledge and outline next steps
-- Sign off as "Kriya Biosys Private Limited"
+- Do NOT add any sign-off, "Best regards", "Thanks and Regards", or company name at the end — the signature is added separately by the system
 - Do NOT include email headers (From, To, Date)
 - Just write the reply body
 - Keep it under 150 words"""
@@ -105,8 +105,12 @@ RULES:
         # Fallback to template
         reply_body = _template_reply(client_name, contact_name, original_subject, original_body)
 
-    # Ensure proper greeting and sign-off
+    # Ensure greeting at the top. The sign-off / signature block is appended
+    # later by the send pipeline using the sender's user signature, so we
+    # explicitly strip any sign-off the AI may have added.
     reply_body = _ensure_greeting_signoff(reply_body, contact_name)
+    from .signature import strip_signature
+    reply_body = strip_signature(reply_body)
 
     # Convert AI markdown (**bold**, newlines) into HTML so Quill renders it correctly
     reply_body = _markdown_to_html(reply_body)
@@ -115,6 +119,101 @@ RULES:
     reply_subject = original_subject
     if not reply_subject.lower().startswith('re:'):
         reply_subject = f'Re: {reply_subject}'
+
+    return {
+        'subject': reply_subject,
+        'body': reply_body,
+    }
+
+
+def generate_followup_email(communication):
+    """Generate an AI-powered FOLLOW-UP email for a previously sent message
+    that the client hasn't responded to.
+
+    The tone is different from generate_email_reply():
+    - We're nudging the client, not answering them
+    - Reference the previous email politely without restating its full content
+    - Acknowledge their time, ask if they had a chance to review
+    - Offer to clarify anything / answer questions
+    - End with a soft call-to-action ("looking forward to hearing from you")
+
+    Returns dict: { subject, body }
+    """
+    client_name = communication.client.company_name if communication.client else 'Valued Customer'
+    contact_name = _get_contact_name(communication)
+    original_subject = communication.subject or '(No Subject)'
+    original_body = _clean_html(communication.body or '')
+    thread_context = _get_thread_context(communication)
+
+    # Days since the message we're following up on
+    from django.utils import timezone
+    days_since = ''
+    try:
+        delta = timezone.now() - communication.created_at
+        d = delta.days
+        if d <= 0:
+            days_since = 'earlier today'
+        elif d == 1:
+            days_since = 'yesterday'
+        else:
+            days_since = f'{d} days ago'
+    except Exception:
+        pass
+
+    # Pull what we sent in the original message so the AI can reference it
+    summary = original_body[:600]
+
+    prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
+You are writing a polite FOLLOW-UP email to a client who hasn't responded to your previous message yet.
+
+Client: {client_name}
+Contact: {contact_name}
+Original subject we sent: {original_subject}
+Original message we sent ({days_since}):
+{summary}
+{f"Thread context:{chr(10)}{thread_context}" if thread_context else ""}
+
+RULES:
+- Polite, friendly nudge — NOT pushy
+- Open with "I hope this message finds you well." or similar warm opener
+- Acknowledge that you sent the previous email {days_since} (only if days_since is set)
+- Briefly reference what the previous email was about (1 short sentence) — do not re-list all details
+- Ask if they had a chance to review and if they have any questions or need clarification
+- Offer to provide any additional information they need (e.g. samples, quotation, technical sheet)
+- End with a soft call-to-action like "Looking forward to hearing from you"
+- **Bold** any key terms (product name, price, quote number) with double asterisks if mentioning them
+- Do NOT add any sign-off, "Best regards", "Thanks and Regards", or company name at the end — the signature is added separately by the system
+- Do NOT include email headers (From, To, Date)
+- Just write the reply body
+- Keep it under 100 words — follow-ups should be SHORT"""
+
+    reply_body = _generate_with_ai(prompt)
+
+    if not reply_body:
+        # Template fallback when no AI is configured
+        days_phrase = f' I sent you a message {days_since}' if days_since else ''
+        reply_body = (
+            f"Dear {contact_name},\n\n"
+            f"I hope this message finds you well.{days_phrase} regarding "
+            f"{original_subject.lower().replace('re: ', '').replace('quotation for', 'a quotation for')}, "
+            f"and I wanted to follow up to see if you had a chance to review it.\n\n"
+            f"Please let me know if you have any questions or if there is any additional information I can provide.\n\n"
+            f"Looking forward to hearing from you."
+        )
+
+    reply_body = _ensure_greeting_signoff(reply_body, contact_name)
+    from .signature import strip_signature
+    reply_body = strip_signature(reply_body)
+    reply_body = _markdown_to_html(reply_body)
+
+    # Subject: prefix "Follow up: " unless already a Re:
+    reply_subject = original_subject
+    if reply_subject.lower().startswith('re:'):
+        reply_subject = reply_subject  # keep the existing Re: chain
+    elif reply_subject.lower().startswith('follow up'):
+        reply_subject = reply_subject
+    else:
+        reply_subject = f'Follow up: {reply_subject}'
 
     return {
         'subject': reply_subject,
@@ -247,8 +346,10 @@ def _ensure_greeting_signoff(body, contact_name):
         if contact_name:
             clean = f'Dear {contact_name},\n\n{clean}'
 
-    # Add sign-off
-    clean = f'{clean}\n\nBest regards,\nKriya Biosys Private Limited'
+    # NOTE: We deliberately do NOT add a sign-off here. The signature block
+    # (with Thanks and Regards + executive name + logo + contact info) is
+    # appended at send-time by communications/signature.append_signature() so
+    # each user gets their own per-account signature.
     return clean
 
 
@@ -364,11 +465,11 @@ RULES:
         '', result, flags=re.IGNORECASE | re.DOTALL
     ).rstrip()
 
-    # Reassemble: greeting + refined body + sign-off
+    # Reassemble: greeting + refined body. The sign-off / signature is added
+    # at send-time per user, so we don't append it here.
     parts = []
     if greeting:
         parts.append(greeting)
     parts.append(result)
-    parts.append("Best regards,\nKriya Biosys Private Limited")
 
     return _markdown_to_html('\n\n'.join(parts))

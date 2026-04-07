@@ -15,5 +15,6 @@ urlpatterns = [
     path('summarize-voice/', views.summarize_voice_text, name='summarize-voice'),
     path('refine-email/', views.refine_email_text, name='refine-email'),
     path('whatsapp-webhook/', views.whatsapp_webhook_view, name='whatsapp-webhook'),
+    path('signature-logo.png', views.signature_logo_view, name='signature-logo'),
     path('', include(router.urls)),
 ]

@@ -1,7 +1,7 @@
 import LoadingSpinner from "./LoadingSpinner";
 import EmptyState from "./EmptyState";
 
-export default function DataTable({ columns, data, loading, emptyTitle, emptyDescription, onRowClick, onRowDoubleClick }) {
+export default function DataTable({ columns, data, loading, emptyTitle, emptyDescription, onRowClick, onRowDoubleClick, rowClassName }) {
   if (loading) return <LoadingSpinner />;
 
   if (!data || data.length === 0) {
@@ -28,7 +28,7 @@ export default function DataTable({ columns, data, loading, emptyTitle, emptyDes
             {data.map((row, i) => (
               <tr
                 key={row.id || i}
-                className={`${onRowClick || onRowDoubleClick ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                className={`${onRowClick || onRowDoubleClick ? "cursor-pointer hover:bg-gray-50" : ""} ${rowClassName ? rowClassName(row) : ""}`}
                 onClick={() => onRowClick && onRowClick(row)}
                 onDoubleClick={() => onRowDoubleClick && onRowDoubleClick(row)}
               >
