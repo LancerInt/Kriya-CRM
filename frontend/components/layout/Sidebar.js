@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSelector } from "react-redux";
 import {
   HiOutlineHome,
   HiOutlineUsers,
@@ -40,7 +41,7 @@ const navItems = [
   { name: "Shipments", href: "/shipments", icon: HiOutlineTruck },
   { name: "Quality", href: "/quality", icon: HiOutlineShieldCheck },
   { name: "Samples", href: "/samples", icon: HiOutlineBeaker },
-  { name: "Finance", href: "/finance", icon: HiOutlineBanknotes },
+  { name: "Finance", href: "/finance", icon: HiOutlineBanknotes, adminOnly: true },
   { name: "Documents", href: "/documents", icon: HiOutlineFolder },
   { name: "Meetings", href: "/meetings", icon: HiOutlinePhone },
   { name: "Reports", href: "/analytics", icon: HiOutlineChartBar },
@@ -52,6 +53,10 @@ const navItems = [
 
 export default function Sidebar({ open, onClose }) {
   const pathname = usePathname();
+  const currentUser = useSelector((state) => state.auth.user);
+  const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
+  // Filter out admin-only items for executive users
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || isAdminOrManager);
 
   return (
     <>
@@ -75,7 +80,7 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="p-3 space-y-1 overflow-y-auto h-[calc(100%-4rem)]">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
             return (
               <Link

@@ -158,16 +158,19 @@ def sync_emails(email_account_id=None):
 
 
 def _auto_create_sample_request(communication):
-    """If an inbound email mentions sample/trial keywords, auto-create a
-    Sample row tied to it (and pre-fill product/quantity from the email).
+    """If an inbound email mentions sample/trial keywords, auto-create ONE
+    Sample row tied to it, with one SampleItem per product the client asked
+    about. Clients often request multiple products in a single email — they
+    must all live under the same parent sample, never split into separate
+    samples.
 
     Idempotent: if a Sample already exists for this communication, do nothing.
-    Same `resolve_line_item_from_email` resolver as Quotation/PI, so the
-    Product is matched/created in the master list and quantity is extracted.
+    Uses `resolve_line_items_from_email` (plural) which runs an AI extraction
+    that returns an array of products.
     """
     import re as _re
-    from samples.models import Sample
-    from communications.auto_quote_service import resolve_line_item_from_email
+    from samples.models import Sample, SampleItem
+    from communications.auto_quote_service import resolve_line_items_from_email
 
     if not communication.client:
         return None
@@ -182,35 +185,60 @@ def _auto_create_sample_request(communication):
     if not _re.search(r'\b(sample|samples|trial|swatch|free sample)\b', text):
         return None
 
-    line = resolve_line_item_from_email(communication.client, communication) or {}
-    qty_value = line.get('quantity') or 0
-    unit = line.get('unit') or ''
-    quantity_str = f"{qty_value:g} {unit}".strip() if qty_value else ''
+    lines = resolve_line_items_from_email(communication.client, communication) or []
+    first = lines[0] if lines else {}
+    # Mirror the first item into the legacy Sample.* fields for backward
+    # compatibility with code that still reads sample.product_name directly.
+    first_qty_str = ''
+    if first:
+        qv = first.get('quantity') or 0
+        u = first.get('unit') or ''
+        first_qty_str = f"{qv:g} {u}".strip() if qv else ''
 
     sample = Sample.objects.create(
         client=communication.client,
         source_communication=communication,
-        product=line.get('product'),
-        product_name=line.get('product_name') or '',
-        client_product_name=line.get('client_product_name') or '',
-        quantity=quantity_str,
-        notes=f'Auto-created from inbound email request. {line.get("description", "")}'.strip(),
+        product=first.get('product') if first else None,
+        product_name=(first.get('product_name') or '') if first else '',
+        client_product_name=(first.get('client_product_name') or '') if first else '',
+        quantity=first_qty_str,
+        notes='Auto-created from inbound email request.',
         created_by=communication.user,
     )
 
+    # Create one SampleItem per extracted line — these are the multi-product
+    # rows the user sees on the sample detail page.
+    for line in lines:
+        qv = line.get('quantity') or 0
+        u = line.get('unit') or ''
+        qty_str = f"{qv:g} {u}".strip() if qv else ''
+        SampleItem.objects.create(
+            sample=sample,
+            product=line.get('product'),
+            product_name=line.get('product_name') or '',
+            client_product_name=line.get('client_product_name') or '',
+            quantity=qty_str,
+        )
+
     try:
         from notifications.helpers import notify
+        product_summary = ', '.join(
+            [(line.get('product_name') or line.get('client_product_name') or '') for line in lines if (line.get('product_name') or line.get('client_product_name'))]
+        ) or '(pending review)'
         notify(
-            title=f'Sample request: {sample.product_name or "(pending review)"}',
-            message=f'Auto-created sample request from email by {communication.client.company_name}.',
+            title=f'Sample request: {product_summary}',
+            message=(
+                f'Auto-created sample request from email by '
+                f'{communication.client.company_name} ({len(lines)} product{"s" if len(lines) != 1 else ""}).'
+            ),
             notification_type='alert',
-            link=f'/clients/{communication.client.id}',
+            link=f'/samples/{sample.id}',
             client=communication.client,
         )
     except Exception:
         pass
 
-    logger.info(f'Auto-created Sample {sample.id} from communication {communication.id}')
+    logger.info(f'Auto-created Sample {sample.id} with {len(lines)} item(s) from communication {communication.id}')
     return sample
 
 

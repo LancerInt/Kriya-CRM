@@ -642,7 +642,12 @@ function CommunicationsTab({ clientId, activeTab, client }) {
           try {
             const sr = await api.get(`/samples/${dispatchSampleId}/`);
             const s = sr.data || {};
-            const productLabel = s.product_name || s.client_product_name || "the requested sample";
+            const items = Array.isArray(s.items) ? s.items.filter(it => it.product_name || it.client_product_name) : [];
+            // Build a label that lists ALL requested products if there are
+            // multiple, otherwise use the parent product_name field.
+            const productLabel = items.length > 1
+              ? items.map(it => it.product_name || it.client_product_name).filter(Boolean).join(", ")
+              : (s.product_name || s.client_product_name || "the requested sample");
             const tracking = (s.tracking_number || "").trim();
             const courier = (s.courier_details || "").trim();
 
@@ -657,15 +662,31 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               etaText = eta.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
             } catch {}
 
+            const headerLine = items.length > 1
+              ? `<p>I'm pleased to inform you that the requested samples have been dispatched.</p>`
+              : `<p>I'm pleased to inform you that the <strong>${productLabel}</strong> sample has been dispatched.</p>`;
             const lines = [
               `<p>Dear ${(s.client_name && s.client_name.split(" ")[0]) || "Sir/Madam"},</p>`,
-              `<p>I'm pleased to inform you that the <strong>${productLabel}</strong> sample has been dispatched.</p>`,
+              headerLine,
             ];
+
+            // If multiple items, render a per-product list before the shipment details
+            if (items.length > 1) {
+              const productBits = items.map(it => {
+                const name = it.product_name || it.client_product_name || "—";
+                const qty = it.quantity || "—";
+                return `<li><strong>${name}</strong> — ${qty}</li>`;
+              });
+              lines.push(`<p>Products dispatched:</p><ul>${productBits.join("")}</ul>`);
+            }
+
             // Always render every key field — when a value is missing, show
             // a placeholder so the executive sees the line and fills it in
             // before sending. This is especially important for Airway Bill No.
             const detailBits = [];
-            detailBits.push(`<li><strong>Quantity:</strong> ${s.quantity || "—"}</li>`);
+            if (items.length <= 1) {
+              detailBits.push(`<li><strong>Quantity:</strong> ${s.quantity || "—"}</li>`);
+            }
             detailBits.push(`<li><strong>Courier:</strong> ${courier || "—"}</li>`);
             detailBits.push(`<li><strong>Airway Bill No:</strong> ${tracking || "—"}</li>`);
             detailBits.push(`<li><strong>Dispatch Date:</strong> ${s.dispatch_date || "—"}</li>`);

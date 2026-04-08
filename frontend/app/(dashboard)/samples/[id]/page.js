@@ -92,6 +92,9 @@ export default function SampleDetailPage() {
   });
   const [showRevertModal, setShowRevertModal] = useState(false);
   const [reverting, setReverting] = useState(false);
+  // Local copy of items for inline editing — saved on demand via "Save Items"
+  const [itemsLocal, setItemsLocal] = useState([]);
+  const [savingItems, setSavingItems] = useState(false);
   // Inline edit state for the Shipping Details card
   const [editingShipping, setEditingShipping] = useState(false);
   const [shippingForm, setShippingForm] = useState({
@@ -112,11 +115,35 @@ export default function SampleDetailPage() {
       setTimeline(t.data);
       setTrackingNumber(s.data.tracking_number || "");
       setCourierDetails(s.data.courier_details || "");
+      setItemsLocal(s.data.items || []);
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to load sample"));
       router.push("/samples");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Items list editing helpers (multiple products per sample)
+  const itemsDirty = JSON.stringify(itemsLocal) !== JSON.stringify(sample?.items || []);
+  const addItem = () => setItemsLocal((prev) => [...prev, { product_name: "", client_product_name: "", quantity: "" }]);
+  const updateItem = (idx, field, value) => {
+    setItemsLocal((prev) => prev.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
+  };
+  const removeItem = (idx) => {
+    setItemsLocal((prev) => prev.filter((_, i) => i !== idx));
+  };
+  const resetItems = () => setItemsLocal(sample?.items || []);
+  const saveItems = async () => {
+    setSavingItems(true);
+    try {
+      await api.patch(`/samples/${id}/`, { items: itemsLocal });
+      toast.success("Items saved");
+      loadSample();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to save items"));
+    } finally {
+      setSavingItems(false);
     }
   };
 
@@ -319,25 +346,97 @@ export default function SampleDetailPage() {
         }}
       />
 
+      {/* Items list — multiple products in one sample request */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Requested Products ({itemsLocal.length})</h3>
+          <button
+            onClick={addItem}
+            className="text-xs font-medium text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 px-3 py-1.5 rounded"
+          >
+            + Add Product
+          </button>
+        </div>
+        {itemsLocal.length === 0 ? (
+          <p className="text-sm text-gray-400 italic">No products yet. Click "+ Add Product" to add one.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">
+                <th className="pb-2 pr-3">Product</th>
+                <th className="pb-2 pr-3">Client Name</th>
+                <th className="pb-2 pr-3">Quantity</th>
+                <th className="pb-2 w-12"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {itemsLocal.map((item, i) => (
+                <tr key={item.id || i} className="border-b border-gray-100 last:border-0">
+                  <td className="py-2 pr-3">
+                    <input
+                      value={item.product_name || ""}
+                      onChange={(e) => updateItem(i, "product_name", e.target.value)}
+                      placeholder="Product name"
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <input
+                      value={item.client_product_name || ""}
+                      onChange={(e) => updateItem(i, "client_product_name", e.target.value)}
+                      placeholder="As client wrote it"
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <input
+                      value={item.quantity || ""}
+                      onChange={(e) => updateItem(i, "quantity", e.target.value)}
+                      placeholder="e.g. 5 KG"
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    />
+                  </td>
+                  <td className="py-2 text-center">
+                    <button
+                      onClick={() => removeItem(i)}
+                      className="text-red-500 hover:text-red-700 text-lg leading-none"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {itemsDirty && (
+          <div className="mt-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <span className="text-xs text-amber-800">You have unsaved changes to the items list.</span>
+            <div className="flex gap-2">
+              <button
+                onClick={resetItems}
+                className="px-3 py-1 text-xs border border-gray-300 rounded font-medium hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveItems}
+                disabled={savingItems}
+                className="px-3 py-1 text-xs bg-fuchsia-600 text-white rounded font-medium hover:bg-fuchsia-700 disabled:opacity-50"
+              >
+                {savingItems ? "Saving..." : "Save Items"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Details grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h3 className="font-semibold mb-4 text-gray-800">Sample Information</h3>
           <dl className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Product</dt>
-              <dd className="font-medium text-gray-900 text-right">{sample.product_name || "—"}</dd>
-            </div>
-            {sample.client_product_name && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Client's Name</dt>
-                <dd className="text-gray-700 text-right">{sample.client_product_name}</dd>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Quantity</dt>
-              <dd className="font-medium text-gray-900 text-right">{sample.quantity || "—"}</dd>
-            </div>
             <div className="flex justify-between">
               <dt className="text-gray-500">Client</dt>
               <dd className="text-gray-700 text-right">{sample.client_name}</dd>

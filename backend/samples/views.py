@@ -67,38 +67,51 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             if existing:
                 return Response(SampleSerializer(existing).data, status=status.HTTP_200_OK)
 
-        # Resolve product / quantity from the source email
-        line = None
+        # Resolve ALL products / quantities from the source email — clients
+        # often request multiple products in one email.
+        lines = []
         if communication_id:
             try:
                 from communications.models import Communication
-                from communications.auto_quote_service import resolve_line_item_from_email
+                from communications.auto_quote_service import resolve_line_items_from_email
                 comm = Communication.objects.filter(id=communication_id).first()
                 if comm:
-                    line = resolve_line_item_from_email(client, comm)
+                    lines = resolve_line_items_from_email(client, comm) or []
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f'Sample pre-fill failed: {e}')
 
-        if line:
-            qty_value = line.get('quantity') or 0
-            unit = line.get('unit') or ''
-            quantity_str = f"{qty_value:g} {unit}".strip() if qty_value else ''
-            sample = Sample.objects.create(
-                client=client,
-                source_communication_id=communication_id if communication_id else None,
+        # Create the parent Sample (mirror first item into legacy fields for
+        # backward compatibility with code that still reads sample.product_name)
+        first = lines[0] if lines else {}
+        first_qty_str = ''
+        if first:
+            qv = first.get('quantity') or 0
+            u = first.get('unit') or ''
+            first_qty_str = f"{qv:g} {u}".strip() if qv else ''
+        sample = Sample.objects.create(
+            client=client,
+            source_communication_id=communication_id if communication_id else None,
+            product=first.get('product'),
+            product_name=first.get('product_name') or '',
+            client_product_name=first.get('client_product_name') or '',
+            quantity=first_qty_str,
+            notes='Auto-created from client email request.',
+            created_by=request.user,
+        )
+
+        # Create one SampleItem per extracted line
+        from .models import SampleItem
+        for line in lines:
+            qv = line.get('quantity') or 0
+            u = line.get('unit') or ''
+            qty_str = f"{qv:g} {u}".strip() if qv else ''
+            SampleItem.objects.create(
+                sample=sample,
                 product=line.get('product'),
                 product_name=line.get('product_name') or '',
                 client_product_name=line.get('client_product_name') or '',
-                quantity=quantity_str,
-                notes=f'Auto-created from client email request. {line.get("description", "")}'.strip(),
-                created_by=request.user,
-            )
-        else:
-            sample = Sample.objects.create(
-                client=client,
-                source_communication_id=communication_id if communication_id else None,
-                created_by=request.user,
+                quantity=qty_str,
             )
 
         notify(

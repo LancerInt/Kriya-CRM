@@ -273,6 +273,155 @@ def _generate_draft_quotation(quote_request):
     return quotation
 
 
+def resolve_line_items_from_email(client, communication):
+    """Multi-product variant of resolve_line_item_from_email.
+
+    Returns a LIST of line-item dicts (same shape as the single version).
+    Used by the Sample flow because clients often request multiple products
+    in one email — e.g. "send me a sample of Neem Oil and Karanja Oil".
+
+    Detection strategy:
+        1. Run a dedicated AI call asking for an array of products with names
+           and quantities.
+        2. For each extracted product, run it through _match_or_create_product
+           and the same client price-list lookup as the single-line resolver.
+        3. If the AI returns nothing useful, fall back to the single-line
+           resolver and wrap its result in a one-element list.
+    """
+    import re as _re
+    import json as _json
+
+    if not communication:
+        return []
+
+    text = (communication.subject or '') + '\n' + (communication.body or '')
+    text = _re.sub(r'<[^>]+>', ' ', text).strip()
+
+    # Try a dedicated multi-product extraction first
+    products_extracted = []
+    try:
+        from agents.models import AIConfig
+        from common.encryption import decrypt_value
+        config = AIConfig.objects.filter(is_active=True).first()
+        if config:
+            api_key = decrypt_value(config.api_key)
+            prompt = (
+                'Extract every distinct product the client mentions in this email. '
+                'Return ONLY a JSON array, no explanation. Each item must have "product" '
+                '(the product name as the client wrote it, e.g. "Neem Oil 0.3%") and '
+                '"quantity" (e.g. "5 KG", "2 LTR", or "" if not mentioned). If only one '
+                'product is mentioned, return an array with one item.\n\n'
+                f'Email:\n{text[:2000]}\n\nJSON array:'
+            )
+            result = ''
+            if config.provider == 'groq':
+                from groq import Groq
+                gclient = Groq(api_key=api_key)
+                resp = gclient.chat.completions.create(
+                    model=config.model_name or 'llama-3.3-70b-versatile',
+                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=0.1, max_tokens=500,
+                )
+                result = resp.choices[0].message.content.strip()
+            elif config.provider == 'gemini':
+                from google import genai
+                gclient = genai.Client(api_key=api_key)
+                resp = gclient.models.generate_content(
+                    model=config.model_name or 'gemini-2.0-flash',
+                    contents=prompt,
+                )
+                result = resp.text.strip()
+            if result:
+                if result.startswith('```'):
+                    result = _re.sub(r'^```(?:json)?\s*', '', result)
+                    result = _re.sub(r'\s*```$', '', result)
+                parsed = _json.loads(result)
+                if isinstance(parsed, list):
+                    for entry in parsed:
+                        if isinstance(entry, dict) and entry.get('product'):
+                            products_extracted.append({
+                                'product': str(entry['product']).strip(),
+                                'quantity': str(entry.get('quantity') or '').strip(),
+                            })
+    except Exception as e:
+        logger.warning(f'Multi-product extraction failed: {e}')
+
+    if not products_extracted:
+        single = resolve_line_item_from_email(client, communication)
+        return [single] if single else []
+
+    # Build a full line dict for each extracted product using the same
+    # matching/pricing logic as the single-product resolver
+    out_lines = []
+    for entry in products_extracted:
+        product_text = entry['product']
+        qty_text = entry['quantity']
+        # Build a synthetic single-line by reusing _match_or_create_product
+        # and the price-list lookup chain. We can't call
+        # resolve_line_item_from_email directly because it parses the WHOLE
+        # email body — we'd lose the per-product mapping.
+        line = {
+            'product': None,
+            'product_name': product_text,
+            'client_product_name': product_text,
+            'quantity': 0,
+            'unit': 'KG',
+            'unit_price': 0,
+            'currency': (client.preferred_currency if client else 'USD') or 'USD',
+            'description': '',
+            'destination_country': '',
+            'destination_port': '',
+            'delivery_terms': '',
+        }
+        try:
+            matched, _was_created = _match_or_create_product(product_text)
+            if matched:
+                line['product'] = matched
+                line['product_name'] = matched.name
+                line['unit'] = matched.unit or line['unit']
+                if matched.client_brand_names:
+                    brands = [b.strip() for b in matched.client_brand_names.split(',') if b.strip()]
+                    extracted_lower = product_text.lower()
+                    chosen = next(
+                        (b for b in brands if b.lower() in extracted_lower or extracted_lower in b.lower()),
+                        brands[0] if brands else '',
+                    )
+                    if chosen:
+                        line['client_product_name'] = chosen
+                if client:
+                    from clients.models import ClientPriceList
+                    cp = ClientPriceList.objects.filter(
+                        client=client, is_deleted=False
+                    ).filter(
+                        models.Q(product=matched) | models.Q(product_name__iexact=matched.name)
+                    ).first()
+                    if cp:
+                        line['unit_price'] = float(cp.unit_price)
+                        line['currency'] = cp.currency or line['currency']
+                        line['unit'] = cp.unit or line['unit']
+                        if cp.client_product_name:
+                            line['client_product_name'] = cp.client_product_name
+                    elif matched.base_price:
+                        line['unit_price'] = float(matched.base_price)
+                        line['currency'] = matched.currency or line['currency']
+        except Exception as e:
+            logger.warning(f'Per-product enrichment failed for "{product_text}": {e}')
+
+        # Parse quantity number/unit
+        if qty_text:
+            m = _re.match(r'\s*([\d,.]+)\s*([a-zA-Z]+)?', qty_text)
+            if m:
+                try:
+                    line['quantity'] = float(m.group(1).replace(',', ''))
+                except (ValueError, TypeError):
+                    pass
+                if m.group(2):
+                    line['unit'] = m.group(2).upper()
+        out_lines.append(line)
+
+    return out_lines
+
+
 def resolve_line_item_from_email(client, communication):
     """Run AI extraction over an email and resolve a complete line-item payload.
 

@@ -8,7 +8,8 @@ class FolderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Folder
-        fields = ['id', 'name', 'parent', 'created_by', 'file_count', 'subfolder_count', 'created_at']
+        fields = ['id', 'name', 'parent', 'created_by', 'visibility',
+                  'file_count', 'subfolder_count', 'created_at']
         read_only_fields = ['id', 'created_by']
 
     def get_file_count(self, obj):

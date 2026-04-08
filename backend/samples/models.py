@@ -36,6 +36,32 @@ class Sample(TimeStampedModel):
         ordering = ['-created_at']
 
 
+class SampleItem(models.Model):
+    """Individual product line on a Sample request.
+
+    A single Sample can contain multiple products the client asked for in
+    one email — e.g. "send me a sample of Neem Oil and Karanja Oil". Each
+    product becomes a separate SampleItem row sharing the same parent
+    Sample. The legacy Sample.product_name / Sample.quantity fields are
+    kept for backward compatibility (mirrored from the first item where
+    relevant) but new code should iterate over Sample.items.
+    """
+    id = models.AutoField(primary_key=True)
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
+    product_name = models.CharField(max_length=255, blank=True, default='', help_text='Company product name')
+    client_product_name = models.CharField(max_length=255, blank=True, default='', help_text='Product name as the client calls it')
+    quantity = models.CharField(max_length=100, blank=True, default='', help_text='e.g. "5 KG", "2 LTR"')
+    notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'sample_items'
+        ordering = ['id']
+
+    def __str__(self):
+        return f'{self.product_name or "(no product)"} — {self.quantity or "(no qty)"}'
+
+
 class SampleFeedback(TimeStampedModel):
     sample = models.OneToOneField(Sample, on_delete=models.CASCADE, related_name='feedback')
     rating = models.IntegerField(null=True, blank=True)

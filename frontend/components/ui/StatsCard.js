@@ -1,4 +1,4 @@
-export default function StatsCard({ title, value, icon: Icon, color = "indigo", subtitle }) {
+export default function StatsCard({ title, value, icon: Icon, color = "indigo", subtitle, onClick }) {
   const colors = {
     indigo: "bg-indigo-50 text-indigo-600",
     green: "bg-green-50 text-green-600",
@@ -8,8 +8,18 @@ export default function StatsCard({ title, value, icon: Icon, color = "indigo", 
     purple: "bg-purple-50 text-purple-600",
   };
 
+  const clickable = typeof onClick === "function";
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
+    <div
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+      className={`bg-white rounded-xl border border-gray-200 p-5 transition-all ${
+        clickable ? "cursor-pointer hover:shadow-md hover:border-indigo-300 hover:-translate-y-0.5" : ""
+      }`}
+    >
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-gray-500">{title}</p>

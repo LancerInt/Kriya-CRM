@@ -74,12 +74,38 @@ function DashboardContent({ s, router, label }) {
   if (!s) return null;
   return (
     <>
-      {/* Stats Cards */}
+      {/* Stats Cards — clickable, navigate to the relevant page */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatsCard title={`${label} Accounts`} value={s.clients?.total || 0} icon={HiOutlineUsers} color="indigo" subtitle={`${s.clients?.active || 0} active`} />
-        <StatsCard title="Open Tasks" value={(s.tasks?.pending || 0) + (s.tasks?.in_progress || 0)} icon={HiOutlineClipboardDocumentList} color="yellow" subtitle={`${s.tasks?.overdue || 0} overdue`} />
-        <StatsCard title="Active Leads" value={s.pipeline?.active_inquiries || 0} icon={HiOutlineFunnel} color="purple" />
-        <StatsCard title="Sales Orders" value={s.orders?.active || 0} icon={HiOutlineShoppingCart} color="green" />
+        <StatsCard
+          title={`${label} Accounts`}
+          value={s.clients?.total || 0}
+          icon={HiOutlineUsers}
+          color="indigo"
+          subtitle={`${s.clients?.active || 0} active`}
+          onClick={() => router.push("/clients")}
+        />
+        <StatsCard
+          title="Open Tasks"
+          value={(s.tasks?.pending || 0) + (s.tasks?.in_progress || 0)}
+          icon={HiOutlineClipboardDocumentList}
+          color="yellow"
+          subtitle={`${s.tasks?.overdue || 0} overdue`}
+          onClick={() => router.push("/tasks")}
+        />
+        <StatsCard
+          title="Active Leads"
+          value={s.pipeline?.active_inquiries || 0}
+          icon={HiOutlineFunnel}
+          color="purple"
+          onClick={() => router.push("/pipeline")}
+        />
+        <StatsCard
+          title="Sales Orders"
+          value={s.orders?.active || 0}
+          icon={HiOutlineShoppingCart}
+          color="green"
+          onClick={() => router.push("/orders")}
+        />
       </div>
 
       {/* Action Items */}

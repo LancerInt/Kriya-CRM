@@ -1,16 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSelector } from "react-redux";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
+import FinanceDashboard from "@/components/finance/FinanceDashboard";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 
-const TABS = ["Invoices", "Payments", "FIRC", "GST"];
+const TABS = ["Dashboard", "Invoices", "Payments", "FIRC", "GST"];
 
 const initialInvoiceForm = { client: "", order: "", invoice_type: "proforma", currency: "USD", subtotal: "", tax: "", due_date: "", notes: "" };
 const initialPaymentForm = { client: "", invoice: "", amount: "", currency: "USD", payment_date: "", mode: "TT", reference: "", notes: "" };
@@ -19,7 +21,20 @@ const initialGstForm = { shipment: "", eligible_amount: "", claimed_amount: "", 
 
 export default function FinancePage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("Invoices");
+  const currentUser = useSelector((state) => state.auth.user);
+  const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
+
+  // Role gate — Finance is restricted to admin/manager only.
+  // If an executive lands here (typed URL, bookmark, etc.) bounce them
+  // back to the dashboard with a toast.
+  useEffect(() => {
+    if (currentUser && !isAdminOrManager) {
+      toast.error("Finance is restricted to admin and manager only");
+      router.replace("/dashboard");
+    }
+  }, [currentUser, isAdminOrManager, router]);
+
+  const [activeTab, setActiveTab] = useState("Dashboard");
 
   // Data states
   const [invoices, setInvoices] = useState([]);
@@ -62,6 +77,11 @@ export default function FinancePage() {
   }, [activeTab]);
 
   const loadTabData = async () => {
+    if (activeTab === "Dashboard") {
+      // Dashboard component fetches its own data — don't trigger the
+      // legacy invoice/payment loads here.
+      return;
+    }
     setLoading(true);
     try {
       if (activeTab === "Invoices") {
@@ -216,9 +236,23 @@ export default function FinancePage() {
     return null;
   };
 
+  // Don't render anything for executives — the useEffect above will redirect.
+  // This prevents a flash of content while the redirect is in flight.
+  if (currentUser && !isAdminOrManager) {
+    return null;
+  }
+
   return (
     <div>
-      <PageHeader title="Finance" subtitle="Invoices, payments, FIRC and GST records" action={getActionButton()} />
+      <PageHeader
+        title="Finance"
+        subtitle={
+          activeTab === "Dashboard"
+            ? "Track revenue, payments, receivables, and financial performance across clients."
+            : "Invoices, payments, FIRC and GST records"
+        }
+        action={getActionButton()}
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
@@ -236,6 +270,7 @@ export default function FinancePage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === "Dashboard" && <FinanceDashboard />}
       {activeTab === "Invoices" && (
         <DataTable columns={invoiceColumns} data={invoices} loading={loading} emptyTitle="No invoices yet" emptyDescription="Create your first invoice to get started" onRowClick={(row) => router.push(`/finance/invoices/${row.id}`)} />
       )}

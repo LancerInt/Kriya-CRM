@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
@@ -35,6 +36,10 @@ export default function DocumentsPage() {
   const [preview, setPreview] = useState(null); // file object for preview
   const [previewUrl, setPreviewUrl] = useState(null); // blob URL for preview
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Visibility 3-dot menu — null when closed, otherwise "folder-{id}" / "file-{id}"
+  const [openMenu, setOpenMenu] = useState(null);
+  const currentUser = useSelector((s) => s.auth.user);
+  const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
 
   const openPreview = async (file) => {
     setPreview(file);
@@ -147,6 +152,38 @@ export default function DocumentsPage() {
     } catch { toast.error("Failed to rename"); }
   };
 
+  // Toggle public/private on a folder or file via the dedicated backend
+  // set-visibility action. Optimistic UI update + reload to stay in sync.
+  const handleSetVisibility = async (id, type, value) => {
+    try {
+      const url = type === "folder"
+        ? `/documents/folders/${id}/set-visibility/`
+        : `/documents/${id}/set-visibility/`;
+      await api.post(url, { visibility: value });
+      // Optimistic local update
+      if (type === "folder") {
+        setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, visibility: value } : f)));
+      } else {
+        setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, visibility: value } : f)));
+        setAllFiles((prev) => prev.map((f) => (f.id === id ? { ...f, visibility: value } : f)));
+      }
+      setOpenMenu(null);
+      toast.success(`Marked as ${value}`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to update visibility"));
+    }
+  };
+
+  // Close the visibility menu when clicking outside
+  useEffect(() => {
+    if (!openMenu) return;
+    const handler = (e) => {
+      if (!e.target.closest("[data-visibility-menu]")) setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openMenu]);
+
   // Drag & drop + paste
   const onDragEnter = (e) => { e.preventDefault(); dragCounter.current++; setDragging(true); };
   const onDragLeave = (e) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current === 0) setDragging(false); };
@@ -218,8 +255,22 @@ export default function DocumentsPage() {
             <div className="mb-6">
               <p className="text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Folders</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                {filteredFolders.map(f => (
+                {filteredFolders.map(f => {
+                  const canManage = isAdminOrManager || f.created_by === currentUser?.id;
+                  const isPublic = f.visibility === "public";
+                  return (
                   <div key={f.id} onDoubleClick={() => navigateToFolder(f)} className="group bg-white border border-gray-200 rounded-xl p-4 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors relative">
+                    {/* Visibility badge — always visible (small pill in top-left corner) */}
+                    <span
+                      className={`absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold rounded-full ${
+                        isPublic
+                          ? "bg-green-100 text-green-700 border border-green-200"
+                          : "bg-gray-100 text-gray-600 border border-gray-200"
+                      }`}
+                      title={isPublic ? "Visible to everyone" : "Visible to you + admin/manager"}
+                    >
+                      {isPublic ? "🌐 PUBLIC" : "🔒 PRIVATE"}
+                    </span>
                     <div className="text-center">
                       <span className="text-4xl">📁</span>
                       {renaming === `folder-${f.id}` ? (
@@ -232,9 +283,42 @@ export default function DocumentsPage() {
                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
                       <button onClick={(e) => { e.stopPropagation(); setRenaming(`folder-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200" title="Rename">✏️</button>
                       <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }} className="w-6 h-6 bg-red-50 rounded text-[10px] hover:bg-red-100" title="Delete">🗑️</button>
+                      {canManage && (
+                        <div className="relative" data-visibility-menu>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === `folder-${f.id}` ? null : `folder-${f.id}`); }}
+                            className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200 flex items-center justify-center font-bold"
+                            title="More options"
+                          >
+                            ⋮
+                          </button>
+                          {openMenu === `folder-${f.id}` && (
+                            <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 text-left" onClick={(e) => e.stopPropagation()}>
+                              <p className="px-3 py-1 text-[10px] text-gray-400 uppercase font-semibold">Visibility</p>
+                              <button
+                                onClick={() => handleSetVisibility(f.id, "folder", "private")}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-2 ${!isPublic ? "font-semibold text-indigo-600" : "text-gray-700"}`}
+                              >
+                                <span>🔒</span>
+                                <span>Private</span>
+                                {!isPublic && <span className="ml-auto">✓</span>}
+                              </button>
+                              <button
+                                onClick={() => handleSetVisibility(f.id, "folder", "public")}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-2 ${isPublic ? "font-semibold text-indigo-600" : "text-gray-700"}`}
+                              >
+                                <span>🌐</span>
+                                <span>Public</span>
+                                {isPublic && <span className="ml-auto">✓</span>}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -244,8 +328,22 @@ export default function DocumentsPage() {
             <div>
               <p className="text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Files</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                {filteredFiles.map(f => (
+                {filteredFiles.map(f => {
+                  const canManage = isAdminOrManager || f.uploaded_by === currentUser?.id;
+                  const isPublic = f.visibility === "public";
+                  return (
                   <div key={f.id} onClick={() => openPreview(f)} className="group bg-white border border-gray-200 rounded-xl p-4 hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors relative cursor-pointer">
+                    {/* Visibility badge */}
+                    <span
+                      className={`absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold rounded-full z-10 ${
+                        isPublic
+                          ? "bg-green-100 text-green-700 border border-green-200"
+                          : "bg-gray-100 text-gray-600 border border-gray-200"
+                      }`}
+                      title={isPublic ? "Visible to everyone" : "Visible to you + admin/manager"}
+                    >
+                      {isPublic ? "🌐" : "🔒"}
+                    </span>
                     <div className="text-center">
                       {isImage(f.filename || f.name) && f.file ? (
                         <div className="w-full h-20 mb-1 flex items-center justify-center overflow-hidden rounded-lg bg-gray-50">
@@ -266,9 +364,42 @@ export default function DocumentsPage() {
                       {f.file && <a href={f.file} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="w-6 h-6 bg-indigo-50 rounded text-[10px] hover:bg-indigo-100 flex items-center justify-center" title="Download">⬇</a>}
                       <button onClick={(e) => { e.stopPropagation(); setRenaming(`file-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200" title="Rename">✏️</button>
                       <button onClick={(e) => { e.stopPropagation(); handleDeleteFile(f.id); }} className="w-6 h-6 bg-red-50 rounded text-[10px] hover:bg-red-100" title="Delete">🗑️</button>
+                      {canManage && (
+                        <div className="relative" data-visibility-menu>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === `file-${f.id}` ? null : `file-${f.id}`); }}
+                            className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200 flex items-center justify-center font-bold"
+                            title="More options"
+                          >
+                            ⋮
+                          </button>
+                          {openMenu === `file-${f.id}` && (
+                            <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40 text-left" onClick={(e) => e.stopPropagation()}>
+                              <p className="px-3 py-1 text-[10px] text-gray-400 uppercase font-semibold">Visibility</p>
+                              <button
+                                onClick={() => handleSetVisibility(f.id, "file", "private")}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-2 ${!isPublic ? "font-semibold text-indigo-600" : "text-gray-700"}`}
+                              >
+                                <span>🔒</span>
+                                <span>Private</span>
+                                {!isPublic && <span className="ml-auto">✓</span>}
+                              </button>
+                              <button
+                                onClick={() => handleSetVisibility(f.id, "file", "public")}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-2 ${isPublic ? "font-semibold text-indigo-600" : "text-gray-700"}`}
+                              >
+                                <span>🌐</span>
+                                <span>Public</span>
+                                {isPublic && <span className="ml-auto">✓</span>}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
