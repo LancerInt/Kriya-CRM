@@ -544,6 +544,31 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         except Exception as e:
             _log.warning(f'Could not update PI status for sent draft {draft.id}: {e}')
 
+        # Stamp the reply timestamp on any linked Sample requests so the
+        # Samples workflow stepper can advance from "Mail Received" to
+        # "Reply Mail". The actual physical-sample status (prepared/dispatched/
+        # delivered) is still managed by the executive on the Sample detail page.
+        # We also schedule a one-shot follow-up reminder so the executive gets
+        # notified if they don't progress the workflow within the threshold.
+        try:
+            from samples.models import Sample
+            from samples.tasks import schedule_sample_reply_reminder
+            from django.utils import timezone as _tz
+            samples_to_remind = list(Sample.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+                replied_at__isnull=True,
+            ).values_list('id', flat=True))
+            if samples_to_remind:
+                Sample.objects.filter(id__in=samples_to_remind).update(
+                    replied_at=_tz.now(),
+                    reminder_sent_at=None,  # re-arm in case it was set previously
+                )
+                for sid in samples_to_remind:
+                    schedule_sample_reply_reminder(sid)
+        except Exception as e:
+            _log.warning(f'Could not stamp Sample replied_at for sent draft {draft.id}: {e}')
+
         # Create outgoing Communication record — store the body that was
         # actually sent (with the signature appended) so the thread view
         # matches what the recipient received.
@@ -653,6 +678,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         from django.core.files.base import ContentFile
         from django.db import transaction
         from .auto_quote_service import process_communication_for_quote
+        from .tasks import _auto_create_sample_request
         from quotations.quotation_service import generate_quotation_pdf
 
         client_id = request.data.get('client_id')
@@ -677,6 +703,11 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         for comm in targets:
             try:
                 with transaction.atomic():
+                    # Sample auto-create — independent of quote detection
+                    try:
+                        _auto_create_sample_request(comm)
+                    except Exception:
+                        pass
                     qr = process_communication_for_quote(comm)
                     if not qr:
                         skipped += 1

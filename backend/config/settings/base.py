@@ -169,3 +169,7 @@ SIGNATURE_LOGO_URL = os.getenv(
     'SIGNATURE_LOGO_URL',
     'https://raw.githubusercontent.com/LancerInt/Kriya-CRM/main/frontend/public/logo.png',
 )
+
+# Lead time the AI quotes when acknowledging a sample request. Override via
+# the SAMPLE_DISPATCH_DAYS env var if your operational lead time changes.
+SAMPLE_DISPATCH_DAYS = os.getenv('SAMPLE_DISPATCH_DAYS', '10-15 days')

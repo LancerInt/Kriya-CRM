@@ -12,7 +12,9 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     filterset_fields = ['client', 'status']
     search_fields = ['product_name', 'tracking_number']
     def get_queryset(self):
-        return Sample.objects.select_related('client', 'product', 'created_by').all()
+        return Sample.objects.filter(is_deleted=False).select_related(
+            'client', 'product', 'created_by'
+        )
 
     def perform_create(self, serializer):
         sample = serializer.save(created_by=self.request.user)
@@ -31,6 +33,283 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             notification_type='system', link='/samples',
             actor=self.request.user, client=sample.client,
         )
+
+    @action(detail=False, methods=['post'], url_path='create-from-email')
+    def create_from_email(self, request):
+        """Create a Sample request pre-filled from an inbound email.
+
+        Body:
+          - client_id (required)
+          - communication_id (optional) — uses resolve_line_item_from_email
+            to extract product/quantity from the source email
+
+        Same flow as Quotation/PI create-blank: matches/creates the product
+        in the Products tab, and ties the Sample to the source communication
+        so future clicks reuse the same record (and the row appears in the
+        client's Samples tab automatically).
+        """
+        client_id = request.data.get('client_id')
+        communication_id = request.data.get('communication_id')
+        if not client_id:
+            return Response({'error': 'client_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from clients.models import Client
+        try:
+            client = Client.objects.get(id=client_id, is_deleted=False)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Reuse existing sample tied to this communication if any
+        if communication_id:
+            existing = Sample.objects.filter(
+                source_communication_id=communication_id, is_deleted=False
+            ).order_by('-created_at').first()
+            if existing:
+                return Response(SampleSerializer(existing).data, status=status.HTTP_200_OK)
+
+        # Resolve product / quantity from the source email
+        line = None
+        if communication_id:
+            try:
+                from communications.models import Communication
+                from communications.auto_quote_service import resolve_line_item_from_email
+                comm = Communication.objects.filter(id=communication_id).first()
+                if comm:
+                    line = resolve_line_item_from_email(client, comm)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f'Sample pre-fill failed: {e}')
+
+        if line:
+            qty_value = line.get('quantity') or 0
+            unit = line.get('unit') or ''
+            quantity_str = f"{qty_value:g} {unit}".strip() if qty_value else ''
+            sample = Sample.objects.create(
+                client=client,
+                source_communication_id=communication_id if communication_id else None,
+                product=line.get('product'),
+                product_name=line.get('product_name') or '',
+                client_product_name=line.get('client_product_name') or '',
+                quantity=quantity_str,
+                notes=f'Auto-created from client email request. {line.get("description", "")}'.strip(),
+                created_by=request.user,
+            )
+        else:
+            sample = Sample.objects.create(
+                client=client,
+                source_communication_id=communication_id if communication_id else None,
+                created_by=request.user,
+            )
+
+        notify(
+            title=f'Sample request created: {sample.product_name or "Pending"}',
+            message=f'{request.user.full_name} created a sample request for {client.company_name}.',
+            notification_type='system', link=f'/clients/{client.id}',
+            actor=request.user, client=client,
+        )
+        return Response(SampleSerializer(sample).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='advance')
+    def advance(self, request, pk=None):
+        """Advance the sample to the next workflow step.
+
+        Body params (all optional, depends on target step):
+          - target: prepared | dispatched | delivered
+          - tracking_number, courier_details (when target=dispatched)
+
+        Returns the updated Sample.
+        """
+        from django.utils import timezone as _tz
+        sample = self.get_object()
+        target = (request.data.get('target') or '').strip().lower()
+        tracking_number = (request.data.get('tracking_number') or '').strip()
+        courier_details = (request.data.get('courier_details') or '').strip()
+
+        if target == 'prepared':
+            sample.status = Sample.Status.PREPARED
+            sample.prepared_at = _tz.now()
+        elif target == 'dispatched':
+            sample.status = Sample.Status.DISPATCHED
+            if tracking_number:
+                sample.tracking_number = tracking_number
+            if courier_details:
+                sample.courier_details = courier_details
+            if not sample.dispatch_date:
+                sample.dispatch_date = _tz.now().date()
+        elif target == 'delivered':
+            sample.status = Sample.Status.DELIVERED
+            sample.delivered_at = _tz.now()
+        elif target == 'feedback_pending':
+            sample.status = Sample.Status.FEEDBACK_PENDING
+        else:
+            return Response({'error': f'Unknown target: {target}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sample.save()
+        notify(
+            title=f'Sample {target.replace("_", " ")}: {sample.product_name or "(no product)"}',
+            message=f'{request.user.full_name} marked sample as {target.replace("_", " ")} for {sample.client.company_name}.',
+            notification_type='system', link=f'/samples/{sample.id}',
+            actor=request.user, client=sample.client,
+        )
+        return Response(SampleSerializer(sample).data)
+
+    @action(detail=True, methods=['post'], url_path='revert')
+    def revert(self, request, pk=None):
+        """Revert the sample to the previous step in the workflow.
+
+        Only admins and managers can actually perform a revert. If an
+        executive triggers this endpoint, the revert is NOT applied and
+        a notification is sent to admin/manager instead so they can
+        review and approve the rollback.
+
+        Walks one step backwards through:
+            requested → prepared → dispatched → delivered → feedback_pending → feedback_received
+
+        Clears the timestamp for the step being undone so the stepper UI
+        reflects the correct progress.
+        """
+        sample = self.get_object()
+
+        # Role gate: only admin/manager can revert. Executives get a 403 and
+        # an admin/manager notification is created so they're aware of the
+        # request.
+        if request.user.role not in ('admin', 'manager'):
+            try:
+                product = sample.product_name or sample.client_product_name or '(no product)'
+                client_name = sample.client.company_name if sample.client else 'Unknown client'
+                notify(
+                    title=f'Revert requested: {product}',
+                    message=(
+                        f'{request.user.full_name} (executive) attempted to revert the sample for '
+                        f'{client_name} from "{sample.status.replace("_", " ").title()}". '
+                        f'Please review and revert it manually if appropriate.'
+                    ),
+                    notification_type='alert',
+                    link=f'/samples/{sample.id}',
+                    actor=request.user,  # don't notify the executive themselves
+                    client=sample.client,
+                )
+            except Exception:
+                pass
+            return Response(
+                {'error': 'Only admin or manager can revert a sample. The admin/manager has been notified of your request.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        order = ['requested', 'prepared', 'dispatched', 'delivered',
+                 'feedback_pending', 'feedback_received']
+        try:
+            cur_idx = order.index(sample.status)
+        except ValueError:
+            return Response({'error': 'Unknown current status'}, status=status.HTTP_400_BAD_REQUEST)
+        if cur_idx == 0:
+            return Response({'error': 'Already at the first step — nothing to revert'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Clear the timestamp for the step we're leaving
+        leaving = sample.status
+        if leaving == 'prepared':
+            sample.prepared_at = None
+            # Re-arm the reminder so it can fire again if no progress is made
+            sample.reminder_sent_at = None
+        elif leaving == 'dispatched':
+            sample.dispatch_date = None
+            sample.tracking_number = ''
+            sample.courier_details = ''
+        elif leaving == 'delivered':
+            sample.delivered_at = None
+        elif leaving in ('feedback_pending', 'feedback_received'):
+            # If we're reverting from a feedback state, drop the feedback row too
+            try:
+                if hasattr(sample, 'feedback') and sample.feedback is not None:
+                    sample.feedback.delete()
+            except Exception:
+                pass
+
+        sample.status = order[cur_idx - 1]
+        sample.save()
+
+        notify(
+            title=f'Sample reverted to {sample.status.replace("_", " ").title()}',
+            message=f'{request.user.full_name} reverted the sample status for {sample.client.company_name}.',
+            notification_type='alert', link=f'/samples/{sample.id}',
+            actor=request.user, client=sample.client,
+        )
+        return Response(SampleSerializer(sample).data)
+
+    @action(detail=True, methods=['get'], url_path='timeline')
+    def timeline(self, request, pk=None):
+        """Return the 6-step Sample workflow timeline for the stepper UI.
+
+        Steps:
+            1. Mail Received  - completed when source_communication is set
+            2. Reply Mail     - completed when replied_at is set
+            3. Prepared       - completed when status >= prepared
+            4. Dispatched     - completed when status >= dispatched
+            5. Delivered      - completed when status >= delivered
+            6. Feedback       - completed when feedback record exists
+        """
+        sample = self.get_object()
+
+        # Status ordering for the >= comparisons
+        order = ['requested', 'prepared', 'dispatched', 'delivered',
+                 'feedback_pending', 'feedback_received']
+        try:
+            cur_idx = order.index(sample.status)
+        except ValueError:
+            cur_idx = 0
+
+        has_feedback = hasattr(sample, 'feedback') and sample.feedback is not None
+
+        steps = [
+            {
+                'key': 'mail_received',
+                'label': 'Mail Received',
+                'completed': bool(sample.source_communication_id) or bool(sample.created_at),
+                'timestamp': (
+                    sample.source_communication.created_at if sample.source_communication_id
+                    else sample.created_at
+                ),
+            },
+            {
+                'key': 'reply_mail',
+                'label': 'Reply Mail',
+                'completed': bool(sample.replied_at),
+                'timestamp': sample.replied_at,
+            },
+            {
+                'key': 'prepared',
+                'label': 'Prepared',
+                'completed': cur_idx >= order.index('prepared'),
+                'timestamp': sample.prepared_at,
+            },
+            {
+                'key': 'dispatched',
+                'label': 'Dispatched',
+                'completed': cur_idx >= order.index('dispatched'),
+                'timestamp': sample.dispatch_date,
+            },
+            {
+                'key': 'delivered',
+                'label': 'Delivered',
+                'completed': cur_idx >= order.index('delivered'),
+                'timestamp': sample.delivered_at,
+            },
+            {
+                'key': 'feedback',
+                'label': 'Feedback',
+                'completed': has_feedback,
+                'timestamp': sample.feedback.created_at if has_feedback else None,
+            },
+        ]
+        # Mark the first incomplete step as "current"
+        for s in steps:
+            s['state'] = 'completed' if s['completed'] else 'pending'
+        for s in steps:
+            if s['state'] == 'pending':
+                s['state'] = 'current'
+                break
+        return Response(steps)
 
     @action(detail=True, methods=['post'])
     def add_feedback(self, request, pk=None):

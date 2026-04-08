@@ -525,6 +525,11 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [savedAttachments, setSavedAttachments] = useState([]); // from server
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  // True when a Sample row already exists for the draft's source communication.
+  // We hide the "Create Sample Request" button in that case so the user
+  // doesn't accidentally create duplicates (e.g. when they navigated here
+  // from /samples/[id] → "Reply to Client").
+  const [sampleAlreadyExists, setSampleAlreadyExists] = useState(false);
 
   // Convert plain text to HTML for rich editor
   const textToHtml = (text) => {
@@ -542,6 +547,18 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setSavedAttachments(res.data.attachments || []);
       setLastSavedAt(res.data.last_saved_at);
       setShowDraftModal(true);
+      // Check whether a Sample already exists for this email so the
+      // "Create Sample Request" button can be suppressed.
+      const commId = res.data.communication;
+      if (commId) {
+        try {
+          const sr = await api.get(`/samples/?source_communication=${commId}`);
+          const items = sr.data?.results || sr.data || [];
+          setSampleAlreadyExists(items.length > 0);
+        } catch { setSampleAlreadyExists(false); }
+      } else {
+        setSampleAlreadyExists(false);
+      }
     } catch { toast.error("Failed to load draft"); }
   };
 
@@ -613,7 +630,62 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         }
 
         const ok = await openDraftForComm(resolvedCommId);
-        if (!ok) toast.error("Could not open AI draft for that email");
+        if (!ok) {
+          toast.error("Could not open AI draft for that email");
+          return;
+        }
+
+        // Optional: pre-fill body with dispatch info from a sample. Triggered
+        // from /samples/[id] → "Notify Client" button via ?dispatchSampleId=...
+        const dispatchSampleId = searchParams.get("dispatchSampleId");
+        if (dispatchSampleId) {
+          try {
+            const sr = await api.get(`/samples/${dispatchSampleId}/`);
+            const s = sr.data || {};
+            const productLabel = s.product_name || s.client_product_name || "the requested sample";
+            const tracking = (s.tracking_number || "").trim();
+            const courier = (s.courier_details || "").trim();
+
+            // Compute estimated time of arrival — default to 5 working days
+            // from dispatch_date (or today). This is a sensible export-courier
+            // ballpark; the executive can edit before sending.
+            let etaText = "";
+            try {
+              const start = s.dispatch_date ? new Date(s.dispatch_date) : new Date();
+              const eta = new Date(start);
+              eta.setDate(eta.getDate() + 5);
+              etaText = eta.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+            } catch {}
+
+            const lines = [
+              `<p>Dear ${(s.client_name && s.client_name.split(" ")[0]) || "Sir/Madam"},</p>`,
+              `<p>I'm pleased to inform you that the <strong>${productLabel}</strong> sample has been dispatched.</p>`,
+            ];
+            // Always render every key field — when a value is missing, show
+            // a placeholder so the executive sees the line and fills it in
+            // before sending. This is especially important for Airway Bill No.
+            const detailBits = [];
+            detailBits.push(`<li><strong>Quantity:</strong> ${s.quantity || "—"}</li>`);
+            detailBits.push(`<li><strong>Courier:</strong> ${courier || "—"}</li>`);
+            detailBits.push(`<li><strong>Airway Bill No:</strong> ${tracking || "—"}</li>`);
+            detailBits.push(`<li><strong>Dispatch Date:</strong> ${s.dispatch_date || "—"}</li>`);
+            detailBits.push(`<li><strong>Estimated Time of Arrival (ETA):</strong> ${etaText || "—"}</li>`);
+            lines.push(`<p>Shipment details:</p><ul>${detailBits.join("")}</ul>`);
+            lines.push(
+              `<p>Please find the <strong>packaging images</strong> attached for your reference. Kindly verify the packaging upon receipt and let us know if everything is in order.</p>`
+            );
+            lines.push(`<p>We look forward to your feedback after evaluation.</p>`);
+            const dispatchHtml = lines.join("");
+            // Replace the body with the dispatch notification
+            setDraftForm((prev) => ({
+              ...prev,
+              subject: prev.subject || `Sample Dispatched: ${productLabel}`,
+              body: dispatchHtml,
+            }));
+          } catch {
+            // Best-effort; silent fail keeps the original AI draft body intact
+          }
+        }
       } catch {
         toast.error("Could not open AI draft");
       } finally {
@@ -641,6 +713,24 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     finally { setSavingDraft(false); }
   };
 
+  const [regenerating, setRegenerating] = useState(false);
+  const handleRegenerateDraft = async () => {
+    if (!draft) return;
+    if (!confirm("Regenerate this draft? Your current edits will be replaced with a fresh AI reply.")) return;
+    setRegenerating(true);
+    try {
+      const res = await api.post(`/communications/drafts/${draft.id}/regenerate/`);
+      setDraft(res.data);
+      setDraftForm({
+        subject: res.data.subject,
+        body: textToHtml(res.data.body),
+        cc: res.data.cc || draftForm.cc,
+      });
+      toast.success("AI draft regenerated");
+    } catch { toast.error("Failed to regenerate"); }
+    finally { setRegenerating(false); }
+  };
+
   const handleRemoveSavedAttachment = async (attId) => {
     try {
       await api.post(`/communications/drafts/${draft.id}/remove-attachment/`, { attachment_id: attId });
@@ -652,12 +742,31 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const handleSendDraft = async () => {
     setSendingDraft(true);
     try {
-      // Save draft edits first
-      await api.patch(`/communications/drafts/${draft.id}/`, {
-        subject: draftForm.subject,
-        body: draftForm.body,
-        cc: draftForm.cc,
-      });
+      let draftId = draft.id;
+
+      // If the loaded draft was already sent (e.g. user clicked Reply Again
+      // or Notify Client on a sample whose original reply has been sent),
+      // create a fresh draft for the same communication instead of trying
+      // to re-send the old one — the backend rejects sent drafts with
+      // "Only drafts can be sent".
+      if (draft.status === "sent") {
+        const created = await api.post("/communications/drafts/", {
+          communication: draft.communication,
+          client: draft.client || clientId,
+          subject: draftForm.subject,
+          body: draftForm.body,
+          to_email: draft.to_email,
+          cc: draftForm.cc || "",
+        });
+        draftId = created.data.id;
+      } else {
+        // Save draft edits first
+        await api.patch(`/communications/drafts/${draftId}/`, {
+          subject: draftForm.subject,
+          body: draftForm.body,
+          cc: draftForm.cc,
+        });
+      }
 
       // Upload any frontend attachments to the draft before sending
       if (draftAttachments.length > 0) {
@@ -666,10 +775,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         fd.append("body", draftForm.body);
         fd.append("cc", draftForm.cc || "");
         draftAttachments.forEach(file => fd.append("attachments", file));
-        await api.post(`/communications/drafts/${draft.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        await api.post(`/communications/drafts/${draftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
-
-      const draftId = draft.id;
 
       // Close modal immediately
       setShowDraftModal(false);
@@ -1077,10 +1184,11 @@ function CommunicationsTab({ clientId, activeTab, client }) {
 
             {/* Smart Generate Buttons — open editor, then attach */}
             {(() => {
-              const draftText = `${draftForm.subject || ""} ${draftForm.body || ""} ${draft?.communication?.subject || ""}`.toLowerCase();
-              const wantsQuote = /quotation|quote|pricing|price list|rate card|rates/i.test(draftText);
-              const wantsPI = /proforma invoice|proforma|performa|\bPI\b|send PI|need PI/i.test(draftText);
-              if (!wantsQuote && !wantsPI) return null;
+              const draftText = `${draftForm.subject || ""} ${draftForm.body || ""} ${draft?.communication?.subject || ""}`.toLowerCase().replace(/<[^>]+>/g, " ");
+              const wantsQuote = /\b(quotation|quote|pricing|price list|rate card|rates)\b/i.test(draftText);
+              const wantsPI = /\b(proforma invoice|proforma|performa|pi)\b|send pi|need pi/i.test(draftText);
+              const wantsSample = /\b(sample|samples|trial|swatch|free sample)\b/i.test(draftText);
+              if (!wantsQuote && !wantsPI && !wantsSample) return null;
 
               const openQuoteEditor = async () => {
                 try {
@@ -1099,6 +1207,21 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                   setAttachMode("quote");
                   toast.success(`Quotation ${qt.quotation_number} created — edit and attach`);
                 } catch { toast.error("Failed to create quotation"); }
+              };
+
+              const openSampleRequest = async () => {
+                try {
+                  const commId = draft?.communication || draft?.communication_id || null;
+                  const res = await api.post("/samples/create-from-email/", {
+                    client_id: clientId,
+                    communication_id: commId,
+                  });
+                  const sample = res.data;
+                  const productLabel = sample.product_name || sample.client_product_name || "(no product)";
+                  const qtyLabel = sample.quantity ? ` · ${sample.quantity}` : "";
+                  toast.success(`Sample request created for ${productLabel}${qtyLabel}`);
+                  setSampleAlreadyExists(true);
+                } catch { toast.error("Failed to create sample request"); }
               };
 
               const openPiEditor = async () => {
@@ -1151,26 +1274,38 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                       📄 Generate PI
                     </button>
                   )}
+                  {wantsSample && !sampleAlreadyExists && (
+                    <button
+                      onClick={openSampleRequest}
+                      title="Create a sample request for this client"
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100"
+                    >
+                      🧪 Create Sample Request
+                    </button>
+                  )}
                 </div>
               );
             })()}
 
-            <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-              <div className="flex gap-2">
-                <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-y-2 pt-2 border-t border-gray-200">
+              <div className="flex flex-wrap gap-2 items-center">
+                <button onClick={handleVoiceToText} className={`px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 whitespace-nowrap ${isListening ? 'text-red-700 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-purple-700 bg-purple-50 hover:bg-purple-100'}`}>
                   {isListening ? '⏹ Stop Recording' : '🎤 Voice to Text'}
                 </button>
                 <RefineDropdown body={draftForm.body} onRefined={(text) => setDraftForm({ ...draftForm, body: text })} contactName={draft?.to_email ? (client?.contacts?.find(c => c.email === draft.to_email)?.name || client?.contacts?.find(c => c.is_primary)?.name || '') : (client?.contacts?.find(c => c.is_primary)?.name || '')} />
-                <button onClick={handleSaveDraft} disabled={savingDraft} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50">
+                <button onClick={handleRegenerateDraft} disabled={regenerating} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 whitespace-nowrap text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-50" title="Regenerate the AI reply from scratch">
+                  {regenerating ? "Regenerating..." : "🔄 Regenerate"}
+                </button>
+                <button onClick={handleSaveDraft} disabled={savingDraft} className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 whitespace-nowrap text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50">
                   {savingDraft ? "Saving..." : "💾 Save as Draft"}
                 </button>
-                <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium">
+                <button onClick={handleDiscardDraft} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 font-medium whitespace-nowrap">
                   Discard
                 </button>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowDraftModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-                <button onClick={handleSendDraft} disabled={sendingDraft} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium text-sm hover:bg-indigo-700 disabled:opacity-50">
+              <div className="flex gap-2 items-center ml-auto">
+                <button onClick={() => setShowDraftModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 whitespace-nowrap">Cancel</button>
+                <button onClick={handleSendDraft} disabled={sendingDraft} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium text-sm hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
                   {sendingDraft ? "Sending..." : "Send Email"}
                 </button>
               </div>

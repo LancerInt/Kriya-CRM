@@ -140,6 +140,14 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Quote request detection failed for {comm.id}: {e}')
 
+            # Auto-detect sample request — independent from quote/PI, runs on
+            # any inbound email mentioning sample/trial keywords.
+            if direction == 'inbound' and client:
+                try:
+                    _auto_create_sample_request(comm)
+                except Exception as e:
+                    logger.error(f'Sample request detection failed for {comm.id}: {e}')
+
             total_synced += 1
 
         account.last_synced = timezone.now()
@@ -147,6 +155,63 @@ def sync_emails(email_account_id=None):
 
     logger.info(f'Email sync complete: {total_synced} new emails synced')
     return f'{total_synced} emails synced'
+
+
+def _auto_create_sample_request(communication):
+    """If an inbound email mentions sample/trial keywords, auto-create a
+    Sample row tied to it (and pre-fill product/quantity from the email).
+
+    Idempotent: if a Sample already exists for this communication, do nothing.
+    Same `resolve_line_item_from_email` resolver as Quotation/PI, so the
+    Product is matched/created in the master list and quantity is extracted.
+    """
+    import re as _re
+    from samples.models import Sample
+    from communications.auto_quote_service import resolve_line_item_from_email
+
+    if not communication.client:
+        return None
+
+    # Reuse existing sample for this communication
+    if Sample.objects.filter(source_communication=communication, is_deleted=False).exists():
+        return None
+
+    # Keyword check — only auto-create when the client actually asked for a sample
+    text = f'{communication.subject or ""} {communication.body or ""}'
+    text = _re.sub(r'<[^>]+>', ' ', text).lower()
+    if not _re.search(r'\b(sample|samples|trial|swatch|free sample)\b', text):
+        return None
+
+    line = resolve_line_item_from_email(communication.client, communication) or {}
+    qty_value = line.get('quantity') or 0
+    unit = line.get('unit') or ''
+    quantity_str = f"{qty_value:g} {unit}".strip() if qty_value else ''
+
+    sample = Sample.objects.create(
+        client=communication.client,
+        source_communication=communication,
+        product=line.get('product'),
+        product_name=line.get('product_name') or '',
+        client_product_name=line.get('client_product_name') or '',
+        quantity=quantity_str,
+        notes=f'Auto-created from inbound email request. {line.get("description", "")}'.strip(),
+        created_by=communication.user,
+    )
+
+    try:
+        from notifications.helpers import notify
+        notify(
+            title=f'Sample request: {sample.product_name or "(pending review)"}',
+            message=f'Auto-created sample request from email by {communication.client.company_name}.',
+            notification_type='alert',
+            link=f'/clients/{communication.client.id}',
+            client=communication.client,
+        )
+    except Exception:
+        pass
+
+    logger.info(f'Auto-created Sample {sample.id} from communication {communication.id}')
+    return sample
 
 
 def _generate_draft_for_email(communication):

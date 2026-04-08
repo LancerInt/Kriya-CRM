@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -20,6 +21,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function SamplesPage() {
+  const router = useRouter();
   const [samples, setSamples] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
@@ -27,6 +29,9 @@ export default function SamplesPage() {
   const [showModal, setShowModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [selectedSample, setSelectedSample] = useState(null);
+  // Edit / Delete state
+  const [editingSample, setEditingSample] = useState(null); // sample row being edited
+  const [deletingSample, setDeletingSample] = useState(null); // sample row pending delete confirmation
   const [form, setForm] = useState({
     client: "",
     product: "",
@@ -87,6 +92,45 @@ export default function SamplesPage() {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to create sample")); }
   };
 
+  const openEdit = (sample) => {
+    setEditingSample(sample);
+    setForm({
+      client: sample.client || "",
+      product: sample.product || "",
+      product_name: sample.product_name || "",
+      quantity: sample.quantity || "",
+      dispatch_date: sample.dispatch_date || "",
+      status: sample.status || "requested",
+      courier_details: sample.courier_details || "",
+      tracking_number: sample.tracking_number || "",
+      notes: sample.notes || "",
+    });
+    setShowModal(true);
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!editingSample) return;
+    try {
+      await api.patch(`/samples/${editingSample.id}/`, form);
+      toast.success("Sample updated");
+      setShowModal(false);
+      setEditingSample(null);
+      resetForm();
+      fetchSamples();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to update sample")); }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingSample) return;
+    try {
+      await api.delete(`/samples/${deletingSample.id}/`);
+      toast.success("Sample deleted");
+      setDeletingSample(null);
+      fetchSamples();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete sample")); }
+  };
+
   const handleFeedback = async (e) => {
     e.preventDefault();
     try {
@@ -118,12 +162,24 @@ export default function SamplesPage() {
       <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">{row.feedback.comments ? row.feedback.comments.slice(0, 30) + (row.feedback.comments.length > 30 ? "..." : "") : `Rating: ${row.feedback.rating}/5`}</span>
     ) : <span className="text-gray-400">{"\u2014"}</span> },
     { key: "actions", label: "", render: (row) => (
-      <div className="flex gap-1">
+      <div className="flex gap-1 items-center">
         {(row.status === "delivered" || row.status === "feedback_pending") && !row.feedback && (
           <button onClick={(e) => { e.stopPropagation(); openFeedback(row); }} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 px-2 py-1 rounded">
             Add Feedback
           </button>
         )}
+        <button
+          onClick={(e) => { e.stopPropagation(); openEdit(row); }}
+          className="text-xs text-blue-600 hover:text-blue-700 font-medium bg-blue-50 px-2 py-1 rounded"
+        >
+          Edit
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setDeletingSample(row); }}
+          className="text-xs text-red-600 hover:text-red-700 font-medium bg-red-50 px-2 py-1 rounded"
+        >
+          Delete
+        </button>
       </div>
     )},
   ];
@@ -141,10 +197,22 @@ export default function SamplesPage() {
           </button>
         }
       />
-      <DataTable columns={columns} data={samples} loading={loading} emptyTitle="No samples yet" emptyDescription="Create your first sample request" />
+      <DataTable
+        columns={columns}
+        data={samples}
+        loading={loading}
+        emptyTitle="No samples yet"
+        emptyDescription="Create your first sample request"
+        onRowClick={(row) => router.push(`/samples/${row.id}`)}
+      />
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Sample" size="lg">
-        <form onSubmit={handleCreate} className="space-y-4">
+      <Modal
+        open={showModal}
+        onClose={() => { setShowModal(false); setEditingSample(null); resetForm(); }}
+        title={editingSample ? "Edit Sample" : "New Sample"}
+        size="lg"
+      >
+        <form onSubmit={editingSample ? handleUpdate : handleCreate} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <SearchableSelect
               label="Account"
@@ -196,10 +264,57 @@ export default function SamplesPage() {
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className={inputClass} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Create Sample</button>
-            <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+              {editingSample ? "Save Changes" : "Create Sample"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowModal(false); setEditingSample(null); resetForm(); }}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation */}
+      <Modal
+        open={!!deletingSample}
+        onClose={() => setDeletingSample(null)}
+        title="Delete Sample?"
+        size="sm"
+      >
+        {deletingSample && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Are you sure you want to delete this sample request?
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+              <p className="font-medium text-gray-800">{deletingSample.product_name || "(no product)"}</p>
+              <p className="text-gray-500 mt-0.5">
+                {deletingSample.client_name}{deletingSample.quantity ? ` · ${deletingSample.quantity}` : ""}
+              </p>
+            </div>
+            <p className="text-xs text-gray-400">
+              This action cannot be undone from this page. The sample row will be removed from the list.
+            </p>
+            <div className="flex gap-2 pt-2 justify-end">
+              <button
+                onClick={() => setDeletingSample(null)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal open={showFeedbackModal} onClose={() => { setShowFeedbackModal(false); setSelectedSample(null); }} title="Add Feedback">

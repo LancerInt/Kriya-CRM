@@ -589,12 +589,30 @@ export default function CommunicationDetailPage() {
 
               {/* Smart Generate Buttons — open editor (pre-filled from email),
                   let user edit/preview, then attach the final PDF.
-                  Same flow as the AI Draft modal on the client page. */}
+                  Same flow as the AI Draft modal on the client page.
+
+                  IMPORTANT: keyword detection is scoped to the SPECIFIC message
+                  the user is replying to (not the whole thread), so threads
+                  that mixed quotation + PI talk earlier don't permanently show
+                  both buttons on every reply. PI keywords also exclude the
+                  word "quotation" so a pure-PI email doesn't trigger the
+                  Generate Quotation button just because "quote" is a substring
+                  of "Quotation" appearing nowhere here.
+                */}
               {(() => {
-                const allText = thread.map(m => `${m.subject || ""} ${m.body || ""}`).join(" ").toLowerCase();
-                const wantsQuote = /quotation|quote|pricing|price list|rate card|rates/i.test(allText);
-                const wantsPI = /proforma invoice|proforma|performa|PI\b|send PI|need PI/i.test(allText);
-                if ((!wantsQuote && !wantsPI) || !comm.client) return null;
+                // Find the message we're replying to: explicit target → latest inbound → current
+                const targetForKw =
+                  (replyTargetId && thread.find(m => m.id === replyTargetId)) ||
+                  [...thread].reverse().find(m => m.direction === "inbound") ||
+                  comm;
+                const text = `${targetForKw?.subject || ""} ${targetForKw?.body || ""}`.replace(/<[^>]+>/g, " ").toLowerCase();
+                // Quotation: must mention quote/quotation/pricing/etc. as a whole word
+                const wantsQuote = /\b(quotation|quote|pricing|price list|rate card|rates)\b/i.test(text);
+                // PI: explicit proforma / PI mentions
+                const wantsPI = /\b(proforma invoice|proforma|performa|pi)\b|send pi|need pi/i.test(text);
+                // Sample: client asking for a sample/trial
+                const wantsSample = /\b(sample|samples|trial|swatch|free sample)\b/i.test(text);
+                if ((!wantsQuote && !wantsPI && !wantsSample) || !comm.client) return null;
 
                 // Disable each button if a matching PDF is already attached
                 const allNames = [
@@ -635,6 +653,19 @@ export default function CommunicationDetailPage() {
                   } catch { toast.error("Failed to create PI"); }
                 };
 
+                const createSampleRequest = async () => {
+                  try {
+                    const res = await api.post("/samples/create-from-email/", {
+                      client_id: comm.client,
+                      communication_id: lastInbound.id,
+                    });
+                    const sample = res.data;
+                    const productLabel = sample.product_name || sample.client_product_name || "(no product)";
+                    const qtyLabel = sample.quantity ? ` · ${sample.quantity}` : "";
+                    toast.success(`Sample request created for ${productLabel}${qtyLabel}`);
+                  } catch { toast.error("Failed to create sample request"); }
+                };
+
                 return (
                   <div className="px-5 py-2 flex gap-2">
                     {wantsQuote && (
@@ -655,6 +686,15 @@ export default function CommunicationDetailPage() {
                         className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-orange-50 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-50"
                       >
                         📄 Generate PI
+                      </button>
+                    )}
+                    {wantsSample && (
+                      <button
+                        onClick={createSampleRequest}
+                        title="Create a sample request for this client"
+                        className="px-3 py-2 text-xs font-medium rounded-lg flex items-center gap-1 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100"
+                      >
+                        🧪 Create Sample Request
                       </button>
                     )}
                   </div>

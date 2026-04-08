@@ -52,4 +52,12 @@ app.conf.beat_schedule = {
         'task': 'workflows.check_stale_tasks',
         'schedule': crontab(hour=17, minute=0),  # 5:00 PM daily
     },
+    # Sample reply reminder — every minute, fire a notification for samples
+    # whose AI reply was sent but the workflow hasn't moved to "Prepared" yet.
+    # The task itself enforces the 2-minute (or longer) cool-down before
+    # actually sending a reminder, so running every minute is cheap.
+    'check-sample-reply-reminders-every-minute': {
+        'task': 'samples.check_sample_reply_reminders',
+        'schedule': crontab(minute='*'),
+    },
 }

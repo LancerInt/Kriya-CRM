@@ -35,6 +35,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from communications.models import Communication, EmailDraft, QuoteRequest, DraftAttachment
         from communications.auto_quote_service import process_communication_for_quote
+        from communications.tasks import _auto_create_sample_request
         from quotations.quotation_service import generate_quotation_pdf
         from django.core.files.base import ContentFile
 
@@ -74,6 +75,14 @@ class Command(BaseCommand):
                     continue
 
                 with transaction.atomic():
+                    # Sample auto-create — runs independently of quote detection
+                    try:
+                        _auto_create_sample_request(comm)
+                    except Exception as e:
+                        self.stdout.write(self.style.WARNING(
+                            f'  ! sample auto-create failed on {comm.id}: {e}'
+                        ))
+
                     qr = process_communication_for_quote(comm)
                     if not qr:
                         skipped += 1

@@ -50,29 +50,75 @@ def generate_email_reply(communication):
     original_body = _clean_html(communication.body or '')
     thread_context = _get_thread_context(communication)
 
-    # Fetch product/price context for the AI
+    # Detect intent — sample-only requests must NOT include any pricing.
+    # Quote/PI requests still need price context for the AI to draft properly.
+    email_lower = f"{original_subject} {original_body}".lower()
+    is_sample_request = bool(re.search(r'\b(sample|samples|trial|swatch|free sample)\b', email_lower))
+    is_quote_or_pi = bool(re.search(
+        r'\b(quotation|quote|pricing|price list|rate card|rates|proforma invoice|proforma|performa|pi)\b',
+        email_lower,
+    ))
+    sample_only = is_sample_request and not is_quote_or_pi
+
+    # Sample dispatch lead time — configurable, defaults to 10-15 days
+    from django.conf import settings as _settings
+    sample_lead_time = getattr(_settings, 'SAMPLE_DISPATCH_DAYS', '10-15 days')
+
+    # Fetch product/price context for the AI. We only include price info when
+    # the email is NOT a pure sample request — mentioning the price in a sample
+    # acknowledgment is unprofessional.
     product_context = ""
     if communication.client:
         try:
             from clients.models import ClientPriceList
             from products.models import Product
             prices = ClientPriceList.objects.filter(client=communication.client, is_deleted=False)[:10]
-            if prices.exists():
+            if prices.exists() and not sample_only:
                 price_lines = [f"- {p.product_name}: {p.currency} {p.unit_price}/{p.unit}" + (f" (client calls it: {p.client_product_name})" if p.client_product_name else "") for p in prices]
                 product_context = f"\nClient's Price List:\n" + "\n".join(price_lines)
             # Match product from email text
-            email_text = f"{original_subject} {original_body}".lower()
             for product in Product.objects.filter(is_deleted=False):
-                if product.name.lower() in email_text or (product.client_brand_names and any(b.strip().lower() in email_text for b in product.client_brand_names.split(",") if b.strip())):
-                    client_price = prices.filter(product_name__iexact=product.name).first()
-                    price_val = f"{client_price.currency} {client_price.unit_price}/{client_price.unit}" if client_price else f"USD {product.base_price}/{product.unit}"
-                    product_context += f"\nMatched Product: {product.name} ({product.concentration}) - Price: {price_val}"
+                if product.name.lower() in email_lower or (product.client_brand_names and any(b.strip().lower() in email_lower for b in product.client_brand_names.split(",") if b.strip())):
+                    if sample_only:
+                        product_context += f"\nMatched Product: {product.name} ({product.concentration})"
+                    else:
+                        client_price = prices.filter(product_name__iexact=product.name).first()
+                        price_val = f"{client_price.currency} {client_price.unit_price}/{client_price.unit}" if client_price else f"USD {product.base_price}/{product.unit}"
+                        product_context += f"\nMatched Product: {product.name} ({product.concentration}) - Price: {price_val}"
                     break
         except Exception:
             pass
 
-    # Build the prompt
-    prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
+    # Build the prompt — different rules for sample-only vs quote/PI/general
+    if sample_only:
+        prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
+The client has asked for a SAMPLE. Write a polite, helpful reply that confirms you'll arrange the sample.
+
+Client: {client_name}
+Contact: {contact_name}
+Original Subject: {original_subject}
+Original Email:
+{original_body[:1000]}
+{product_context}
+{f"Previous conversation context:{chr(10)}{thread_context}" if thread_context else ""}
+
+Sample dispatch lead time: {sample_lead_time}
+
+RULES:
+- Professional, warm, concise tone
+- Acknowledge the sample request clearly
+- Mention the SPECIFIC product name in **bold** (e.g. **Neem Oil 0.3%**)
+- State that the sample will be dispatched within **{sample_lead_time}** (bold this phrase)
+- Mention that the sample will be accompanied by **Certificate of Analysis (COA)**, **Technical Specifications**, and **Safety Data Sheet** (where available)
+- Offer to share dispatch tracking once the sample is shipped
+- Close with a forward-looking line about supporting their evaluation
+- ABSOLUTELY DO NOT mention any price, USD/MT amount, currency figure, quotation, or proforma invoice — this is purely a sample acknowledgment, prices belong in a separate quotation
+- Do NOT add any sign-off, "Best regards", "Thanks and Regards", or company name at the end — the signature is added separately by the system
+- Do NOT include email headers (From, To, Date)
+- Just write the reply body
+- Keep it under 130 words"""
+    else:
+        prompt = f"""You are a professional export trade executive at Kriya Biosys Private Limited.
 Write a reply email to the following client email.
 
 Client: {client_name}
@@ -91,7 +137,6 @@ RULES:
 - If they inquire about products, mention the SPECIFIC product name and its price in **bold**
 - If product price is available, write it as **USD 1,800/MT** (bold with currency)
 - If they ask about delivery, bold the delivery terms like **FOB Chennai**
-- If they mention samples, offer to arrange sample dispatch
 - If they confirm an order, acknowledge and outline next steps
 - Do NOT add any sign-off, "Best regards", "Thanks and Regards", or company name at the end — the signature is added separately by the system
 - Do NOT include email headers (From, To, Date)

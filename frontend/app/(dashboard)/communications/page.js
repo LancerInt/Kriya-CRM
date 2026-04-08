@@ -67,6 +67,29 @@ export default function CommunicationsPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [archivePrompt, setArchivePrompt] = useState(null); // { commId, senderEmail }
   const [followUpTick, setFollowUpTick] = useState(0); // forces age re-eval
+  // Conversation keys the user has explicitly dismissed (no follow-up needed).
+  // Persisted in localStorage so it survives reloads, keyed by client+contact.
+  // The dismissal is tied to the latest message id at the time of dismissal —
+  // a brand-new message in that conversation will re-arm the follow-up badge.
+  const [dismissedFollowUps, setDismissedFollowUps] = useState({});
+  // Confirmation popup for dismissing a follow-up. Holds the row that was
+  // clicked so we can finalize the dismissal on Proceed.
+  const [followUpDismissPrompt, setFollowUpDismissPrompt] = useState(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("kriya_dismissed_followups");
+      if (raw) setDismissedFollowUps(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const dismissFollowUp = (convKey, latestMsgId) => {
+    setDismissedFollowUps((prev) => {
+      const next = { ...prev, [convKey]: latestMsgId };
+      try { localStorage.setItem("kriya_dismissed_followups", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const loadData = useCallback(() => {
     dispatch(fetchCommunications());
@@ -78,10 +101,19 @@ export default function CommunicationsPage() {
     api.get("/auth/users/").then((r) => setExecutives((r.data.results || r.data).filter(u => u.role === "executive"))).catch(() => {});
   }, []);
 
-  // Re-evaluate follow-up ages every 30s so badges update without a reload.
-  // (The 2-min testing threshold makes this freshness very visible.)
+  // When the header sync button finishes, reload the activities list so any
+  // newly synced inbound emails appear without a manual page refresh.
   useEffect(() => {
-    const t = setInterval(() => setFollowUpTick((n) => n + 1), 30 * 1000);
+    const handler = () => loadData();
+    window.addEventListener("kriya:emails-synced", handler);
+    return () => window.removeEventListener("kriya:emails-synced", handler);
+  }, [loadData]);
+
+  // Re-evaluate follow-up ages periodically so badges update without a reload.
+  // 5 minutes is plenty given the 5-day threshold — a freshly-overdue thread
+  // will appear within 5 minutes of crossing the boundary.
+  useEffect(() => {
+    const t = setInterval(() => setFollowUpTick((n) => n + 1), 5 * 60 * 1000);
     return () => clearInterval(t);
   }, []);
 
@@ -113,9 +145,7 @@ export default function CommunicationsPage() {
     //   - latest is INBOUND  → we owe the client a reply  → kind=reply
     //   - latest is OUTBOUND → client hasn't responded    → kind=followup
     // Tagged rows bubble to the top, sorted by most-overdue first.
-    // TESTING: threshold is 2 minutes. Bump to days for production
-    // (e.g. FOLLOWUP_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000).
-    const FOLLOWUP_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+    const FOLLOWUP_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
     if (filterTab !== "drafts" && filterTab !== "unmatched") {
       // Group by conversation key
       const groups = new Map();
@@ -128,10 +158,17 @@ export default function CommunicationsPage() {
       // For each group, mark only the latest message
       const followUpById = new Map();
       const now = Date.now();
-      groups.forEach((items) => {
+      groups.forEach((items, convKey) => {
         items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const latest = items[0];
         if (!latest?.created_at) return;
+        // If the user explicitly dismissed this conversation AND no newer
+        // message has arrived since, skip it. A brand-new message in the same
+        // conversation will have a different latest.id, so the dismissal is
+        // automatically invalidated and the badge re-arms.
+        if (dismissedFollowUps[convKey] && dismissedFollowUps[convKey] === latest.id) {
+          return;
+        }
         const ageMs = now - new Date(latest.created_at).getTime();
         if (ageMs >= FOLLOWUP_THRESHOLD_MS) {
           // Pick the largest unit that fits, so the badge reads naturally
@@ -143,7 +180,7 @@ export default function CommunicationsPage() {
           else if (hours >= 1) { amount = hours; unit = hours === 1 ? "hour" : "hours"; }
           else { amount = minutes; unit = minutes === 1 ? "minute" : "minutes"; }
           followUpById.set(latest.id, {
-            amount, unit, ageMs,
+            amount, unit, ageMs, convKey,
             kind: latest.direction === "inbound" ? "reply" : "followup",
           });
         }
@@ -163,7 +200,7 @@ export default function CommunicationsPage() {
       });
     }
     return filtered;
-  }, [list, filterTab, filterClient, filterExec, unmatchedCategory, followUpTick]);
+  }, [list, filterTab, filterClient, filterExec, unmatchedCategory, followUpTick, dismissedFollowUps]);
 
   const unreadCount = useMemo(() => list.filter((item) => !item.is_read && item.is_client_mail).length, [list]);
   const unmatchedEmails = useMemo(() => list.filter((item) => !item.is_client_mail), [list]);
@@ -329,15 +366,29 @@ export default function CommunicationsPage() {
       <div className="flex items-center gap-2 flex-wrap">
         <span className={row.is_read ? "text-gray-600" : "font-semibold text-gray-900"}>{row.subject || "\u2014"}</span>
         {row._followUp && (
-          row._followUp.kind === "reply" ? (
-            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-300 animate-pulse">
-              Not responded for {row._followUp.amount} {row._followUp.unit} — Reply?
-            </span>
-          ) : (
-            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-700 border border-amber-300">
-              No reply for {row._followUp.amount} {row._followUp.unit} — Follow up?
-            </span>
-          )
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+              row._followUp.kind === "reply"
+                ? "bg-red-100 text-red-700 border-red-300 animate-pulse"
+                : "bg-amber-100 text-amber-700 border-amber-300"
+            }`}
+          >
+            {row._followUp.kind === "reply"
+              ? `Not responded for ${row._followUp.amount} ${row._followUp.unit} — Reply?`
+              : `No reply for ${row._followUp.amount} ${row._followUp.unit} — Follow up?`}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setFollowUpDismissPrompt(row);
+              }}
+              title="No follow-up needed"
+              className={`ml-0.5 -mr-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/60 ${
+                row._followUp.kind === "reply" ? "text-red-700" : "text-amber-700"
+              }`}
+            >
+              ×
+            </button>
+          </span>
         )}
       </div>
     )},
@@ -721,6 +772,51 @@ export default function CommunicationsPage() {
                 )}
               </div>
               <button onClick={() => setSelectedComm(null)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-sm hover:bg-gray-50">Close</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Dismiss Follow-up Confirmation */}
+      <Modal
+        open={!!followUpDismissPrompt}
+        onClose={() => setFollowUpDismissPrompt(null)}
+        title="Dismiss Follow-up?"
+        size="sm"
+      >
+        {followUpDismissPrompt && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Mark this conversation as <strong>no follow-up needed</strong>?
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+              <p className="font-medium text-gray-800 truncate">{followUpDismissPrompt.subject || "(No subject)"}</p>
+              <p className="text-gray-500 mt-0.5">
+                {followUpDismissPrompt.client_name || followUpDismissPrompt.external_email || followUpDismissPrompt.external_phone}
+              </p>
+            </div>
+            <p className="text-xs text-gray-400">
+              The reminder badge will be removed from this row. If a new message arrives in this conversation, the badge will reappear automatically.
+            </p>
+            <div className="flex gap-2 pt-2 justify-end">
+              <button
+                onClick={() => setFollowUpDismissPrompt(null)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const row = followUpDismissPrompt;
+                  if (row?._followUp?.convKey) {
+                    dismissFollowUp(row._followUp.convKey, row.id);
+                  }
+                  setFollowUpDismissPrompt(null);
+                }}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+              >
+                Proceed
+              </button>
             </div>
           </div>
         )}
