@@ -153,8 +153,19 @@ export default function DocumentsPage() {
   };
 
   // Toggle public/private on a folder or file via the dedicated backend
-  // set-visibility action. Optimistic UI update + reload to stay in sync.
+  // set-visibility action. When switching from private → public, show a
+  // confirmation popup so the user doesn't accidentally expose a file.
   const handleSetVisibility = async (id, type, value) => {
+    // Find current item to check if it's a private → public switch
+    const current = type === "folder"
+      ? folders.find(f => f.id === id)
+      : files.find(f => f.id === id);
+    if (current?.visibility === "private" && value === "public") {
+      if (!confirm("This will make it visible to everyone in the organization. Are you sure you want to make it public?")) {
+        setOpenMenu(null);
+        return;
+      }
+    }
     try {
       const url = type === "folder"
         ? `/documents/folders/${id}/set-visibility/`
@@ -279,6 +290,7 @@ export default function DocumentsPage() {
                         <p className="text-sm font-medium text-gray-800 mt-1 truncate">{f.name}</p>
                       )}
                       <p className="text-[10px] text-gray-400">{f.file_count} file{f.file_count !== 1 ? "s" : ""} · {f.subfolder_count} folder{f.subfolder_count !== 1 ? "s" : ""}</p>
+                      {f.created_by_name && <p className="text-[10px] text-gray-400 mt-0.5">by {f.created_by_name}</p>}
                     </div>
                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
                       <button onClick={(e) => { e.stopPropagation(); setRenaming(`folder-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200" title="Rename">✏️</button>
@@ -359,6 +371,7 @@ export default function DocumentsPage() {
                       )}
                       <p className="text-[10px] text-gray-400">{fmtSize(f.file_size)}{isSearching && f.folder_name ? ` · 📁 ${f.folder_name}` : ""}</p>
                       <p className="text-[10px] text-gray-400">{f.created_at ? format(new Date(f.created_at), "MMM d, yyyy") : ""}</p>
+                      {f.uploaded_by_name && <p className="text-[10px] text-gray-400">by {f.uploaded_by_name}</p>}
                     </div>
                     <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
                       {f.file && <a href={f.file} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="w-6 h-6 bg-indigo-50 rounded text-[10px] hover:bg-indigo-100 flex items-center justify-center" title="Download">⬇</a>}

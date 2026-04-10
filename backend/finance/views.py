@@ -372,6 +372,12 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         pi = self.get_object()
         from .pi_service import send_pi_email
         try:
+            # Assign a permanent sequential number at send-time
+            if pi.status != 'sent':
+                from .models import generate_pi_number
+                pi.invoice_number = generate_pi_number()
+                pi.status = 'sent'
+                pi.save(update_fields=['invoice_number', 'status'])
             sent_to = send_pi_email(pi, request.user)
             notify(
                 title=f'PI {pi.invoice_number} sent to {pi.client.company_name}',
@@ -481,9 +487,9 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
         new_version = (original.version or 1) + 1
 
-        count = ProformaInvoice.objects.count() + 1
+        from .models import generate_pi_number
         today = dt_date.today()
-        invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
+        invoice_number = generate_pi_number()
 
         pi = ProformaInvoice.objects.create(
             client=original.client,
@@ -664,9 +670,9 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 parent_pi = previous
                 next_version = (previous.version or 1) + 1
 
-        count = ProformaInvoice.objects.count() + 1
+        from .models import generate_pi_number
         today = dt_date.today()
-        invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
+        invoice_number = generate_pi_number()
 
         # When this is a revision, copy structural fields from the parent so
         # the new version starts with the same terms / ports / packaging as the

@@ -103,6 +103,41 @@ class GSTRecord(TimeStampedModel):
         db_table = 'gst_records'
 
 
+def generate_pi_number():
+    """
+    Generate PI number in format: YY-MM/KB-NNN
+    YY = 2-digit year, MM = current month.
+    NNN = sequential counter of SENT PIs in the current financial year
+    (April to March). Resets every April.
+
+    Only sent PIs consume a number — drafts that were never sent don't
+    affect the sequence. The final number is assigned at send-time.
+
+    Handles legacy data: if the generated number already exists (from PIs
+    created before this numbering scheme), keeps incrementing until a
+    unique number is found.
+    """
+    from datetime import date
+    today = date.today()
+    fy_year = today.year if today.month >= 4 else today.year - 1
+    fy_start = date(fy_year, 4, 1)
+    fy_end = date(fy_year + 1, 3, 31)
+
+    sent_count = ProformaInvoice.objects.filter(
+        created_at__date__gte=fy_start,
+        created_at__date__lte=fy_end,
+        status='sent',
+    ).count()
+
+    prefix = today.strftime("%y-%m")
+    seq = sent_count + 1
+    candidate = f'{prefix}/KB-{seq:03d}'
+    while ProformaInvoice.objects.filter(invoice_number=candidate).exists():
+        seq += 1
+        candidate = f'{prefix}/KB-{seq:03d}'
+    return candidate
+
+
 class ProformaInvoice(TimeStampedModel):
     """
     Dedicated Proforma Invoice matching the Kriya Biosys PI template.
@@ -173,12 +208,12 @@ class ProformaInvoiceItem(models.Model):
     """Line items for Proforma Invoice — matching Packing Details section."""
     id = models.AutoField(primary_key=True)
     pi = models.ForeignKey(ProformaInvoice, on_delete=models.CASCADE, related_name='items')
-    product_name = models.CharField(max_length=255, help_text='Company/internal product name')
-    client_product_name = models.CharField(max_length=255, blank=True, default='', help_text='Product name as the client calls it')
+    product_name = models.TextField(help_text='Company/internal product name')
+    client_product_name = models.TextField(blank=True, default='', help_text='Product name as the client calls it')
     packages_description = models.TextField(blank=True, help_text='No. & Kind of Packages')
     description_of_goods = models.TextField(blank=True, help_text='Description + NCM Code + LOTE')
     quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    unit = models.CharField(max_length=20, default='Ltrs')
+    unit = models.TextField(default='Ltrs', blank=True)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_price = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 

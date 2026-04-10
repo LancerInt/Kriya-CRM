@@ -10,6 +10,7 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import SearchableSelect from "@/components/ui/SearchableSelect";
+import PdfViewer from "@/components/ui/PdfViewer";
 
 export default function ProformaInvoicesPage() {
   const router = useRouter();
@@ -27,6 +28,7 @@ export default function ProformaInvoicesPage() {
   const [piItems, setPiItems] = useState([]);
   const [piLoading, setPiLoading] = useState(false);
   const [piSending, setPiSending] = useState(false);
+  const [pdfView, setPdfView] = useState(null);
 
   // Review modal
   const [selectedPI, setSelectedPI] = useState(null);
@@ -118,10 +120,7 @@ export default function ProformaInvoicesPage() {
     await handleSavePI();
     try {
       const res = await api.get(`/finance/pi/${pi.id}/generate-pdf/`, { responseType: "blob" });
-      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const title = `PI ${pi.invoice_number} - ${pi.client_company_name}`;
-      const w = window.open("", "_blank");
-      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+      setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: `PI ${pi.invoice_number} - ${pi.client_company_name}` });
     } catch { toast.error("Failed to preview"); }
   };
 
@@ -157,13 +156,7 @@ export default function ProformaInvoicesPage() {
   const _viewPiPdf = async (piId) => {
     try {
       const res = await api.get(`/finance/pi/${piId}/generate-pdf/`, { responseType: "blob" });
-      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const w = window.open("", "_blank");
-      if (w) {
-        w.document.title = "Proforma Invoice";
-        w.document.write(`<html><head><title>Proforma Invoice</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
-        w.document.close();
-      }
+      setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: "Proforma Invoice" });
     } catch { toast.error("Failed to load PI PDF"); }
   };
 
@@ -521,6 +514,7 @@ export default function ProformaInvoicesPage() {
         onSave={handleSavePI} onPreview={handlePreviewPI}
         onSend={handleSendPI} sending={piSending} sendLabel="Attach to Email"
       />
+      <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
     </div>
   );
 }

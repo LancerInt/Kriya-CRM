@@ -9,6 +9,7 @@ import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
+import PdfViewer from "@/components/ui/PdfViewer";
 
 /**
  * Quotations list page — every quotation row (draft, sent, approved, etc.)
@@ -29,6 +30,7 @@ export default function QuotationsPage() {
   const [qtItems, setQtItems] = useState([]);
   const [qtLoading, setQtLoading] = useState(false);
   const [qtSending, setQtSending] = useState(false);
+  const [pdfView, setPdfView] = useState(null);
 
   const loadQuotations = async () => {
     try {
@@ -94,10 +96,7 @@ export default function QuotationsPage() {
     await handleSaveQt();
     try {
       const res = await api.get(`/quotations/quotations/${qt.id}/generate-pdf/`, { responseType: "blob" });
-      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const title = `Quotation ${qt.quotation_number} - ${qt.client_name || "Client"}`;
-      const w = window.open("", "_blank");
-      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+      setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: `Quotation ${qt.quotation_number} - ${qt.client_name || "Client"}` });
     } catch { toast.error("Failed to preview"); }
   };
 
@@ -293,6 +292,7 @@ export default function QuotationsPage() {
         onSave={handleSaveQt} onPreview={handlePreviewQt}
         onSend={handleSendQt} sending={qtSending}
       />
+      <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
     </div>
   );
 }

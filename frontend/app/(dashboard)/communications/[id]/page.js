@@ -12,6 +12,7 @@ import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import PIEditorModal from "@/components/finance/PIEditorModal";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import EmailChips from "@/components/ui/EmailChips";
+import PdfViewer from "@/components/ui/PdfViewer";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -98,6 +99,7 @@ export default function CommunicationDetailPage() {
   const [attachQtItems, setAttachQtItems] = useState([]);
   const [attachPi, setAttachPi] = useState(null);
   const [attachMode, setAttachMode] = useState(null); // 'quote' | 'pi' | null
+  const [pdfView, setPdfView] = useState(null);
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -902,9 +904,7 @@ export default function CommunicationDetailPage() {
             Object.entries(attachQtForm).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
             await api.post(`/quotations/quotations/${attachQt.id}/save-with-items/`, { ...attachQtForm, display_overrides, items: attachQtItems });
             const res = await api.get(`/quotations/quotations/${attachQt.id}/generate-pdf/`, { responseType: "blob" });
-            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-            const w = window.open("", "_blank");
-            if (w) { w.document.write(`<html><body style="margin:0"><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+            setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: `Quotation ${attachQt.quotation_number}` });
           } catch { toast.error("Failed to preview"); }
         }}
         onSend={async () => {
@@ -951,9 +951,7 @@ export default function CommunicationDetailPage() {
             Object.entries(attachPi).forEach(([k, v]) => { if (k.startsWith("_")) display_overrides[k] = v; });
             await api.post(`/finance/pi/${attachPi.id}/save-with-items/`, { ...attachPi, display_overrides, items: attachPi.items });
             const res = await api.get(`/finance/pi/${attachPi.id}/generate-pdf/`, { responseType: "blob" });
-            const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-            const w = window.open("", "_blank");
-            if (w) { w.document.write(`<html><body style="margin:0"><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+            setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: `PI ${attachPi.invoice_number}` });
           } catch { toast.error("Failed to preview"); }
         }}
         onSend={async () => {
@@ -971,6 +969,7 @@ export default function CommunicationDetailPage() {
           } catch (err) { toast.error(getErrorMessage(err, "Failed to attach")); }
         }}
       />
+      <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
     </div>
   );
 }

@@ -5,10 +5,11 @@ from .models import Document, Folder
 class FolderSerializer(serializers.ModelSerializer):
     file_count = serializers.SerializerMethodField()
     subfolder_count = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
 
     class Meta:
         model = Folder
-        fields = ['id', 'name', 'parent', 'created_by', 'visibility',
+        fields = ['id', 'name', 'parent', 'created_by', 'created_by_name', 'visibility',
                   'file_count', 'subfolder_count', 'created_at']
         read_only_fields = ['id', 'created_by']
 

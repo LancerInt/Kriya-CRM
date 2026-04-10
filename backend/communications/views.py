@@ -533,14 +533,26 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                     attached_qnums.add(m.group(1).replace('-', '/'))
 
             if attached_qnums:
-                Quotation.objects.filter(
+                from quotations.models import generate_quotation_number
+                for q in Quotation.objects.filter(
                     quotation_number__in=attached_qnums,
                     is_deleted=False,
-                ).exclude(status='sent').update(
-                    status='sent',
-                    sent_at=timezone.now(),
-                    sent_via='email',
-                )
+                ).exclude(status='sent'):
+                    # Assign a permanent sequential number at send-time so
+                    # the sequence only advances for actually-sent quotes.
+                    old_number = q.quotation_number
+                    q.quotation_number = generate_quotation_number()
+                    q.status = 'sent'
+                    q.sent_at = timezone.now()
+                    q.sent_via = 'email'
+                    q.save(update_fields=['quotation_number', 'status', 'sent_at', 'sent_via'])
+                    # Update the attachment filename to match the new number
+                    # so future sends / filename-parsing still works.
+                    new_fname = f'Quotation_{q.quotation_number.replace("/", "-")}.pdf'
+                    old_fname = f'Quotation_{old_number.replace("/", "-")}.pdf'
+                    draft.attachments.filter(filename=old_fname).update(filename=new_fname)
+                    attached_qnums.discard(old_number)
+                    attached_qnums.add(q.quotation_number)
 
             qr = QuoteRequest.objects.filter(
                 source_communication=draft.communication,
@@ -550,10 +562,12 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                 # Backwards-compat: if there were no parseable attachments
                 # (e.g. older drafts) still flip the original linked V1.
                 if not attached_qnums and qr.linked_quotation and qr.linked_quotation.status != 'sent':
+                    from quotations.models import generate_quotation_number
+                    qr.linked_quotation.quotation_number = generate_quotation_number()
                     qr.linked_quotation.status = 'sent'
                     qr.linked_quotation.sent_at = timezone.now()
                     qr.linked_quotation.sent_via = 'email'
-                    qr.linked_quotation.save(update_fields=['status', 'sent_at', 'sent_via'])
+                    qr.linked_quotation.save(update_fields=['quotation_number', 'status', 'sent_at', 'sent_via'])
                 if qr.status != 'converted':
                     qr.status = 'converted'
                     qr.save(update_fields=['status'])
@@ -576,17 +590,32 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                     attached_pinums.add(m.group(1).replace('-', '/'))
 
             if attached_pinums:
-                ProformaInvoice.objects.filter(
+                from finance.models import generate_pi_number
+                for p in ProformaInvoice.objects.filter(
                     invoice_number__in=attached_pinums,
                     is_deleted=False,
-                ).exclude(status='sent').update(status='sent')
+                ).exclude(status='sent'):
+                    old_number = p.invoice_number
+                    p.invoice_number = generate_pi_number()
+                    p.status = 'sent'
+                    p.save(update_fields=['invoice_number', 'status'])
+                    # Update attachment filename to match
+                    new_fname = f'PI_{p.invoice_number.replace("/", "-")}.pdf'
+                    old_fname = f'PI_{old_number.replace("/", "-")}.pdf'
+                    draft.attachments.filter(filename=old_fname).update(filename=new_fname)
+                    attached_pinums.discard(old_number)
+                    attached_pinums.add(p.invoice_number)
             else:
                 # Backwards-compat: legacy drafts without parseable filenames
-                ProformaInvoice.objects.filter(
+                from finance.models import generate_pi_number
+                for p in ProformaInvoice.objects.filter(
                     source_communication=draft.communication,
                     is_deleted=False,
                     status='draft',
-                ).update(status='sent')
+                ):
+                    p.invoice_number = generate_pi_number()
+                    p.status = 'sent'
+                    p.save(update_fields=['invoice_number', 'status'])
         except Exception as e:
             _log.warning(f'Could not update PI status for sent draft {draft.id}: {e}')
 

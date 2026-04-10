@@ -8,21 +8,31 @@ def generate_quotation_number():
     Generate quotation number in format: YYYY/KBnnn
     YYYY = financial year (April 1 start).
     If current month >= April, FY = current year. If < April, FY = current year - 1.
-    Sequence resets per financial year.
+
+    The sequence counter only advances based on SENT quotations — drafts
+    that were never sent don't consume a number. This prevents gaps like
+    KB001, KB005, KB010 when many drafts are created but few are mailed out.
     """
     today = date.today()
     fy_year = today.year if today.month >= 4 else today.year - 1
 
-    # Count quotations in this financial year
+    # Count only SENT quotations in this financial year for the sequence
     fy_start = date(fy_year, 4, 1)
     fy_end = date(fy_year + 1, 3, 31)
     from quotations.models import Quotation
-    count = Quotation.objects.filter(
+    sent_count = Quotation.objects.filter(
         created_at__date__gte=fy_start,
         created_at__date__lte=fy_end,
-    ).count() + 1
+        status='sent',
+    ).count()
 
-    return f'{fy_year}/KB{count:03d}'
+    # Next number = sent count + 1, skip any that already exist (legacy data)
+    seq = sent_count + 1
+    candidate = f'{fy_year}/KB{seq:03d}'
+    while Quotation.objects.filter(quotation_number=candidate).exists():
+        seq += 1
+        candidate = f'{fy_year}/KB{seq:03d}'
+    return candidate
 
 
 class Quotation(TimeStampedModel):

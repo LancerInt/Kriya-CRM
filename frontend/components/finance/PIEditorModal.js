@@ -12,7 +12,21 @@ import { getErrorMessage } from "@/lib/errorHandler";
  */
 export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, piItems, setPiItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const piInit = useRef(null);
+  const piTableRef = useRef(null);
   const [products, setProducts] = useState([]);
+
+  // Auto-resize all textareas in the packing details table whenever items
+  // change (e.g. after save-with-items returns and replaces piItems, or
+  // after closing and reopening the modal). Without this, textareas reset
+  // to rows=1 but multi-line content overflows hidden.
+  useEffect(() => {
+    if (!piTableRef.current) return;
+    const textareas = piTableRef.current.querySelectorAll("textarea");
+    textareas.forEach((ta) => {
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    });
+  }, [piItems, open]);
 
   // Fetch products for price auto-populate
   useEffect(() => {
@@ -221,7 +235,7 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
 
         {/* ── PACKING DETAILS ── */}
         <div className="text-right text-lg font-light mb-1" style={{ color: "#999" }}>PACKING DETAILS</div>
-        <table className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
+        <table ref={piTableRef} className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
           <thead>
             <tr style={{ backgroundColor: "#558b2f" }}>
               <th className="border border-gray-400 p-1 text-left text-white text-[9px]">Product Details</th>

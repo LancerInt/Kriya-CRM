@@ -9,8 +9,22 @@ import api from "@/lib/axios";
  */
 export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtForm, qtItems, setQtItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const initialized = useRef(null);
+  const tableRef = useRef(null);
   const [products, setProducts] = useState([]);
   const [clientPriceList, setClientPriceList] = useState([]);
+
+  // Auto-resize all textareas in the items table whenever items change
+  // (e.g. after save-with-items returns and replaces qtItems). Without this,
+  // textareas reset to rows=1 but the content may have newlines, so the
+  // extra lines overflow hidden.
+  useEffect(() => {
+    if (!tableRef.current) return;
+    const textareas = tableRef.current.querySelectorAll("textarea");
+    textareas.forEach((ta) => {
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    });
+  }, [qtItems, open]);
   const [logoSrc, setLogoSrc] = useState("/logo.png");
   const [sealSrc, setSealSrc] = useState("/seal.png");
   const [signSrc, setSignSrc] = useState("/sign.png");
@@ -277,7 +291,7 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
 
         {/* ── PACKING DETAILS TABLE ── */}
         <div className="text-right text-lg font-light mb-1" style={{ color: "#999" }}>PACKING DETAILS</div>
-        <table className="w-full border-collapse border border-gray-400 text-sm mb-1">
+        <table ref={tableRef} className="w-full border-collapse border border-gray-400 text-sm mb-1">
           <thead>
             <tr style={{ backgroundColor: "#558b2f" }}>
               <th className="border border-gray-400 p-1 text-left text-white text-sm">Product Name</th>
@@ -295,17 +309,55 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
               return (
                 <tr key={item.id || i}>
                   <td className="border border-gray-400 p-0">
-                    <input
+                    <textarea
                       value={item.product_name}
                       onChange={(e) => updateItem(i, "product_name", e.target.value)}
-                      className={ic}
+                      className={ic + " resize-none overflow-hidden"}
                       placeholder="-"
+                      rows={1}
+                      onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
                     />
                   </td>
-                  <td className="border border-gray-400 p-0"><input value={item.client_product_name != null ? item.client_product_name : ""} onChange={(e) => updateItem(i, "client_product_name", e.target.value)} className={ic} placeholder="-" /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" value={parseFloat(item.quantity) ? item.quantity : ""} onChange={(e) => updateItem(i, "quantity", e.target.value)} placeholder="-" className={icr + " w-20"} /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.unit || ""} onChange={(e) => updateItem(i, "unit", e.target.value)} className={ic + " text-center w-16"} placeholder="KG" /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={parseFloat(item.unit_price) ? item.unit_price : ""} onChange={(e) => updateItem(i, "unit_price", e.target.value)} placeholder="-" className={icr + " w-24"} /></td>
+                  <td className="border border-gray-400 p-0">
+                    <textarea
+                      value={item.client_product_name != null ? item.client_product_name : ""}
+                      onChange={(e) => updateItem(i, "client_product_name", e.target.value)}
+                      className={ic + " resize-none overflow-hidden"}
+                      placeholder="-"
+                      rows={1}
+                      onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                    />
+                  </td>
+                  <td className="border border-gray-400 p-0">
+                    <textarea
+                      value={parseFloat(item.quantity) ? item.quantity : ""}
+                      onChange={(e) => updateItem(i, "quantity", e.target.value)}
+                      placeholder="-"
+                      className={icr + " w-20 resize-none overflow-hidden"}
+                      rows={1}
+                      onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                    />
+                  </td>
+                  <td className="border border-gray-400 p-0">
+                    <textarea
+                      value={item.unit || ""}
+                      onChange={(e) => updateItem(i, "unit", e.target.value)}
+                      className={ic + " text-center w-16 resize-none overflow-hidden"}
+                      placeholder="KG"
+                      rows={1}
+                      onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                    />
+                  </td>
+                  <td className="border border-gray-400 p-0">
+                    <textarea
+                      value={parseFloat(item.unit_price) ? item.unit_price : ""}
+                      onChange={(e) => updateItem(i, "unit_price", e.target.value)}
+                      placeholder="-"
+                      className={icr + " w-24 resize-none overflow-hidden"}
+                      rows={1}
+                      onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                    />
+                  </td>
                   <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{amt !== null ? amt.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "-"}</td>
                   <td className="border border-gray-400 p-0 text-center"><button onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600">&times;</button></td>
                 </tr>

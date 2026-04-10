@@ -9,6 +9,7 @@ import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
+import PdfViewer from "@/components/ui/PdfViewer";
 
 function ConfidenceBadge({ value }) {
   const pct = Math.round(value * 100);
@@ -56,6 +57,7 @@ export default function QuoteRequestsPage() {
   const [qtForm, setQtForm] = useState({});
   const [qtLoading, setQtLoading] = useState(false);
   const [qtSending, setQtSending] = useState(false);
+  const [pdfView, setPdfView] = useState(null); // { url, title }
   const [qtItems, setQtItems] = useState([]);
 
   const loadRequests = async () => {
@@ -179,9 +181,7 @@ export default function QuoteRequestsPage() {
     try {
       const res = await api.get(`/quotations/quotations/${qt.id}/generate-pdf/`, { responseType: "blob" });
       const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const title = `Quotation ${qt.quotation_number} - ${qt.client_name || "Client"}`;
-      const w = window.open("", "_blank");
-      if (w) { w.document.title = title; w.document.write(`<html><head><title>${title}</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); w.document.close(); }
+      setPdfView({ url: pdfUrl, title: `Quotation ${qt.quotation_number} - ${qt.client_name || "Client"}` });
     } catch { toast.error("Failed to preview"); }
   };
 
@@ -256,27 +256,14 @@ export default function QuoteRequestsPage() {
   const _viewQuotationPdf = async (quotationId) => {
     try {
       const res = await api.get(`/quotations/quotations/${quotationId}/generate-pdf/`, { responseType: "blob" });
-      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const w = window.open("", "_blank");
-      if (w) {
-        w.document.title = "Quotation";
-        w.document.write(`<html><head><title>Quotation</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
-        w.document.close();
-      }
+      setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: "Quotation" });
     } catch { toast.error("Failed to load quotation PDF"); }
   };
 
-  // Same for sent PIs
   const _viewPiPdf = async (piId) => {
     try {
       const res = await api.get(`/finance/pi/${piId}/generate-pdf/`, { responseType: "blob" });
-      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const w = window.open("", "_blank");
-      if (w) {
-        w.document.title = "Proforma Invoice";
-        w.document.write(`<html><head><title>Proforma Invoice</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
-        w.document.close();
-      }
+      setPdfView({ url: window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })), title: "Proforma Invoice" });
     } catch { toast.error("Failed to load PI PDF"); }
   };
 
@@ -550,6 +537,7 @@ export default function QuoteRequestsPage() {
         onSave={handleSaveQt} onPreview={handlePreviewQt}
         onSend={handleAttachQt} sending={qtSending} sendLabel="Attach to Email"
       />
+      <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
     </div>
   );
 }

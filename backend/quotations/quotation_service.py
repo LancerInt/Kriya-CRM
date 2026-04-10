@@ -207,7 +207,10 @@ def generate_quotation_pdf(q):
     el.append(Spacer(1, 4*mm))
 
     # ═══ SHIPMENT DETAILS ═══
-    payment_display = q.payment_terms_detail or (q.get_payment_terms_display() if q.payment_terms else '')
+    # Show whatever the user typed in the editor's "Terms of Trade" value
+    # cell. If they left it blank, show blank — don't auto-fill with the
+    # model default ("100% Advance") because that wasn't what the user entered.
+    payment_display = q.payment_terms_detail or ''
     delivery_display = q.get_delivery_terms_display() if q.delivery_terms else ''
 
     sd = [
@@ -289,15 +292,35 @@ def generate_quotation_pdf(q):
         else:
             amount = 0
 
-        # Wrap text columns in Paragraph so long text wraps to next line
+        # Wrap text columns in Paragraph so long text wraps to next line.
+        # Convert literal newlines (\n) to <br/> so Shift+Enter / Enter line
+        # breaks entered in the editor are preserved in the PDF output.
         _bs = ParagraphStyle('bs', fontSize=10, leading=12, fontName=_br)
+        def _nl(text):
+            """Escape XML and preserve whitespace for ReportLab Paragraphs.
+            - & < > → XML entities
+            - \\n → <br/> (line breaks from Shift+Enter / Enter)
+            - \\t → 4 non-breaking spaces (tab)
+            - multiple consecutive spaces → non-breaking spaces so they
+              don't get collapsed by the HTML-like paragraph renderer
+            """
+            t = (text or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            t = t.replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
+            t = t.replace('\n', '<br/>')
+            # Preserve runs of 2+ spaces: replace every space after the first
+            # in a consecutive run with &nbsp; so the renderer doesn't collapse.
+            import re
+            t = re.sub(r'  +', lambda m: ' ' + '&nbsp;' * (len(m.group(0)) - 1), t)
+            return t
+
         # "Product Details" column shows the client's name for the product
         # (what the client called it in their email); fall back to description.
         details_text = item.client_product_name or item.description or ''
+        qty_str = f'{qty:,.0f} {_nl(item.unit)}' if qty else ('-' if not (item.unit or '').strip() else _nl(item.unit))
         data.append([
-            Paragraph(item.product_name or '-', _bs),
-            Paragraph(details_text or '-', _bs),
-            f'{qty:,.0f} {item.unit}' if qty else '-',
+            Paragraph(_nl(item.product_name) or '-', _bs),
+            Paragraph(_nl(details_text) or '-', _bs),
+            Paragraph(qty_str, _bs),
             f'{prefix}{price:,.2f}' if price else '-',
             f'{prefix}{amount:,.2f}' if amount else '-',
         ])
