@@ -233,18 +233,68 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 import logging
                 logging.getLogger(__name__).warning(f'Linked quotation repair failed: {e}')
 
+        # ── Auto-versioning ──
+        # If the client already has a previously SENT quotation tied to a
+        # *different* email, treat the current click as a revision request.
+        # The new row inherits structural fields from the previous quote and
+        # carries version+1 with parent → previous quotation, so the V1/V2/V3
+        # history is preserved on the Quotations list.
+        parent_q = None
+        next_version = 1
+        if communication_id:
+            previous_q = Quotation.objects.filter(
+                client=client,
+                is_deleted=False,
+                status__in=['sent', 'approved', 'accepted'],
+            ).order_by('-created_at').first()
+            if previous_q:
+                # Only treat as a revision if the previous quotation came from
+                # a *different* email — otherwise it's the same conversation.
+                from communications.models import QuoteRequest
+                same_comm = QuoteRequest.objects.filter(
+                    linked_quotation=previous_q,
+                    source_communication_id=communication_id,
+                ).exists()
+                if not same_comm:
+                    parent_q = previous_q
+                    next_version = (previous_q.version or 1) + 1
+
         from .models import generate_quotation_number
         delivery = (line or {}).get('delivery_terms', '')
-        q = Quotation.objects.create(
-            quotation_number=generate_quotation_number(),
-            client=client,
-            currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
-            delivery_terms=delivery if delivery in dict(Quotation.DELIVERY_CHOICES) else 'FOB',
-            country_of_origin='India',
-            country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
-            port_of_discharge=(line or {}).get('destination_port') or '',
-            created_by=request.user,
-        )
+        if parent_q:
+            q = Quotation.objects.create(
+                quotation_number=generate_quotation_number(),
+                client=client,
+                inquiry=parent_q.inquiry,
+                version=next_version,
+                parent=parent_q,
+                currency=(line or {}).get('currency') or parent_q.currency,
+                delivery_terms=delivery if delivery in dict(Quotation.DELIVERY_CHOICES) else (parent_q.delivery_terms or 'FOB'),
+                payment_terms=parent_q.payment_terms,
+                payment_terms_detail=parent_q.payment_terms_detail,
+                freight_terms=parent_q.freight_terms,
+                country_of_origin=parent_q.country_of_origin or 'India',
+                country_of_final_destination=(line or {}).get('destination_country') or parent_q.country_of_final_destination,
+                port_of_loading=parent_q.port_of_loading,
+                port_of_discharge=(line or {}).get('destination_port') or parent_q.port_of_discharge,
+                vessel_flight_no=parent_q.vessel_flight_no,
+                final_destination=parent_q.final_destination,
+                packaging_details=parent_q.packaging_details,
+                display_overrides=parent_q.display_overrides,
+                validity_days=parent_q.validity_days,
+                created_by=request.user,
+            )
+        else:
+            q = Quotation.objects.create(
+                quotation_number=generate_quotation_number(),
+                client=client,
+                currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
+                delivery_terms=delivery if delivery in dict(Quotation.DELIVERY_CHOICES) else 'FOB',
+                country_of_origin='India',
+                country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
+                port_of_discharge=(line or {}).get('destination_port') or '',
+                created_by=request.user,
+            )
         # Add the (pre-filled or blank) first item
         if line:
             qty = line['quantity']
@@ -275,9 +325,39 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='revise')
     def revise(self, request, pk=None):
-        """Create a new version of this quotation, copying all items."""
-        original = self.get_object()
+        """Create a new version of this quotation, copying all items.
+
+        Always pivots off the LATEST version in the chain (not the row the
+        user clicked on), and reuses an existing draft revision if one is
+        already sitting in the chain — so cancelling Revise and clicking it
+        again no longer inflates the version number past what was actually sent.
+        """
+        clicked = self.get_object()
         from .models import generate_quotation_number
+
+        # Walk to the latest version in the chain
+        root = clicked
+        while root.parent_id:
+            root = root.parent
+        all_ids = {root.id}
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for child in Quotation.objects.filter(parent=node, is_deleted=False).only('id', 'parent_id'):
+                if child.id not in all_ids:
+                    all_ids.add(child.id)
+                    stack.append(child)
+        original = (
+            Quotation.objects.filter(id__in=all_ids, is_deleted=False)
+            .order_by('-version', '-created_at')
+            .first()
+        ) or clicked
+
+        # Reuse an existing unsent draft revision instead of spawning another
+        # one. Cancelling Revise without sending leaves a draft V(n+1) row;
+        # next click should hand it back rather than create V(n+2).
+        if original.status == 'draft' and original.parent_id and original.id != clicked.id:
+            return Response(QuotationSerializer(original).data, status=status.HTTP_200_OK)
 
         new_version = original.version + 1
         q = Quotation.objects.create(
@@ -318,10 +398,11 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         q.total = total
         q.save(update_fields=['subtotal', 'total'])
 
-        # Mark original as superseded
-        if original.status in ['draft', 'sent', 'approved']:
-            original.status = 'expired'
-            original.save(update_fields=['status'])
+        # NOTE: We intentionally do NOT change the original's status here.
+        # Both the old version and the new revision should remain as full
+        # records on the Quotations list (the V1/V2/... badges + parent link
+        # are how the user tells them apart). Marking the original 'expired'
+        # would hide it from the active list and lose the audit trail.
 
         notify(
             title=f'Quotation revised: {q.quotation_number} (v{new_version})',
@@ -346,6 +427,152 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         all_ids = set([root.id] + [r.id for r in all_versions] + [r.id for r in revisions_of_q] + [q.id])
         all_qs = Quotation.objects.filter(id__in=all_ids).order_by('version')
         return Response(QuotationSerializer(all_qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='attach-to-email')
+    def attach_to_email(self, request, pk=None):
+        """Generate the quotation PDF and attach it to the source email's
+        AI Draft. Creates a draft for the source communication if one doesn't
+        exist yet. Returns the source communication id so the frontend can
+        navigate the user to the AI Draft modal.
+
+        This is the "Attach to Email" flow used from the Inquiries page —
+        replaces the older send-to-client flow which directly mailed the PDF.
+        The user wanted the PDF to land in the draft so they can review the
+        full email body + attachment before clicking Send Reply themselves.
+        """
+        from communications.models import (
+            Communication, EmailDraft, DraftAttachment, QuoteRequest,
+        )
+        from django.core.files.base import ContentFile
+        from .quotation_service import generate_quotation_pdf
+
+        q = self.get_object()
+
+        # Find the source communication via QuoteRequest. If none exists fall
+        # back to the latest inbound mail for the client.
+        qr = QuoteRequest.objects.filter(linked_quotation=q).first()
+        comm = None
+        if qr and qr.source_communication_id:
+            comm = Communication.objects.filter(id=qr.source_communication_id).first()
+        if not comm and q.client_id:
+            comm = Communication.objects.filter(
+                client_id=q.client_id,
+                comm_type='email', direction='inbound', is_deleted=False,
+            ).order_by('-created_at').first()
+        if not comm:
+            return Response(
+                {'error': 'No source email found to attach to'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Find or create the draft for this communication
+        draft = EmailDraft.objects.filter(
+            communication=comm, status='draft'
+        ).order_by('-updated_at').first()
+
+        # Generate an AI body that references the freshly-attached quotation
+        # so the user lands in the modal with a ready-to-review reply instead
+        # of an empty body. We use the existing AI service which handles
+        # quote/PI/sample intent detection automatically. If AI fails for any
+        # reason we fall back to a static template.
+        ai_subject = f'Re: {comm.subject}' if comm.subject else 'Re: Your Quotation Request'
+        ai_body = ''
+        try:
+            from communications.ai_email_service import generate_email_reply
+            reply = generate_email_reply(comm)
+            if reply:
+                ai_subject = reply.get('subject') or ai_subject
+                ai_body = reply.get('body') or ''
+        except Exception:
+            pass
+
+        if not ai_body:
+            # Static fallback referencing the quote so the body is never blank
+            client_name = comm.client.company_name if comm.client_id and comm.client else 'Valued Customer'
+            ai_body = (
+                f'<p>Dear {client_name},</p>'
+                f'<p>Thank you for your inquiry. Please find attached our quotation '
+                f'<strong>{q.quotation_number}</strong> for your review.</p>'
+                f'<p>The quotation includes the product details, pricing, and terms. '
+                f'Kindly review and let us know if you have any questions or require any modifications.</p>'
+                f'<p>We look forward to your confirmation.</p>'
+                f'<p>Best regards,<br/>{request.user.full_name or request.user.username}</p>'
+            )
+
+        if not draft:
+            # Resolve the recipient — the original sender of the inbound
+            # email. Falls back to the client's primary contact if the
+            # external_email field is empty.
+            to_email = comm.external_email or ''
+            if not to_email and comm.client_id:
+                from clients.models import Contact
+                primary = Contact.objects.filter(
+                    client_id=comm.client_id, is_primary=True
+                ).first() or Contact.objects.filter(client_id=comm.client_id).first()
+                if primary and primary.email:
+                    to_email = primary.email
+
+            # Create a fresh draft pre-populated with the AI body so the user
+            # doesn't have to click Generate inside the modal.
+            draft = EmailDraft.objects.create(
+                communication=comm,
+                to_email=to_email,
+                subject=ai_subject,
+                body=ai_body,
+                cc='',
+                status='draft',
+                created_by=request.user,
+                edited_by=request.user,
+            )
+        else:
+            update_fields = []
+            # Backfill to_email if it's blank on an existing draft
+            if not (draft.to_email or '').strip():
+                fallback_to = comm.external_email or ''
+                if not fallback_to and comm.client_id:
+                    from clients.models import Contact
+                    primary = Contact.objects.filter(
+                        client_id=comm.client_id, is_primary=True
+                    ).first() or Contact.objects.filter(client_id=comm.client_id).first()
+                    if primary and primary.email:
+                        fallback_to = primary.email
+                if fallback_to:
+                    draft.to_email = fallback_to
+                    update_fields.append('to_email')
+            # Existing draft is empty — fill it in with the AI body so the
+            # user has something to review when they land in the modal.
+            if not (draft.body or '').strip():
+                if not draft.subject:
+                    draft.subject = ai_subject
+                    update_fields.append('subject')
+                draft.body = ai_body
+                update_fields.append('body')
+            if update_fields:
+                draft.edited_by = request.user
+                update_fields.append('edited_by')
+                update_fields.append('updated_at')
+                draft.save(update_fields=update_fields)
+
+        # Generate PDF and attach (replaces any previous Quotation_ attachment
+        # for this draft so the latest revision is what gets sent).
+        pdf_buffer = generate_quotation_pdf(q)
+        pdf_bytes = pdf_buffer.read() if hasattr(pdf_buffer, 'read') else pdf_buffer
+        filename = f'Quotation_{q.quotation_number.replace("/", "-")}.pdf'
+
+        DraftAttachment.objects.filter(
+            draft=draft, filename__startswith='Quotation_'
+        ).delete()
+
+        att = DraftAttachment(draft=draft, filename=filename, file_size=len(pdf_bytes))
+        att.file.save(filename, ContentFile(pdf_bytes), save=True)
+
+        return Response({
+            'status': 'attached',
+            'communication_id': str(comm.id),
+            'client_id': str(comm.client_id) if comm.client_id else None,
+            'draft_id': str(draft.id),
+            'filename': filename,
+        })
 
     @action(detail=True, methods=['post'], url_path='save-with-items')
     def save_with_items(self, request, pk=None):

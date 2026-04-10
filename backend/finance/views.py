@@ -248,6 +248,124 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="PI_{pi.invoice_number.replace("/", "-")}_{pi.client_company_name.replace(" ", "_")}.pdf"'
         return response
 
+    @action(detail=True, methods=['post'], url_path='attach-to-email')
+    def attach_to_email(self, request, pk=None):
+        """Generate the PI PDF and attach it to the source email's AI Draft.
+        Mirrors QuotationViewSet.attach_to_email — creates a draft if needed,
+        replaces any older PI_*.pdf attachment, and pre-fills the body with
+        an AI-generated reply that references the new PI.
+        """
+        from communications.models import (
+            Communication, EmailDraft, DraftAttachment,
+        )
+        from django.core.files.base import ContentFile
+        from .pi_service import generate_pi_pdf
+
+        pi = self.get_object()
+
+        comm = None
+        if pi.source_communication_id:
+            comm = Communication.objects.filter(id=pi.source_communication_id).first()
+        if not comm and pi.client_id:
+            comm = Communication.objects.filter(
+                client_id=pi.client_id,
+                comm_type='email', direction='inbound', is_deleted=False,
+            ).order_by('-created_at').first()
+        if not comm:
+            return Response(
+                {'error': 'No source email found to attach to'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        draft = EmailDraft.objects.filter(
+            communication=comm, status='draft'
+        ).order_by('-updated_at').first()
+
+        ai_subject = f'Re: {comm.subject}' if comm.subject else 'Re: Proforma Invoice'
+        ai_body = ''
+        try:
+            from communications.ai_email_service import generate_email_reply
+            reply = generate_email_reply(comm)
+            if reply:
+                ai_subject = reply.get('subject') or ai_subject
+                ai_body = reply.get('body') or ''
+        except Exception:
+            pass
+        if not ai_body:
+            client_name = comm.client.company_name if comm.client_id and comm.client else 'Valued Customer'
+            ai_body = (
+                f'<p>Dear {client_name},</p>'
+                f'<p>Please find attached our Proforma Invoice '
+                f'<strong>{pi.invoice_number}</strong> for your review.</p>'
+                f'<p>Kindly review the document and confirm so we can proceed.</p>'
+                f'<p>Best regards,<br/>{request.user.full_name or request.user.username}</p>'
+            )
+
+        if not draft:
+            to_email = comm.external_email or ''
+            if not to_email and comm.client_id:
+                from clients.models import Contact
+                primary = Contact.objects.filter(
+                    client_id=comm.client_id, is_primary=True
+                ).first() or Contact.objects.filter(client_id=comm.client_id).first()
+                if primary and primary.email:
+                    to_email = primary.email
+            draft = EmailDraft.objects.create(
+                communication=comm,
+                to_email=to_email,
+                subject=ai_subject,
+                body=ai_body,
+                cc='',
+                status='draft',
+                created_by=request.user,
+                edited_by=request.user,
+            )
+        else:
+            update_fields = []
+            if not (draft.to_email or '').strip():
+                fallback_to = comm.external_email or ''
+                if not fallback_to and comm.client_id:
+                    from clients.models import Contact
+                    primary = Contact.objects.filter(
+                        client_id=comm.client_id, is_primary=True
+                    ).first() or Contact.objects.filter(client_id=comm.client_id).first()
+                    if primary and primary.email:
+                        fallback_to = primary.email
+                if fallback_to:
+                    draft.to_email = fallback_to
+                    update_fields.append('to_email')
+            if not (draft.body or '').strip():
+                if not draft.subject:
+                    draft.subject = ai_subject
+                    update_fields.append('subject')
+                draft.body = ai_body
+                update_fields.append('body')
+            if update_fields:
+                draft.edited_by = request.user
+                update_fields.append('edited_by')
+                draft.save(update_fields=update_fields)
+
+        # Generate PDF and replace any existing PI_ attachment so the latest
+        # revision is what gets sent.
+        pdf_buffer = generate_pi_pdf(pi)
+        pdf_bytes = pdf_buffer.read() if hasattr(pdf_buffer, 'read') else pdf_buffer
+        filename = f'PI_{pi.invoice_number.replace("/", "-")}.pdf'
+
+        DraftAttachment.objects.filter(
+            draft=draft, filename__startswith='PI_'
+        ).delete()
+
+        att = DraftAttachment(draft=draft, filename=filename, file_size=len(pdf_bytes))
+        att.file.save(filename, ContentFile(pdf_bytes), save=True)
+
+        return Response({
+            'status': 'attached',
+            'communication_id': str(comm.id),
+            'client_id': str(comm.client_id) if comm.client_id else None,
+            'draft_id': str(draft.id),
+            'filename': filename,
+        })
+
     @action(detail=True, methods=['post'], url_path='send-email')
     def send_email(self, request, pk=None):
         """Generate PDF and send to client via email."""
@@ -315,6 +433,127 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
         from orders.serializers import OrderSerializer
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='revise')
+    def revise(self, request, pk=None):
+        """Create a new version of this PI, copying all items.
+
+        Mirrors QuotationViewSet.revise — used when a client asks for changes
+        on a previously-sent PI. The original is left intact (so the history
+        is preserved); the new row carries version+1 and parent → original.
+        """
+        from .models import ProformaInvoiceItem
+        from datetime import date as dt_date
+
+        clicked = self.get_object()
+        # Always pivot off the LATEST version in the chain — not the row the
+        # user happened to click on. Otherwise revising V1 when V2 already
+        # exists would create another V2 instead of progressing to V3.
+        root = clicked
+        while root.parent_id:
+            root = root.parent
+        all_ids = {root.id}
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for child in ProformaInvoice.objects.filter(parent=node, is_deleted=False).only('id', 'parent_id'):
+                if child.id not in all_ids:
+                    all_ids.add(child.id)
+                    stack.append(child)
+        original = (
+            ProformaInvoice.objects.filter(id__in=all_ids, is_deleted=False)
+            .order_by('-version', '-created_at')
+            .first()
+        ) or clicked
+
+        # ── Reuse existing unsent draft revision ──
+        # If the latest row is already a DRAFT (i.e. an earlier Revise click
+        # spawned it but the user closed the editor without sending) just
+        # return that row instead of creating yet another version. This
+        # prevents version inflation: cancelling Revise no longer leaves
+        # behind a stranded V3 that gets stuck waiting for V4.
+        if original.status == 'draft' and original.id != clicked.id:
+            return Response(ProformaInvoiceSerializer(original).data, status=status.HTTP_200_OK)
+        # Same rule when the user clicks Revise on V1 (already sent) but a
+        # draft V2 from an earlier click is sitting in the chain — reuse it.
+        if original.status == 'draft' and original.parent_id:
+            return Response(ProformaInvoiceSerializer(original).data, status=status.HTTP_200_OK)
+
+        new_version = (original.version or 1) + 1
+
+        count = ProformaInvoice.objects.count() + 1
+        today = dt_date.today()
+        invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
+
+        pi = ProformaInvoice.objects.create(
+            client=original.client,
+            order=original.order,
+            source_communication=original.source_communication,
+            invoice_number=invoice_number,
+            invoice_date=today,
+            version=new_version,
+            parent=original,
+            client_company_name=original.client_company_name,
+            client_tax_number=original.client_tax_number,
+            client_address=original.client_address,
+            client_pincode=original.client_pincode,
+            client_city_state_country=original.client_city_state_country,
+            client_phone=original.client_phone,
+            country_of_origin=original.country_of_origin,
+            country_of_final_destination=original.country_of_final_destination,
+            port_of_loading=original.port_of_loading,
+            port_of_discharge=original.port_of_discharge,
+            vessel_flight_no=original.vessel_flight_no,
+            final_destination=original.final_destination,
+            terms_of_trade=original.terms_of_trade,
+            terms_of_delivery=original.terms_of_delivery,
+            buyer_reference=original.buyer_reference,
+            currency=original.currency,
+            total=original.total,
+            amount_in_words=original.amount_in_words,
+            bank_details=original.bank_details,
+            display_overrides=original.display_overrides,
+            created_by=request.user,
+        )
+        for item in original.items.all():
+            ProformaInvoiceItem.objects.create(
+                pi=pi,
+                product_name=item.product_name,
+                client_product_name=item.client_product_name,
+                packages_description=item.packages_description,
+                description_of_goods=item.description_of_goods,
+                quantity=item.quantity,
+                unit=item.unit,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+            )
+
+        notify(
+            title=f'PI revised: {pi.invoice_number} (v{new_version})',
+            message=f'{request.user.full_name} created revision v{new_version} from {original.invoice_number}.',
+            notification_type='system', link='/proforma-invoices',
+            actor=request.user, client=pi.client,
+        )
+        return Response(ProformaInvoiceSerializer(pi).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='versions')
+    def versions(self, request, pk=None):
+        """Return the full version chain (root + every revision) for this PI."""
+        pi = self.get_object()
+        root = pi
+        while root.parent:
+            root = root.parent
+        all_ids = {root.id}
+        # Walk all descendants of the root
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            children = list(ProformaInvoice.objects.filter(parent=node, is_deleted=False))
+            for c in children:
+                all_ids.add(c.id)
+                stack.append(c)
+        chain = ProformaInvoice.objects.filter(id__in=all_ids).order_by('version', 'created_at')
+        return Response(ProformaInvoiceSerializer(chain, many=True).data)
 
     @action(detail=False, methods=['post'], url_path='create-standalone')
     def create_standalone(self, request):
@@ -408,28 +647,79 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 import logging
                 logging.getLogger(__name__).warning(f'Linked PI repair failed: {e}')
 
+        # ── Auto-versioning ──
+        # If this client already has a PREVIOUS SENT PI tied to a *different*
+        # email, treat the current call as a revision request: spawn a new row
+        # with version+1 and parent → previous PI. This is the case where the
+        # client wrote back asking for changes on an earlier PI.
+        parent_pi = None
+        next_version = 1
+        if communication_id:
+            previous = ProformaInvoice.objects.filter(
+                client=client,
+                is_deleted=False,
+                status='sent',
+            ).exclude(source_communication_id=communication_id).order_by('-created_at').first()
+            if previous:
+                parent_pi = previous
+                next_version = (previous.version or 1) + 1
+
         count = ProformaInvoice.objects.count() + 1
         today = dt_date.today()
         invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
 
-        pi = ProformaInvoice.objects.create(
-            client=client,
-            source_communication_id=communication_id if communication_id else None,
-            invoice_number=invoice_number,
-            invoice_date=today,
-            created_by=request.user,
-            client_company_name=client.company_name,
-            client_tax_number=client.tax_number or '',
-            client_address=client.address or '',
-            client_pincode=client.postal_code or '',
-            client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
-            client_phone=client.phone_number or '',
-            country_of_origin='India',
-            country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
-            port_of_discharge=(line or {}).get('destination_port') or '',
-            currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
-            bank_details=DEFAULT_BANK,
-        )
+        # When this is a revision, copy structural fields from the parent so
+        # the new version starts with the same terms / ports / packaging as the
+        # previously-sent PI, then overlay any freshly-extracted line data.
+        if parent_pi:
+            pi = ProformaInvoice.objects.create(
+                client=client,
+                source_communication_id=communication_id if communication_id else None,
+                invoice_number=invoice_number,
+                invoice_date=today,
+                version=next_version,
+                parent=parent_pi,
+                created_by=request.user,
+                client_company_name=parent_pi.client_company_name,
+                client_tax_number=parent_pi.client_tax_number,
+                client_address=parent_pi.client_address,
+                client_pincode=parent_pi.client_pincode,
+                client_city_state_country=parent_pi.client_city_state_country,
+                client_phone=parent_pi.client_phone,
+                country_of_origin=parent_pi.country_of_origin,
+                country_of_final_destination=(line or {}).get('destination_country') or parent_pi.country_of_final_destination,
+                port_of_loading=parent_pi.port_of_loading,
+                port_of_discharge=(line or {}).get('destination_port') or parent_pi.port_of_discharge,
+                vessel_flight_no=parent_pi.vessel_flight_no,
+                final_destination=parent_pi.final_destination,
+                terms_of_trade=parent_pi.terms_of_trade,
+                terms_of_delivery=parent_pi.terms_of_delivery,
+                buyer_reference=parent_pi.buyer_reference,
+                currency=(line or {}).get('currency') or parent_pi.currency,
+                bank_details=parent_pi.bank_details,
+                display_overrides=parent_pi.display_overrides,
+            )
+        else:
+            pi = ProformaInvoice.objects.create(
+                client=client,
+                source_communication_id=communication_id if communication_id else None,
+                invoice_number=invoice_number,
+                invoice_date=today,
+                version=next_version,
+                parent=parent_pi,
+                created_by=request.user,
+                client_company_name=client.company_name,
+                client_tax_number=client.tax_number or '',
+                client_address=client.address or '',
+                client_pincode=client.postal_code or '',
+                client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
+                client_phone=client.phone_number or '',
+                country_of_origin='India',
+                country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
+                port_of_discharge=(line or {}).get('destination_port') or '',
+                currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
+                bank_details=DEFAULT_BANK,
+            )
 
         if line:
             qty = line['quantity']

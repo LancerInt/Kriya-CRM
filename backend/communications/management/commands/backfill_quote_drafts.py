@@ -31,6 +31,12 @@ class Command(BaseCommand):
                             help='Report what would be done without writing')
         parser.add_argument('--reattach', action='store_true',
                             help='Re-attach Quotation PDF to drafts even if one already exists')
+        parser.add_argument('--today', action='store_true',
+                            help='Only process emails received today (server local date)')
+        parser.add_argument('--quotation-only', action='store_true',
+                            help='Skip sample/PI auto-create — only run the quotation pipeline')
+        parser.add_argument('--force', action='store_true',
+                            help='Bypass AI intent check and create a QuoteRequest for every targeted email')
 
     def handle(self, *args, **opts):
         from communications.models import Communication, EmailDraft, QuoteRequest, DraftAttachment
@@ -45,6 +51,12 @@ class Command(BaseCommand):
 
         if opts['client']:
             qs = qs.filter(client_id=opts['client'])
+
+        if opts['today']:
+            from django.utils import timezone
+            today = timezone.localdate()
+            qs = qs.filter(created_at__date=today)
+            self.stdout.write(self.style.NOTICE(f'Restricting to emails received on {today}'))
 
         # Skip those that already have a linked QuoteRequest with a quotation
         already_done_ids = set(
@@ -75,15 +87,17 @@ class Command(BaseCommand):
                     continue
 
                 with transaction.atomic():
-                    # Sample auto-create — runs independently of quote detection
-                    try:
-                        _auto_create_sample_request(comm)
-                    except Exception as e:
-                        self.stdout.write(self.style.WARNING(
-                            f'  ! sample auto-create failed on {comm.id}: {e}'
-                        ))
+                    # Sample auto-create — runs independently of quote detection.
+                    # Skipped when --quotation-only is set.
+                    if not opts['quotation_only']:
+                        try:
+                            _auto_create_sample_request(comm)
+                        except Exception as e:
+                            self.stdout.write(self.style.WARNING(
+                                f'  ! sample auto-create failed on {comm.id}: {e}'
+                            ))
 
-                    qr = process_communication_for_quote(comm)
+                    qr = process_communication_for_quote(comm, force=opts['force'])
                     if not qr:
                         skipped += 1
                         continue

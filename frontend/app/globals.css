@@ -1,1 +1,69 @@
 @import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Modern <select> dropdowns
+   ─────────────────────────────────────────────────────────────────────────
+   Replaces the OS-default native select chrome with a clean modern look:
+   custom chevron, indigo focus ring, rounded border, subtle shadow,
+   smooth hover. Applies globally to every <select> in the app so we don't
+   need to touch the 70+ scattered usages.
+
+   Opt out on a per-element basis with class="raw-select" if a particular
+   spot needs the unstyled native chrome.
+*/
+select:not(.raw-select) {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.75' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 1.1rem 1.1rem;
+  padding-right: 2.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  color: #1f2937;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+  cursor: pointer;
+}
+
+select:not(.raw-select):hover {
+  border-color: #c7d2fe;
+  background-color: #fafbff;
+}
+
+select:not(.raw-select):focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+  background-color: #ffffff;
+}
+
+select:not(.raw-select):disabled {
+  background-color: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  border-color: #e5e7eb;
+}
+
+/* Options inside the dropdown panel — Tailwind/Chrome styles these from the
+   OS, but we can give the panel a modern font weight and padding via the
+   prose-y baseline. Most browsers ignore option padding, so we keep this minimal. */
+select:not(.raw-select) option {
+  background-color: #ffffff;
+  color: #1f2937;
+  padding: 0.5rem 0.75rem;
+  font-weight: 500;
+}
+
+/* When a select is rendered inside a tighter table cell, give it a smaller
+   footprint by default — pages can still override with explicit classes. */
+td > select:not(.raw-select),
+th > select:not(.raw-select) {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.75rem;
+}

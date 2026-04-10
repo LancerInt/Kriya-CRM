@@ -514,15 +514,42 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.sent_at = timezone.now()
         draft.save(update_fields=['status', 'sent_at'])
 
-        # Mark the linked QuoteRequest + Quotation as sent so the Inquiries
-        # page shows "Mail Sent" instead of "Enter Rates" for this row.
+        # Mark the linked QuoteRequest + every Quotation that was actually
+        # attached to this draft as sent. We can't rely on QuoteRequest's
+        # linked_quotation alone because revisions (V2/V3/...) keep V1 as the
+        # link target — so a freshly-revised V2 attached to the draft would
+        # never flip. Instead, parse the draft's attachment filenames
+        # (Quotation_<number>.pdf) and flip exactly the versions that went out.
         try:
+            from quotations.models import Quotation
+            import re as _re
+
+            attached_qnums = set()
+            for att in draft.attachments.all():
+                m = _re.match(r'Quotation_(.+)\.pdf$', att.filename or '', _re.IGNORECASE)
+                if m:
+                    # Filenames use "-" instead of "/" for filesystem safety —
+                    # convert back to the canonical quote number format.
+                    attached_qnums.add(m.group(1).replace('-', '/'))
+
+            if attached_qnums:
+                Quotation.objects.filter(
+                    quotation_number__in=attached_qnums,
+                    is_deleted=False,
+                ).exclude(status='sent').update(
+                    status='sent',
+                    sent_at=timezone.now(),
+                    sent_via='email',
+                )
+
             qr = QuoteRequest.objects.filter(
                 source_communication=draft.communication,
                 is_deleted=False,
             ).select_related('linked_quotation').first()
             if qr:
-                if qr.linked_quotation and qr.linked_quotation.status != 'sent':
+                # Backwards-compat: if there were no parseable attachments
+                # (e.g. older drafts) still flip the original linked V1.
+                if not attached_qnums and qr.linked_quotation and qr.linked_quotation.status != 'sent':
                     qr.linked_quotation.status = 'sent'
                     qr.linked_quotation.sent_at = timezone.now()
                     qr.linked_quotation.sent_via = 'email'
@@ -533,14 +560,33 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         except Exception as e:
             _log.warning(f'Could not update QuoteRequest status for sent draft {draft.id}: {e}')
 
-        # Mark any linked Proforma Invoice as sent too
+        # Mark exactly the PI version(s) attached to this draft as sent.
+        # We parse PI_<number>.pdf attachment filenames the same way we do
+        # for quotations, so revising V1 → V2 and sending V2 only flips V2
+        # (not V1, which would already be sent, and not V3 if the user later
+        # revised but hasn't attached/sent it).
         try:
             from finance.models import ProformaInvoice
-            ProformaInvoice.objects.filter(
-                source_communication=draft.communication,
-                is_deleted=False,
-                status='draft',
-            ).update(status='sent')
+            import re as _re
+
+            attached_pinums = set()
+            for att in draft.attachments.all():
+                m = _re.match(r'PI_(.+)\.pdf$', att.filename or '', _re.IGNORECASE)
+                if m:
+                    attached_pinums.add(m.group(1).replace('-', '/'))
+
+            if attached_pinums:
+                ProformaInvoice.objects.filter(
+                    invoice_number__in=attached_pinums,
+                    is_deleted=False,
+                ).exclude(status='sent').update(status='sent')
+            else:
+                # Backwards-compat: legacy drafts without parseable filenames
+                ProformaInvoice.objects.filter(
+                    source_communication=draft.communication,
+                    is_deleted=False,
+                    status='draft',
+                ).update(status='sent')
         except Exception as e:
             _log.warning(f'Could not update PI status for sent draft {draft.id}: {e}')
 

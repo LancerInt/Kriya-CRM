@@ -17,9 +17,15 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def process_communication_for_quote(communication):
+def process_communication_for_quote(communication, force=False):
     """
     Main entry point — process an incoming communication for auto-quote generation.
+
+    When ``force=True`` the AI intent check is bypassed and a QuoteRequest is
+    created regardless of the detector's verdict. This is used by the manual
+    backfill command and the in-app "Save to Quotations" button so the user can
+    override the AI when they know the email is a quote request.
+
     Returns QuoteRequest if created, None otherwise.
     """
     from .models import QuoteRequest
@@ -41,9 +47,13 @@ def process_communication_for_quote(communication):
     if not text or len(text.strip()) < 10:
         return None
 
-    # Step 1: Detect quote intent
-    from .quote_request_parser import detect_intent_with_ai
-    is_quote, confidence = detect_intent_with_ai(text)
+    # Step 1: Detect quote intent (skipped when force=True)
+    if force:
+        is_quote, confidence = True, 1.0
+        logger.info(f'Forced quote creation for comm {communication.id} (intent check bypassed)')
+    else:
+        from .quote_request_parser import detect_intent_with_ai
+        is_quote, confidence = detect_intent_with_ai(text)
 
     # Update communication with detected intent
     communication.ai_extracted_intent = 'quote_request' if is_quote else 'general'

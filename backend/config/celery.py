@@ -60,4 +60,14 @@ app.conf.beat_schedule = {
         'task': 'samples.check_sample_reply_reminders',
         'schedule': crontab(minute='*'),
     },
+    # Daily task due-date reminder — runs at 8:30 AM IST. Fires:
+    #   • day-before notifications ("tomorrow is the last date")
+    #   • last-day notifications ("today is the last date")
+    #   • periodic 5-day nudges for tasks not due soon yet
+    # The first reminder (right after assignment) is sent inline by the
+    # viewset hooks, not by this task.
+    'check-task-due-reminders-daily': {
+        'task': 'tasks.check_task_due_reminders',
+        'schedule': crontab(hour=8, minute=30),
+    },
 }

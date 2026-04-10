@@ -478,6 +478,70 @@ export default function CommunicationDetailPage() {
 
       <div id="reply-form-anchor" />
 
+      {/* Quick-Save action bar — visible on any thread that contains quote / PI
+          / sample keywords, even before the user clicks Reply. Lets the user
+          push the message into the Quotations / PI tab in one click without
+          having to enter the reply form first. Same backend endpoints as the
+          buttons inside the reply form. */}
+      {comm.comm_type === "email" && comm.client && (() => {
+        const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+        const text = `${lastInbound?.subject || ""} ${lastInbound?.body || ""}`.replace(/<[^>]+>/g, " ").toLowerCase();
+        const wantsQuote = /\b(quotation|quote|pricing|price list|rate card|rates)\b/i.test(text);
+        const wantsPI = /\b(proforma invoice|proforma|performa|pi)\b|send pi|need pi/i.test(text);
+        const wantsSample = /\b(sample|samples|trial|swatch|free sample)\b/i.test(text);
+        if (!wantsQuote && !wantsPI && !wantsSample) return null;
+
+        const quickCreateQuote = async () => {
+          try {
+            const res = await api.post("/quotations/quotations/create-blank/", {
+              client_id: comm.client,
+              communication_id: lastInbound.id,
+            });
+            toast.success(`Quotation ${res.data.quotation_number} saved to Quotations tab`);
+          } catch { toast.error("Failed to create quotation"); }
+        };
+        const quickCreatePi = async () => {
+          try {
+            const res = await api.post("/finance/pi/create-standalone/", {
+              client_id: comm.client,
+              communication_id: lastInbound.id,
+            });
+            toast.success(`PI ${res.data.invoice_number} saved to Proforma Invoices tab`);
+          } catch { toast.error("Failed to create PI"); }
+        };
+        const quickCreateSample = async () => {
+          try {
+            const res = await api.post("/samples/create-from-email/", {
+              client_id: comm.client,
+              communication_id: lastInbound.id,
+            });
+            const productLabel = res.data.product_name || res.data.client_product_name || "(no product)";
+            toast.success(`Sample request saved: ${productLabel}`);
+          } catch { toast.error("Failed to create sample request"); }
+        };
+
+        return (
+          <div className="mt-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl flex flex-wrap items-center gap-2">
+            <span className="text-xs text-indigo-700 font-medium mr-1">Detected in this email:</span>
+            {wantsQuote && (
+              <button onClick={quickCreateQuote} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-teal-700 bg-white border border-teal-200 hover:bg-teal-50">
+                📋 Save to Quotations
+              </button>
+            )}
+            {wantsPI && (
+              <button onClick={quickCreatePi} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-orange-700 bg-white border border-orange-200 hover:bg-orange-50">
+                📄 Save to Proforma Invoices
+              </button>
+            )}
+            {wantsSample && (
+              <button onClick={quickCreateSample} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-fuchsia-700 bg-white border border-fuchsia-200 hover:bg-fuchsia-50">
+                🧪 Save Sample Request
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Reply Section — show if last message in thread is inbound (awaiting reply)
           OR if the user explicitly clicked Reply / Follow up on a specific message */}
       {comm.comm_type === "email" && thread.length > 0 && (showReply || thread[thread.length - 1].direction === "inbound") && (
@@ -552,14 +616,20 @@ export default function CommunicationDetailPage() {
                 {savedAttachments.length > 0 && (
                   <div className="space-y-1">
                     {savedAttachments.map((att) => (
-                      <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs">
-                        <div className="flex items-center gap-2">
+                      <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs hover:bg-green-100 transition-colors">
+                        <a
+                          href={att.file}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`Open ${att.filename}`}
+                          className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:underline"
+                        >
                           <span className="text-green-500">📄</span>
-                          <span className="font-medium">{att.filename}</span>
-                          <span className="text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
-                          <span className="text-green-600 text-[10px]">Saved</span>
-                        </div>
-                        <button onClick={() => handleRemoveSavedAtt(att.id)} className="text-red-400 hover:text-red-600">&times;</button>
+                          <span className="font-medium truncate">{att.filename}</span>
+                          <span className="text-gray-400 shrink-0">{(att.file_size / 1024).toFixed(1)} KB</span>
+                          <span className="text-green-600 text-[10px] shrink-0">Saved</span>
+                        </a>
+                        <button onClick={() => handleRemoveSavedAtt(att.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0">&times;</button>
                       </div>
                     ))}
                   </div>

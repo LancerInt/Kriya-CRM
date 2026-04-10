@@ -279,7 +279,15 @@ def generate_quotation_pdf(q):
     for item in q.items.all():
         qty = float(item.quantity) if item.quantity else 0
         price = float(item.unit_price) if item.unit_price else 0
-        amount = qty * price if qty and price else 0
+        # Mirror the editor's amount logic: if both qty and price are set use
+        # qty*price, otherwise fall back to the price alone (so a quote with
+        # only a unit price still shows a populated Amount column instead of '-').
+        if qty and price:
+            amount = qty * price
+        elif price:
+            amount = price
+        else:
+            amount = 0
 
         # Wrap text columns in Paragraph so long text wraps to next line
         _bs = ParagraphStyle('bs', fontSize=10, leading=12, fontName=_br)
@@ -316,7 +324,17 @@ def generate_quotation_pdf(q):
 
     # ═══ TOTAL ═══
     ts_g = ParagraphStyle('tsg', fontSize=FS, textColor=G, fontName=_bf, alignment=2)
-    amounts = [float(i.quantity or 0) * float(i.unit_price or 0) for i in q.items.all()]
+    # Same fallback as the line-item Amount column: qty*price when both set,
+    # otherwise the unit price alone, so the Total never shows '-' for a quote
+    # whose user only entered prices.
+    amounts = []
+    for i in q.items.all():
+        qty = float(i.quantity or 0)
+        price = float(i.unit_price or 0)
+        if qty and price:
+            amounts.append(qty * price)
+        elif price:
+            amounts.append(price)
     valid_amounts = [a for a in amounts if a > 0]
     total_val = sum(valid_amounts) if valid_amounts else 0
     total_display = f'{prefix}{total_val:,.2f}' if total_val else '-'

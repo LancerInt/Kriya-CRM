@@ -28,6 +28,13 @@ class Task(TimeStampedModel):
     is_auto_generated = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
     status_note = models.CharField(max_length=500, blank=True, help_text='Custom status update text')
+    # Notification tracking — set when the assignee was last notified about
+    # the task. The daily reminder task uses these to decide whether to fire
+    # the next reminder (day-before, every-5-days cadence, etc.).
+    assigned_at = models.DateTimeField(null=True, blank=True,
+                                        help_text='When the task was first assigned to the current owner')
+    last_reminder_sent_at = models.DateTimeField(null=True, blank=True,
+                                                  help_text='When the most recent due-date reminder was sent')
 
     class Meta:
         db_table = 'tasks'

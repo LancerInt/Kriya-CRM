@@ -119,6 +119,12 @@ class ProformaInvoice(TimeStampedModel):
     invoice_date = models.DateField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
 
+    # ── Version tracking (mirrors Quotation) ──
+    # When a client asks for changes on a previously-sent PI we create a new
+    # row with version+1 and parent → previous PI, instead of overwriting it.
+    version = models.IntegerField(default=1)
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='revisions')
+
     # ── Consignee (Client) Section ──
     client_company_name = models.CharField(max_length=255)
     client_tax_number = models.CharField(max_length=100, blank=True)

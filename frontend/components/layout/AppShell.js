@@ -4,6 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import GlobalTooltip from "@/components/ui/GlobalTooltip";
 import { fetchMe } from "@/store/slices/authSlice";
 
 export default function AppShell({ children }) {
@@ -38,6 +39,8 @@ export default function AppShell({ children }) {
           {children}
         </main>
       </div>
+      {/* Global modern tooltip — replaces every native title= popup */}
+      <GlobalTooltip />
     </div>
   );
 }

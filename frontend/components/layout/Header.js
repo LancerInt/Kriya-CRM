@@ -57,15 +57,6 @@ export default function Header({ onMenuClick }) {
     if (syncing) return;
     setSyncing(true);
     try {
-      // Snapshot the unread notification count BEFORE sync so we can
-      // surface a popup for any new alerts (sample requests, quote requests,
-      // etc.) that the auto-pipeline created during this sync.
-      let beforeUnread = 0;
-      try {
-        const r = await api.get("/notifications/unread-count/");
-        beforeUnread = r.data?.count || 0;
-      } catch {}
-
       const accounts = await api.get("/communications/email-accounts/");
       const accs = accounts.data.results || accounts.data;
       let totalSynced = 0;
@@ -75,25 +66,13 @@ export default function Header({ onMenuClick }) {
         if (match) totalSynced += parseInt(match[1]);
       }
       setLastSync(new Date());
-      // Refresh header counts and notify any listening page that data changed.
+      // Refresh header counts (bell badge picks up any new notifications) and
+      // notify any listening page that data changed.
       fetchHeaderCounts();
       fetchUnread();
       // Custom event so the Activities/Communications page (and any other
       // page that displays emails) can refetch its list without a manual reload.
       try { window.dispatchEvent(new CustomEvent("kriya:emails-synced", { detail: { count: totalSynced } })); } catch {}
-
-      // Fetch unread again and pop a toast for each NEW notification the
-      // auto-pipeline created (sample requests, quote requests, etc.).
-      try {
-        const r2 = await api.get("/notifications/?is_read=false&limit=20");
-        const items = r2.data?.results || r2.data || [];
-        const afterUnread = items.length;
-        const newCount = Math.max(0, afterUnread - beforeUnread);
-        // Show the most recent N notifications as toasts
-        items.slice(0, newCount).forEach((n) => {
-          toast.success(n.title || "New notification", { duration: 5000, icon: "🔔" });
-        });
-      } catch {}
 
       if (!silent) {
         toast.success(totalSynced > 0 ? `${totalSynced} new email(s) synced!` : "No new emails");

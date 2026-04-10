@@ -70,7 +70,7 @@ function ShadowClientsPopup({ clients, onClose }) {
   );
 }
 
-function DashboardContent({ s, router, label }) {
+function DashboardContent({ s, router, label, isPrivileged }) {
   if (!s) return null;
   return (
     <>
@@ -109,7 +109,7 @@ function DashboardContent({ s, router, label }) {
       </div>
 
       {/* Action Items */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${isPrivileged ? "lg:grid-cols-3 xl:grid-cols-6" : "lg:grid-cols-4"} gap-3 mb-6`}>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-amber-100" onClick={() => router.push("/communications?tab=unread_email")}>
           <div className="w-10 h-10 rounded-full bg-amber-200 flex items-center justify-center"><span className="text-lg">📧</span></div>
           <div><p className="text-2xl font-bold text-amber-800">{s.unread_emails || 0}</p><p className="text-xs text-amber-600">Unread Emails</p></div>
@@ -118,10 +118,22 @@ function DashboardContent({ s, router, label }) {
           <div className="w-10 h-10 rounded-full bg-purple-200 flex items-center justify-center"><span className="text-lg">✏️</span></div>
           <div><p className="text-2xl font-bold text-purple-800">{s.draft_emails || 0}</p><p className="text-xs text-purple-600">Pending AI Drafts</p></div>
         </div>
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3">
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-orange-100" onClick={() => router.push("/quotations?status=pending_approval")}>
           <div className="w-10 h-10 rounded-full bg-orange-200 flex items-center justify-center"><span className="text-lg">📋</span></div>
           <div><p className="text-2xl font-bold text-orange-800">{s.quotations_summary?.pending_approval || 0}</p><p className="text-xs text-orange-600">Pending Approval</p></div>
         </div>
+        {isPrivileged && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-blue-100" onClick={() => router.push("/orders")}>
+            <div className="w-10 h-10 rounded-full bg-blue-200 flex items-center justify-center"><span className="text-lg">📦</span></div>
+            <div><p className="text-2xl font-bold text-blue-800">{s.pending_orders || 0}</p><p className="text-xs text-blue-600">Pending Orders</p></div>
+          </div>
+        )}
+        {isPrivileged && (
+          <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-cyan-100" onClick={() => router.push("/samples")}>
+            <div className="w-10 h-10 rounded-full bg-cyan-200 flex items-center justify-center"><span className="text-lg">🧪</span></div>
+            <div><p className="text-2xl font-bold text-cyan-800">{s.pending_samples || 0}</p><p className="text-xs text-cyan-600">Pending Samples</p></div>
+          </div>
+        )}
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-red-100" onClick={() => router.push("/tasks")}>
           <div className="w-10 h-10 rounded-full bg-red-200 flex items-center justify-center"><span className="text-lg">⚠️</span></div>
           <div><p className="text-2xl font-bold text-red-800">{s.tasks?.overdue || 0}</p><p className="text-xs text-red-600">Overdue Tasks</p></div>
@@ -249,6 +261,7 @@ export default function DashboardPage() {
   const user = useSelector((state) => state.auth.user);
   const router = useRouter();
   const isExecutive = user?.role === "executive";
+  const isPrivileged = user?.role === "admin" || user?.role === "manager";
 
   const loadDashboard = () => {
     api.get("/analytics/dashboard/")
@@ -288,10 +301,10 @@ export default function DashboardPage() {
 
       {shadowView && isExecutive ? (
         /* ═══ SHADOW DASHBOARD — same layout as main ═══ */
-        <DashboardContent s={stats?.shadow_stats || {}} router={router} label="Shadow" />
+        <DashboardContent s={stats?.shadow_stats || {}} router={router} label="Shadow" isPrivileged={false} />
       ) : (
         /* ═══ MAIN DASHBOARD ═══ */
-        <DashboardContent s={stats} router={router} label={isExecutive ? "My" : "Total"} />
+        <DashboardContent s={stats} router={router} label={isExecutive ? "My" : "Total"} isPrivileged={isPrivileged} />
       )}
 
       {showShadow && (

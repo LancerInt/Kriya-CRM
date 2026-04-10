@@ -1,12 +1,25 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import { useSelector } from "react-redux";
 import api from "@/lib/axios";
 
 /**
  * Gmail-style email chips input with autocomplete.
  * Suggests from contacts, users, and previously used emails.
+ *
+ * Also flags recipients whose domain is outside the logged-in user's
+ * organization (Gmail-style "be cautious" warning).
  */
 export default function EmailChips({ value, onChange, placeholder }) {
+  const currentUser = useSelector((state) => state.auth.user);
+  // Org domain comes from the logged-in user's own email. Falls back to ""
+  // (in which case nothing is flagged as external).
+  const orgDomain = (currentUser?.email || "").split("@")[1]?.toLowerCase() || "";
+  const isExternal = (email) => {
+    if (!orgDomain) return false;
+    const dom = (email || "").split("@")[1]?.toLowerCase();
+    return !!dom && dom !== orgDomain;
+  };
   const [inputVal, setInputVal] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [allEmails, setAllEmails] = useState([]);
@@ -140,23 +153,36 @@ export default function EmailChips({ value, onChange, placeholder }) {
         className="flex flex-wrap items-center gap-1 px-2 py-1.5 border border-gray-300 rounded-lg min-h-[38px] cursor-text focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent bg-white"
         onClick={() => inputRef.current?.focus()}
       >
-        {emails.map((email, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${
-              isValid(email) ? colors[i % colors.length] : "bg-red-100 text-red-800 border-red-200"
-            }`}
-          >
-            {email}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); removeEmail(i); }}
-              className="ml-0.5 hover:text-red-600 text-current opacity-60 hover:opacity-100"
+        {emails.map((email, i) => {
+          const valid = isValid(email);
+          const external = valid && isExternal(email);
+          const chipClass = !valid
+            ? "bg-red-100 text-red-800 border-red-200"
+            : external
+            ? "bg-amber-50 text-amber-800 border-amber-300"
+            : colors[i % colors.length];
+          return (
+            <span
+              key={i}
+              title={external ? "Outside your organization" : undefined}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${chipClass}`}
             >
-              &times;
-            </button>
-          </span>
-        ))}
+              {external && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 -ml-0.5">
+                  <path fillRule="evenodd" d="M8.485 3.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 3.495zM10 7a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 7zm0 7a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+                </svg>
+              )}
+              {email}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); removeEmail(i); }}
+                className="ml-0.5 hover:text-red-600 text-current opacity-60 hover:opacity-100"
+              >
+                &times;
+              </button>
+            </span>
+          );
+        })}
         <input
           ref={inputRef}
           value={inputVal}
@@ -169,6 +195,29 @@ export default function EmailChips({ value, onChange, placeholder }) {
           className="flex-1 min-w-[120px] border-0 outline-none text-sm bg-transparent py-0.5"
         />
       </div>
+
+      {/* External-recipient warning (Gmail-style) */}
+      {(() => {
+        const externals = emails.filter((e) => isValid(e) && isExternal(e));
+        if (externals.length === 0) return null;
+        return (
+          <div className="mt-1.5 flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mt-0.5 shrink-0">
+              <path fillRule="evenodd" d="M8.485 3.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 3.495zM10 7a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 7zm0 7a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+            </svg>
+            <div className="text-[11px] leading-snug">
+              <p className="font-semibold">Be cautious about sharing sensitive information.</p>
+              <p>
+                {externals.length === 1 ? (
+                  <><span className="font-medium">{externals[0]}</span> is outside your organization and isn't in your contacts.</>
+                ) : (
+                  <><span className="font-medium">{externals.length} recipients</span> ({externals.join(", ")}) are outside your organization.</>
+                )}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Autocomplete dropdown */}
       {showSuggestions && (

@@ -456,6 +456,7 @@ function RefineDropdown({ body, onRefined, contactName }) {
 
 // ── Communications Tab ──
 function CommunicationsTab({ clientId, activeTab, client }) {
+  const currentUser = useSelector((state) => state.auth.user);
   const { data, loading, reload } = useTabData(clientId, "/communications/", activeTab, "communications");
   const [showModal, setShowModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -539,10 +540,45 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   };
 
   const openDraft = async (draftId) => {
+    let res;
     try {
-      const res = await api.get(`/communications/drafts/${draftId}/`);
+      res = await api.get(`/communications/drafts/${draftId}/`);
+    } catch {
+      toast.error("Failed to load draft");
+      return;
+    }
+    try {
       setDraft(res.data);
-      setDraftForm({ subject: res.data.subject, body: textToHtml(res.data.body), cc: res.data.cc || adminManagerEmails });
+
+      // Build the audit-CC set: every admin + manager + every other client
+      // contact, EXCLUDING the currently logged-in user (no point CCing
+      // yourself on a mail you're sending). All steps are wrapped so a
+      // failure in CC computation can never block draft rendering.
+      const myEmail = (currentUser?.email || "").toLowerCase();
+      let auditEmails = [];
+      try {
+        const ur = await api.get("/auth/users/");
+        const users = ur.data.results || ur.data || [];
+        auditEmails = users
+          .filter(u => u && u.email && (u.role === "admin" || u.role === "manager"))
+          .map(u => u.email)
+          .filter(e => e.toLowerCase() !== myEmail);
+      } catch {}
+      try {
+        (client?.contacts || []).forEach(c => {
+          if (c?.email && c.email !== composeToEmail && c.email.toLowerCase() !== myEmail && !auditEmails.includes(c.email)) {
+            auditEmails.push(c.email);
+          }
+        });
+      } catch {}
+
+      const savedCc = (res.data.cc || "")
+        .split(",").map(e => e.trim()).filter(Boolean)
+        .filter(e => e.toLowerCase() !== myEmail);
+      const merged = [...savedCc];
+      auditEmails.forEach(e => { if (!merged.includes(e)) merged.push(e); });
+
+      setDraftForm({ subject: res.data.subject, body: textToHtml(res.data.body), cc: merged.join(", ") });
       setDraftAttachments([]);
       setSavedAttachments(res.data.attachments || []);
       setLastSavedAt(res.data.last_saved_at);
@@ -559,7 +595,12 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       } else {
         setSampleAlreadyExists(false);
       }
-    } catch { toast.error("Failed to load draft"); }
+    } catch (err) {
+      // Draft *loaded* successfully — only the post-load logic threw. Log
+      // the real error so we don't gaslight the user with "Failed to load
+      // draft" for an unrelated bug. Modal still opens.
+      console.error("openDraft post-load error:", err);
+    }
   };
 
   // Auto-open AI Draft modal when arriving from /quote-requests or
@@ -1168,14 +1209,20 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               {savedAttachments.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {savedAttachments.map((att) => (
-                    <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs">
-                      <div className="flex items-center gap-2">
+                    <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs hover:bg-green-100 transition-colors">
+                      <a
+                        href={att.file}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`Open ${att.filename}`}
+                        className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:underline"
+                      >
                         <span className="text-green-500">📄</span>
-                        <span className="font-medium">{att.filename}</span>
-                        <span className="text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
-                        <span className="text-green-600 text-[10px]">Saved</span>
-                      </div>
-                      <button onClick={() => handleRemoveSavedAttachment(att.id)} className="text-red-400 hover:text-red-600">&times;</button>
+                        <span className="font-medium truncate">{att.filename}</span>
+                        <span className="text-gray-400 shrink-0">{(att.file_size / 1024).toFixed(1)} KB</span>
+                        <span className="text-green-600 text-[10px] shrink-0">Saved</span>
+                      </a>
+                      <button onClick={() => handleRemoveSavedAttachment(att.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0">&times;</button>
                     </div>
                   ))}
                 </div>
@@ -1203,12 +1250,39 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               <p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p>
             )}
 
-            {/* Smart Generate Buttons — open editor, then attach */}
+            {/* Smart Generate Buttons — open editor, then attach.
+                Visibility is CONTEXT-AWARE:
+                - If a Quotation_*.pdf is already attached (user arrived from
+                  the Quotations page) → only Generate Quotation shows.
+                - If a PI_*.pdf is already attached (arrived from PI page) →
+                  only Generate PI shows.
+                - If BOTH are attached → both buttons show (so the user can
+                  refresh either).
+                - If NEITHER is attached → fall back to keyword detection
+                  on the email body, so a fresh draft from the inbox still
+                  surfaces the relevant buttons. */}
             {(() => {
               const draftText = `${draftForm.subject || ""} ${draftForm.body || ""} ${draft?.communication?.subject || ""}`.toLowerCase().replace(/<[^>]+>/g, " ");
-              const wantsQuote = /\b(quotation|quote|pricing|price list|rate card|rates)\b/i.test(draftText);
-              const wantsPI = /\b(proforma invoice|proforma|performa|pi)\b|send pi|need pi/i.test(draftText);
+              // Look at the saved/uploaded attachment filenames first to
+              // detect the "context" — which page the user came from.
+              const allAttachmentNames = [
+                ...savedAttachments.map(a => (a.filename || "").toLowerCase()),
+                ...draftAttachments.map(a => (a.name || "").toLowerCase()),
+              ];
+              const hasQuoteAttached = allAttachmentNames.some(n => n.startsWith("quotation_"));
+              const hasPiAttached = allAttachmentNames.some(n => n.startsWith("pi_"));
+              const hasContextAttachment = hasQuoteAttached || hasPiAttached;
+
+              // Keyword detection on the email body — used only when there's
+              // no attachment context yet.
+              const kwQuote = /\b(quotation|quote|pricing|price list|rate card|rates)\b/i.test(draftText);
+              const kwPI = /\b(proforma invoice|proforma|performa|pi)\b|send pi|need pi/i.test(draftText);
               const wantsSample = /\b(sample|samples|trial|swatch|free sample)\b/i.test(draftText);
+
+              // Final visibility: attachment context wins; fall back to keywords.
+              const wantsQuote = hasContextAttachment ? hasQuoteAttached : kwQuote;
+              const wantsPI = hasContextAttachment ? hasPiAttached : kwPI;
+
               if (!wantsQuote && !wantsPI && !wantsSample) return null;
 
               const openQuoteEditor = async () => {
@@ -1262,17 +1336,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                 } catch { toast.error("Failed to create PI"); }
               };
 
-              // Disable each button if a matching attachment is already on the
-              // draft (saved on the server OR just-uploaded but not yet saved).
-              // We match by filename prefix because that's what the backend uses
-              // when it auto-generates and attaches the PDFs.
-              const allAttachmentNames = [
-                ...savedAttachments.map(a => (a.filename || "").toLowerCase()),
-                ...draftAttachments.map(a => (a.name || "").toLowerCase()),
-              ];
-              const hasQuoteAttached = allAttachmentNames.some(n => n.startsWith("quotation_"));
-              const hasPiAttached = allAttachmentNames.some(n => n.startsWith("pi_"));
-
+              // (hasQuoteAttached / hasPiAttached already computed above for
+              // visibility — they double as the disabled-state for the buttons)
               return (
                 <div className="flex gap-2 py-1">
                   {wantsQuote && (

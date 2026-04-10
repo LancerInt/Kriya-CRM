@@ -6,6 +6,11 @@ from django.utils import timezone
 from django.db.models import Q, Count
 from .models import Task
 from .serializers import TaskSerializer
+from .notifications import (
+    notify_task_assigned,
+    notify_task_completed,
+    notify_task_due_reminder,
+)
 
 
 from notifications.helpers import notify
@@ -28,13 +33,40 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         task = serializer.save()
-        extra = [task.owner] if task.owner else []
-        notify(
-            title=f'New task: {task.title}',
-            message=f'{self.request.user.full_name} created a task{" for " + task.client.company_name if task.client else ""}.',
-            notification_type='task', link='/tasks',
-            actor=self.request.user, client=task.client, extra_users=extra,
-        )
+        # Send the dedicated task assignment notification (in-app + email +
+        # stamps assigned_at). Also fires the "first" reminder if a deadline
+        # is set so the assignee gets the heads-up immediately, not 24 hours
+        # later when the daily Celery tick runs. Wrapped so a notification
+        # failure (e.g. SMTP outage) can never break task creation.
+        try:
+            notify_task_assigned(task, actor=self.request.user, is_reassignment=False)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('notify_task_assigned failed')
+        if task.due_date:
+            try:
+                notify_task_due_reminder(task, kind='first')
+            except Exception:
+                pass
+
+    def perform_update(self, serializer):
+        # Detect owner change BEFORE saving so we know whether to fire a
+        # reassignment notification.
+        old_owner_id = None
+        if serializer.instance and serializer.instance.pk:
+            old_owner_id = Task.objects.filter(pk=serializer.instance.pk).values_list('owner_id', flat=True).first()
+        task = serializer.save()
+        if task.owner_id and task.owner_id != old_owner_id:
+            try:
+                notify_task_assigned(task, actor=self.request.user, is_reassignment=bool(old_owner_id))
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('notify_task_assigned failed')
+            if task.due_date:
+                try:
+                    notify_task_due_reminder(task, kind='first')
+                except Exception:
+                    pass
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -52,6 +84,7 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         """Update task status with optional custom note."""
         task = self.get_object()
+        old_status = task.status
         new_status = request.data.get('status', '').strip()
         status_note = request.data.get('status_note', '').strip()
 
@@ -68,32 +101,31 @@ class TaskViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             task.status_note = status_note
         task.save()
 
-        extra = [task.created_by] if task.created_by else []
-        if task.owner:
-            extra.append(task.owner)
-        notify(
-            title=f'Task updated: {task.title}',
-            message=f'{request.user.full_name} updated status to "{new_status or task.status}"{" — " + status_note if status_note else ""}.',
-            notification_type='task', link='/tasks',
-            actor=request.user, client=task.client, extra_users=extra,
-        )
+        # If the status flipped to completed, fire the dedicated completion
+        # notifier (email + in-app to creator AND owner). Otherwise just send
+        # a generic status-update note.
+        if new_status == 'completed' and old_status != 'completed':
+            notify_task_completed(task, actor=request.user)
+        else:
+            extra = [task.created_by] if task.created_by else []
+            if task.owner:
+                extra.append(task.owner)
+            notify(
+                title=f'Task updated: {task.title}',
+                message=f'{request.user.full_name} updated status to "{new_status or task.status}"{" — " + status_note if status_note else ""}.',
+                notification_type='task', link='/tasks',
+                actor=request.user, client=task.client, extra_users=extra,
+            )
         return Response(TaskSerializer(task).data)
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         task = self.get_object()
+        was_completed_already = task.status == 'completed'
         task.status = 'completed'
         task.completed_at = timezone.now()
         task.save()
 
-        extra = [task.created_by] if task.created_by else []
-        if task.owner:
-            extra.append(task.owner)
-        notify(
-            title=f'Task completed: {task.title}',
-            message=f'{request.user.full_name} completed "{task.title}"{" for " + task.client.company_name if task.client else ""}.',
-            notification_type='task', link='/tasks',
-            actor=request.user, client=task.client, extra_users=extra,
-        )
-
+        if not was_completed_already:
+            notify_task_completed(task, actor=request.user)
         return Response(TaskSerializer(task).data)

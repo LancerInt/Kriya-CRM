@@ -30,6 +30,18 @@ export default function TasksPage() {
     try {
       const payload = { ...form };
       if (!payload.owner) delete payload.owner;
+      // datetime-local sends "2026-04-08T17:53" — Django's DateTimeField is
+      // strict about timezone, so convert to a full ISO string in the user's
+      // local timezone. Empty value → omit so the field stays nullable.
+      if (payload.due_date) {
+        try {
+          payload.due_date = new Date(payload.due_date).toISOString();
+        } catch {
+          delete payload.due_date;
+        }
+      } else {
+        delete payload.due_date;
+      }
       await dispatch(createTask(payload)).unwrap();
       toast.success("Task created");
       setShowModal(false);
@@ -70,7 +82,7 @@ export default function TasksPage() {
         ]} />
       </div>
     )},
-    { key: "due_date", label: "Due Date", render: (row) => row.due_date ? format(new Date(row.due_date), "MMM d, yyyy") : "\u2014" },
+    { key: "due_date", label: "Due Date", render: (row) => row.due_date ? format(new Date(row.due_date), "MMM d, yyyy h:mm a") : "\u2014" },
     { key: "owner_name", label: "Assigned To", render: (row) => row.owner_name || "\u2014" },
     { key: "creator_name", label: "Assigned By", render: (row) => <span className="text-gray-500">{row.creator_name || "\u2014"}</span> },
     { key: "actions", label: "", render: (row) => row.status !== "completed" && row.status !== "cancelled" && (
@@ -152,8 +164,13 @@ export default function TasksPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-              <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date &amp; Time</label>
+              <input
+                type="datetime-local"
+                value={form.due_date}
+                onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
             </div>
           </div>
           <div>

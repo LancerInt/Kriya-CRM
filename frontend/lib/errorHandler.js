@@ -7,8 +7,11 @@
  *   { "non_field_errors": ["Invalid data."] }
  */
 export function getErrorMessage(err, fallback = "Something went wrong") {
-  if (!err?.response?.data) return fallback;
-  const data = err.response.data;
+  // Handle both Axios errors (err.response.data) AND raw payloads from
+  // redux-toolkit's `rejectWithValue` (where `.unwrap()` throws the data
+  // object directly, with no `.response` wrapper).
+  const data = err?.response?.data ?? err;
+  if (!data || (typeof data !== "object" && typeof data !== "string")) return fallback;
 
   // String error
   if (typeof data === "string") return data;

@@ -98,16 +98,28 @@ export default function QuoteRequestsPage() {
     setShowReview(true);
   };
 
-  // "Enter Rates" — navigate to the client's Communications tab and auto-open
-  // the AI Draft Reply modal for the source email. The Generate Quotation
-  // button inside that modal lets the user open the editor with values
-  // pre-filled from the email.
-  const handleEnterRates = (qr) => {
+  // "Enter Rates" — open the Quotation Editor in-place so the executive can
+  // type product/qty/price directly. If the inquiry already has a linked
+  // quotation we open it; otherwise we create one (AI-prefilled from the
+  // source email) and then open it. No detour through AI Draft — that's
+  // only used at SEND time, not at rate-entry time.
+  const handleEnterRates = async (qr) => {
     if (!qr.client) {
       toast.error("This inquiry has no client linked yet");
       return;
     }
-    router.push(`/clients/${qr.client}?openDraftFor=${qr.source_communication}`);
+    try {
+      let quotationId = qr.linked_quotation;
+      if (!quotationId) {
+        const res = await api.post("/quotations/quotations/create-blank/", {
+          client_id: qr.client,
+          communication_id: qr.source_communication,
+        });
+        quotationId = res.data.id;
+        loadRequests();
+      }
+      _openQuotationEditor(quotationId);
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to open quotation")); }
   };
 
   const handleGenerateQuote = async (qr) => {
@@ -173,22 +185,99 @@ export default function QuoteRequestsPage() {
     } catch { toast.error("Failed to preview"); }
   };
 
-  const handleSendQt = async () => {
+  // Save → generate PDF → attach to the source email's AI Draft, then jump
+  // to the AI Draft modal so the user can review the full reply (body + the
+  // freshly attached Quotation PDF) and click Send Reply when ready. Replaces
+  // the old "send-to-client" flow which mailed the quote out directly.
+  const handleAttachQt = async () => {
     if (!qt) return;
     const noRate = qtItems.some(item => !parseFloat(item.unit_price));
     if (noRate) {
-      toast.error("Please enter rate for all products before sending");
+      toast.error("Please enter rate for all products before attaching");
       return;
     }
     setQtSending(true);
     try {
       await handleSaveQt();
-      await api.post(`/quotations/quotations/${qt.id}/send-to-client/`, { send_via: "email" });
-      toast.success("Quotation sent!");
+      const res = await api.post(`/quotations/quotations/${qt.id}/attach-to-email/`);
+      toast.success("Quotation attached to email — review and send");
       setShowQtModal(false);
-      loadRequests();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
+      const { client_id, communication_id } = res.data || {};
+      if (client_id && communication_id) {
+        router.push(`/clients/${client_id}?openDraftFor=${communication_id}`);
+      } else {
+        loadRequests();
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to attach")); }
     finally { setQtSending(false); }
+  };
+
+  // ── Revise an already-sent quotation: create v+1 of the linked quotation
+  // (e.g. when the client comes back asking for changes) and open the new
+  // version directly in the Quotation Editor for inline rate edits. The
+  // editor's own Send button pushes it through email when ready.
+  const handleReviseQuote = async (qr) => {
+    if (!qr.linked_quotation) return;
+    // Pick the LATEST version in the chain — not the originally-linked V1.
+    // QuoteRequest.linked_quotation always points at V1, so naively reusing
+    // it would always revise V1 → V2 instead of V2 → V3, V3 → V4, etc.
+    const versions = qr.linked_quotation_versions || [];
+    const latest = versions.length
+      ? versions.reduce((a, b) => ((a.version || 1) >= (b.version || 1) ? a : b))
+      : { id: qr.linked_quotation, version: qr.linked_quotation_version || 1 };
+    if (!confirm(`Create a new version after V${latest.version}?\n\nThe previous version will be kept and the new V${(latest.version || 1) + 1} will open in the editor.`)) return;
+    try {
+      const res = await api.post(`/quotations/quotations/${latest.id}/revise/`);
+      toast.success(`Revision V${res.data.version} created`);
+      loadRequests();
+      _openQuotationEditor(res.data.id);
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create revision")); }
+  };
+
+  // ── Open a specific version chip:
+  //   • DRAFT versions  → Quotation Editor (in-place) so the executive can
+  //     enter rates and edit details directly. Editor has its own Send button
+  //     when ready.
+  //   • SENT versions   → open the saved PDF in a new tab as a read-only
+  //     viewer. Once a version has been mailed out it must NOT be re-edited
+  //     or re-sent — locked as a historical record.
+  const openVersionInDraft = (qr, version) => {
+    const isSentVersion = version && (
+      version.status === "sent" || version.status === "approved" || version.status === "accepted"
+    );
+    if (isSentVersion) {
+      _viewQuotationPdf(version.id);
+      return;
+    }
+    _openQuotationEditor(version.id);
+  };
+
+  // ── Quick PDF viewer for sent quotations (read-only) ──
+  const _viewQuotationPdf = async (quotationId) => {
+    try {
+      const res = await api.get(`/quotations/quotations/${quotationId}/generate-pdf/`, { responseType: "blob" });
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.title = "Quotation";
+        w.document.write(`<html><head><title>Quotation</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
+        w.document.close();
+      }
+    } catch { toast.error("Failed to load quotation PDF"); }
+  };
+
+  // Same for sent PIs
+  const _viewPiPdf = async (piId) => {
+    try {
+      const res = await api.get(`/finance/pi/${piId}/generate-pdf/`, { responseType: "blob" });
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.title = "Proforma Invoice";
+        w.document.write(`<html><head><title>Proforma Invoice</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
+        w.document.close();
+      }
+    } catch { toast.error("Failed to load PI PDF"); }
   };
 
   const handleReject = async (qr) => {
@@ -269,21 +358,89 @@ export default function QuoteRequestsPage() {
                   {qr.assigned_to_name && <p className="text-gray-500 mt-0.5">{qr.assigned_to_name}</p>}
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
-                {qr.linked_quotation_number ? (
-                  <>
-                    <span className="text-xs text-green-600 font-medium">{qr.linked_quotation_status === "sent" ? "Sent" : "Draft"}: {qr.linked_quotation_number}</span>
-                    {qr.linked_quotation_status === "sent" ? (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Mail Sent</span>
-                    ) : (
-                      <button onClick={(e) => { e.stopPropagation(); handleEnterRates(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
-                    )}
-                  </>
+              {/* Version history chips — every Quotation revision and every PI
+                  spawned from this email, with creator + sender attribution so
+                  the full negotiation audit trail is visible at a glance. */}
+              {((qr.linked_quotation_versions?.length || 0) > 0 || (qr.linked_pi_versions?.length || 0) > 0) && (
+                <div className="mt-2 flex flex-wrap items-stretch gap-1.5">
+                  {qr.linked_quotation_versions?.map((v) => {
+                    const sent = v.status === "sent" || v.status === "approved" || v.status === "accepted";
+                    const cls = sent
+                      ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                      : v.status === "rejected"
+                      ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+                    return (
+                      <button
+                        key={`q-${v.id}`}
+                        onClick={(e) => { e.stopPropagation(); openVersionInDraft(qr, v); }}
+                        title={sent ? `${v.quotation_number} · sent — view PDF` : `${v.quotation_number} · draft — open AI Draft`}
+                        className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
+                      >
+                        <div className="font-semibold">Quote V{v.version} · {v.quotation_number}</div>
+                        {(v.created_by_name || v.sent_by_name) && (
+                          <div className="font-normal opacity-80 leading-tight mt-0.5">
+                            {v.created_by_name && <>Edited: {v.created_by_name}</>}
+                            {v.created_by_name && v.sent_by_name && " · "}
+                            {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {qr.linked_pi_versions?.map((v) => {
+                    const cls = v.status === "sent"
+                      ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+                    const piSent = v.status === "sent";
+                    return (
+                      <button
+                        key={`pi-${v.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (piSent) {
+                            _viewPiPdf(v.id);
+                          } else {
+                            // Drafts open in the PI editor on the Proforma
+                            // Invoices page (this page doesn't host the PI
+                            // editor itself).
+                            router.push(`/proforma-invoices?open=${v.id}`);
+                          }
+                        }}
+                        title={piSent ? `${v.invoice_number} · sent — view PDF` : `${v.invoice_number} · draft — open editor`}
+                        className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
+                      >
+                        <div className="font-semibold">PI V{v.version} · {v.invoice_number}</div>
+                        {(v.created_by_name || v.sent_by_name) && (
+                          <div className="font-normal opacity-80 leading-tight mt-0.5">
+                            {v.created_by_name && <>Edited: {v.created_by_name}</>}
+                            {v.created_by_name && v.sent_by_name && " · "}
+                            {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-end">
+                {qr.linked_quotation_status === "sent" ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleReviseQuote(qr); }}
+                    className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"
+                    title="Client asked for changes — create a new version"
+                  >
+                    Revise (V{(qr.linked_quotation_version || 1) + 1})
+                  </button>
                 ) : (
-                  <>
-                    <span className="text-xs text-gray-400">No quotation linked</span>
-                    <button onClick={(e) => { e.stopPropagation(); handleEnterRates(qr); }} className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700">Enter Rates</button>
-                  </>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleEnterRates(qr); }}
+                    className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700"
+                    title="Open AI Draft to enter rates and send"
+                  >
+                    Enter Rates
+                  </button>
                 )}
               </div>
             </div>
@@ -343,7 +500,12 @@ export default function QuoteRequestsPage() {
               <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
                 <span className="text-sm text-green-700 font-medium">{selectedQR.linked_quotation_status === "sent" ? "Sent" : "Draft"} Quotation: {selectedQR.linked_quotation_number}</span>
                 {selectedQR.linked_quotation_status === "sent" ? (
-                  <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg">Mail Sent</span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg">Mail Sent</span>
+                    <button onClick={() => handleReviseQuote(selectedQR)} className="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700">
+                      Revise (V{(selectedQR.linked_quotation_version || 1) + 1})
+                    </button>
+                  </div>
                 ) : (
                   <button onClick={() => handleEnterRates(selectedQR)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">Open & Enter Rates</button>
                 )}
@@ -359,7 +521,12 @@ export default function QuoteRequestsPage() {
               </div>
               <div className="flex gap-2">
                 {selectedQR.linked_quotation_status === "sent" ? (
-                  <span className="px-4 py-2 bg-green-100 text-green-700 text-sm font-medium rounded-lg">Mail Sent</span>
+                  <>
+                    <span className="px-4 py-2 bg-green-100 text-green-700 text-sm font-medium rounded-lg">Mail Sent</span>
+                    <button onClick={() => handleReviseQuote(selectedQR)} className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">
+                      Revise (V{(selectedQR.linked_quotation_version || 1) + 1})
+                    </button>
+                  </>
                 ) : (
                   <button onClick={() => handleEnterRates(selectedQR)} className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Open AI Draft & Enter Rates</button>
                 )}
@@ -381,7 +548,7 @@ export default function QuoteRequestsPage() {
         qt={qt} qtForm={qtForm} setQtForm={setQtForm}
         qtItems={qtItems} setQtItems={setQtItems}
         onSave={handleSaveQt} onPreview={handlePreviewQt}
-        onSend={handleSendQt} sending={qtSending}
+        onSend={handleAttachQt} sending={qtSending} sendLabel="Attach to Email"
       />
     </div>
   );

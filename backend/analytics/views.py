@@ -8,6 +8,7 @@ from tasks.models import Task
 from quotations.models import Inquiry, Quotation
 from finance.models import Invoice
 from communications.models import Communication
+from samples.models import Sample
 
 
 def _get_exec_client_ids(user):
@@ -142,6 +143,17 @@ def dashboard_stats(request):
             order_qs.values('status').annotate(count=Count('id')).order_by('status')
         ),
     }
+
+    # ── Admin/manager-only tiles ──────────────────────────────────────────
+    # Pending orders = anything not yet delivered or cancelled.
+    # Pending samples = anything before feedback_received (still in flight).
+    if not is_executive:
+        stats['pending_orders'] = Order.objects.exclude(
+            status__in=['delivered', 'cancelled']
+        ).count()
+        stats['pending_samples'] = Sample.objects.exclude(
+            status__in=['feedback_received']
+        ).count()
 
     if shadow_clients is not None:
         stats['shadow_clients'] = shadow_clients

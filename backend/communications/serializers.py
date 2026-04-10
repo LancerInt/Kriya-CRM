@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Q
 from .models import Communication, CommunicationAttachment, EmailAccount, WhatsAppConfig, EmailDraft, DraftAttachment, QuoteRequest
 from common.encryption import encrypt_value
 
@@ -168,6 +169,150 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
     source_body = serializers.CharField(source='source_communication.body', read_only=True, default='')
     linked_quotation_number = serializers.CharField(source='linked_quotation.quotation_number', read_only=True, default='')
     linked_quotation_status = serializers.CharField(source='linked_quotation.status', read_only=True, default='')
+    linked_quotation_version = serializers.SerializerMethodField()
+
+    def get_linked_quotation_version(self, obj):
+        """Highest version in the linked quotation's revision chain — so the
+        Revise button label tracks the latest V, not the originally-linked V1.
+        """
+        if not obj.linked_quotation_id:
+            return 1
+        try:
+            from quotations.models import Quotation
+            root = obj.linked_quotation
+            while root.parent_id:
+                root = root.parent
+            all_ids = {root.id}
+            stack = [root]
+            while stack:
+                node = stack.pop()
+                for child in Quotation.objects.filter(parent=node, is_deleted=False).only('id'):
+                    if child.id not in all_ids:
+                        all_ids.add(child.id)
+                        stack.append(child)
+            max_v = Quotation.objects.filter(id__in=all_ids).order_by('-version').values_list('version', flat=True).first()
+            return max_v or 1
+        except Exception:
+            return obj.linked_quotation.version or 1
+    # Full version chain (root + every revision) for the linked quotation, plus
+    # any Proforma Invoices spawned from the same source email. Renders as
+    # V1/V2/V3 chips on the inquiry card so the full negotiation history is
+    # visible at a glance.
+    linked_quotation_versions = serializers.SerializerMethodField()
+    linked_pi_versions = serializers.SerializerMethodField()
+
+    def _walk_chain(self, root):
+        """Walk parent → children, returning the full version chain."""
+        from quotations.models import Quotation
+        all_ids = {root.id}
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for child in Quotation.objects.filter(parent=node, is_deleted=False).only('id'):
+                if child.id not in all_ids:
+                    all_ids.add(child.id)
+                    stack.append(child)
+        return Quotation.objects.filter(id__in=all_ids).order_by('version', 'created_at')
+
+    def _resolve_sent_by(self, comm_id):
+        """Find who actually sent the reply mail for a given source_communication.
+
+        Strategy (in order of preference):
+          1. The most recently sent EmailDraft tied to this inbound message —
+             EmailDraft.created_by is the executive who clicked "Send Reply".
+          2. The most recent OUTBOUND Communication in the same thread, using
+             Communication.user (the user who owns the email_account it was
+             sent from).
+        Returns the user's full_name (or username), or '' if nothing matched.
+        """
+        if not comm_id:
+            return ''
+        try:
+            from communications.models import Communication, EmailDraft
+            # 1) Prefer the EmailDraft that was actually sent on this inbound msg
+            draft = EmailDraft.objects.filter(
+                communication_id=comm_id, status='sent'
+            ).select_related('created_by').order_by('-updated_at').first()
+            if draft and draft.created_by:
+                return draft.created_by.full_name or draft.created_by.username or ''
+            # 2) Fallback: latest outbound message in the same thread
+            comm = Communication.objects.filter(id=comm_id).first()
+            if comm:
+                thread_id = comm.thread_id or comm.id
+                out = Communication.objects.filter(
+                    Q(thread_id=thread_id) | Q(id=thread_id),
+                    direction='outbound', is_deleted=False,
+                ).select_related('user').order_by('-created_at').first()
+                if out and out.user:
+                    return out.user.full_name or out.user.username or ''
+        except Exception:
+            pass
+        return ''
+
+    def get_linked_quotation_versions(self, obj):
+        if not obj.linked_quotation_id:
+            return []
+        try:
+            from quotations.models import Quotation
+            root = obj.linked_quotation
+            while root.parent_id:
+                root = root.parent
+            chain = self._walk_chain(root)
+            # Always resolve the sender from the outbound email — the
+            # quotation's own status flag doesn't always flip to 'sent' when
+            # the user just emailed the PDF as a reply attachment, so we
+            # attribute based on whoever actually sent the reply mail.
+            sent_by = self._resolve_sent_by(obj.source_communication_id)
+            return [
+                {
+                    'id': str(q.id),
+                    'quotation_number': q.quotation_number,
+                    'version': q.version or 1,
+                    'status': q.status,
+                    'created_by_name': (q.created_by.full_name if q.created_by else '') or '',
+                    'approved_by_name': (q.approved_by.full_name if q.approved_by else '') or '',
+                    'sent_by_name': sent_by,
+                    'sent_at': q.sent_at.isoformat() if q.sent_at else '',
+                    'created_at': q.created_at.isoformat() if q.created_at else '',
+                }
+                for q in chain
+            ]
+        except Exception:
+            return []
+
+    def get_linked_pi_versions(self, obj):
+        try:
+            from finance.models import ProformaInvoice
+            qs = ProformaInvoice.objects.filter(
+                source_communication_id=obj.source_communication_id,
+                is_deleted=False,
+            ).select_related('created_by').order_by('version', 'created_at')
+            # Also pull any descendants (revisions) of those PIs so the chain
+            # is complete even when create_standalone auto-versioned them.
+            seen = {pi.id: pi for pi in qs}
+            stack = list(qs)
+            while stack:
+                node = stack.pop()
+                for child in ProformaInvoice.objects.filter(parent=node, is_deleted=False).select_related('created_by'):
+                    if child.id not in seen:
+                        seen[child.id] = child
+                        stack.append(child)
+            chain = sorted(seen.values(), key=lambda p: (p.version or 1, p.created_at))
+            sent_by = self._resolve_sent_by(obj.source_communication_id)
+            return [
+                {
+                    'id': str(p.id),
+                    'invoice_number': p.invoice_number,
+                    'version': p.version or 1,
+                    'status': p.status,
+                    'created_by_name': (p.created_by.full_name if p.created_by else '') or '',
+                    'sent_by_name': sent_by,
+                    'created_at': p.created_at.isoformat() if p.created_at else '',
+                }
+                for p in chain
+            ]
+        except Exception:
+            return []
 
     class Meta:
         model = QuoteRequest
@@ -182,7 +327,8 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
             'extracted_packaging', 'extracted_destination_country',
             'extracted_destination_port', 'extracted_delivery_terms',
             'extracted_payment_terms', 'extracted_notes',
-            'linked_quotation', 'linked_quotation_number', 'linked_quotation_status',
+            'linked_quotation', 'linked_quotation_number', 'linked_quotation_status', 'linked_quotation_version',
+            'linked_quotation_versions', 'linked_pi_versions',
             'source_subject', 'source_body',
             'created_at', 'updated_at',
         ]

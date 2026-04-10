@@ -31,6 +31,7 @@ export default function ProformaInvoicesPage() {
   // Review modal
   const [selectedPI, setSelectedPI] = useState(null);
   const [showReview, setShowReview] = useState(false);
+  const [filter, setFilter] = useState("all");
 
   const loadPIs = async () => {
     try {
@@ -124,18 +125,46 @@ export default function ProformaInvoicesPage() {
     } catch { toast.error("Failed to preview"); }
   };
 
-  // ── Send PI ──
+  // ── Attach PI to Email (mirrors Quotation Attach-to-Email flow) ──
+  // Save → generate PDF → attach to source email's draft → jump to AI Draft.
+  // Falls back to direct send-email if no source email exists.
   const handleSendPI = async () => {
     if (!pi) return;
     setPiSending(true);
     try {
       await handleSavePI();
-      await api.post(`/finance/pi/${pi.id}/send-email/`);
-      toast.success("PI sent to client!");
-      setShowPiModal(false);
-      loadPIs();
+      if (pi.source_communication) {
+        const res = await api.post(`/finance/pi/${pi.id}/attach-to-email/`);
+        toast.success("PI attached to email — review and send");
+        setShowPiModal(false);
+        const { client_id, communication_id } = res.data || {};
+        if (client_id && communication_id) {
+          router.push(`/clients/${client_id}?openDraftFor=${communication_id}`);
+        } else {
+          loadPIs();
+        }
+      } else {
+        await api.post(`/finance/pi/${pi.id}/send-email/`);
+        toast.success("PI sent to client!");
+        setShowPiModal(false);
+        loadPIs();
+      }
     } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
     finally { setPiSending(false); }
+  };
+
+  // ── Read-only PDF viewer for sent PIs ──
+  const _viewPiPdf = async (piId) => {
+    try {
+      const res = await api.get(`/finance/pi/${piId}/generate-pdf/`, { responseType: "blob" });
+      const pdfUrl = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.title = "Proforma Invoice";
+        w.document.write(`<html><head><title>Proforma Invoice</title><style>body{margin:0}</style></head><body><iframe src="${pdfUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`);
+        w.document.close();
+      }
+    } catch { toast.error("Failed to load PI PDF"); }
   };
 
   // ── Edit & Send: open the client's AI Draft modal so the PI flows through
@@ -155,6 +184,27 @@ export default function ProformaInvoicesPage() {
     }
   };
 
+  // ── Revise: create v+1 of an existing PI (e.g. when client asks for changes)
+  // and jump to the AI Draft of the source email so the new version can be
+  // sent through the same email pipeline as the original. Falls back to the
+  // standalone editor if the PI has no email link.
+  const handleRevise = async (piData) => {
+    // Use latest_version (computed by the serializer across the whole chain)
+    // so the button always increments past the highest existing version,
+    // even if the user clicked Revise on an older row in the chain.
+    const latestV = piData.latest_version || piData.version || 1;
+    if (!confirm(`Create a new version after V${latestV}?\n\nThe previous version will be kept intact and the new V${latestV + 1} will open in the editor.`)) return;
+    try {
+      const res = await api.post(`/finance/pi/${piData.id}/revise/`);
+      toast.success(`Revision V${res.data.version} created`);
+      const newPi = res.data;
+      // Open the new revision directly in the PI editor (no AI Draft detour
+      // for rate-entry — same flow as the Quotation editor).
+      loadPIs();
+      _openPIEditor(newPi.id);
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to create revision")); }
+  };
+
   // ── Convert PI to Order ──
   const handleConvertToOrder = async (piData) => {
     try {
@@ -170,6 +220,41 @@ export default function ProformaInvoicesPage() {
   const draftPIs = piList.filter(p => p.status === "draft");
   const sentPIs = piList.filter(p => p.status === "sent");
 
+  // ── Group revisions into a single "lineage" card ──
+  // Walk parent links to find the root for each PI, then bucket every PI
+  // under its root. This gives us one card per logical PI lineage with
+  // V1/V2/V3 chips inside, instead of 3 separate cards for the same chain.
+  const byId = new Map(piList.map(p => [p.id, p]));
+  const findRootId = (p) => {
+    let cur = p;
+    let safety = 0;
+    while (cur && cur.parent && byId.has(cur.parent) && safety < 50) {
+      cur = byId.get(cur.parent);
+      safety++;
+    }
+    return cur?.id || p.id;
+  };
+  const groups = new Map(); // rootId → { root, versions: [] }
+  piList.forEach(p => {
+    const rootId = findRootId(p);
+    if (!groups.has(rootId)) groups.set(rootId, { root: byId.get(rootId), versions: [] });
+    groups.get(rootId).versions.push(p);
+  });
+  // Sort each lineage by version, and pick the latest as the "display" row
+  const lineages = Array.from(groups.values()).map(g => {
+    g.versions.sort((a, b) => (a.version || 1) - (b.version || 1));
+    g.latest = g.versions[g.versions.length - 1];
+    g.anySent = g.versions.some(v => v.status === "sent");
+    g.anyDraft = g.versions.some(v => v.status === "draft");
+    return g;
+  });
+  // Sort lineages by latest version's created_at desc
+  lineages.sort((a, b) => new Date(b.latest.created_at) - new Date(a.latest.created_at));
+
+  const filteredLineages = filter === "all"
+    ? lineages
+    : lineages.filter(g => g.latest.status === filter);
+
   return (
     <div>
       <PageHeader
@@ -181,6 +266,27 @@ export default function ProformaInvoicesPage() {
           </button>
         }
       />
+
+      {/* Status filter pills */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {[
+          { key: "all", label: "All", count: piList.length },
+          { key: "draft", label: "Draft", count: draftPIs.length },
+          { key: "sent", label: "Sent", count: sentPIs.length },
+        ].map(f => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+              filter === f.key
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            {f.label} ({f.count})
+          </button>
+        ))}
+      </div>
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
@@ -202,26 +308,47 @@ export default function ProformaInvoicesPage() {
         </div>
       )}
 
-      {piList.length === 0 ? (
+      {filteredLineages.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <p className="text-gray-500">No proforma invoices yet.</p>
+          <p className="text-gray-500">No proforma invoices in this view.</p>
           <p className="text-sm text-gray-400 mt-1">Create one for a client or generate from an order.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {piList.map((piData) => (
-            <div key={piData.id}
+          {filteredLineages.map((g) => {
+            const piData = g.latest;            // header reflects the newest version
+            const versions = g.versions;        // V1 → Vn chips
+            return (
+            <div key={g.root.id}
               className={`bg-white rounded-xl border p-4 hover:shadow-md transition-shadow ${
-                selectedIds.has(piData.id) ? "border-indigo-400 bg-indigo-50/30" : piData.status === "draft" ? "border-amber-300 bg-amber-50/30" : "border-green-300 bg-green-50/20"
+                selectedIds.has(piData.id) ? "border-indigo-400 bg-indigo-50/30" :
+                g.anySent ? "border-green-300 bg-green-50/20" :
+                "border-amber-300 bg-amber-50/30"
               }`}>
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3 flex-1">
                   <input type="checkbox" checked={selectedIds.has(piData.id)} onChange={(e) => toggleSelect(piData.id, e)} className="h-4 w-4 mt-1 text-indigo-600 border-gray-300 rounded cursor-pointer flex-shrink-0" />
-                  <div className="flex-1 cursor-pointer" onClick={() => { setSelectedPI(piData); setShowReview(true); }}>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex-1 cursor-pointer" onClick={() => {
+                    if (piData.status === "sent") _viewPiPdf(piData.id);
+                    else _openPIEditor(piData.id);
+                  }}>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <StatusBadge status={piData.status} />
-                    <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{piData.invoice_number}</span>
-                    {piData.order_number && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Order: {piData.order_number}</span>}
+                    <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{g.root.invoice_number}</span>
+                    {versions.length > 1 && (
+                      <span className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded">
+                        {versions.length} versions
+                      </span>
+                    )}
+                    {piData.order_number && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); router.push(`/orders/${piData.order}`); }}
+                        title={`Open order ${piData.order_number}`}
+                        className="text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded font-medium"
+                      >
+                        Order: {piData.order_number}
+                      </button>
+                    )}
                   </div>
                   <h3 className="font-semibold text-sm">{piData.client_company_name}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -233,36 +360,73 @@ export default function ProformaInvoicesPage() {
                       {piData.items.map(item => item.product_name).filter(Boolean).join(", ") || "No products"}
                     </p>
                   )}
+
+                  {/* Version chips — clickable, color-coded by status,
+                      with edited/sent attribution like the inquiries page. */}
+                  <div className="mt-2 flex flex-wrap items-stretch gap-1.5">
+                    {versions.map((v) => {
+                      const sent = v.status === "sent";
+                      const cls = sent
+                        ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                        : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (sent) _viewPiPdf(v.id);
+                            else _openPIEditor(v.id);
+                          }}
+                          title={sent ? `${v.invoice_number} · sent — view PDF` : `${v.invoice_number} · draft — open editor`}
+                          className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
+                        >
+                          <div className="font-semibold">PI V{v.version || 1} · {v.invoice_number}</div>
+                          {(v.created_by_name || v.sent_by_name) && (
+                            <div className="font-normal opacity-80 leading-tight mt-0.5">
+                              {v.created_by_name && <>Edited: {v.created_by_name}</>}
+                              {v.created_by_name && v.sent_by_name && " · "}
+                              {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                   </div>
                 </div>
                 <div className="text-right text-xs text-gray-400 flex-shrink-0">
                   {piData.created_at ? format(new Date(piData.created_at), "MMM d, yyyy h:mm a") : ""}
+                  {g.root.created_by_name && (
+                    <p className="text-gray-500 mt-0.5">{g.root.created_by_name}</p>
+                  )}
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
+              <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-end gap-2">
                 {piData.status === "sent" ? (
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-medium">Sent</span>
-                ) : (
-                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded font-medium">Draft</span>
-                )}
-                <div className="flex gap-2">
-                  {!piData.order && (
-                    <button onClick={(e) => { e.stopPropagation(); handleConvertToOrder(piData); }} className="text-xs bg-blue-600 text-white px-3 py-1 rounded font-medium hover:bg-blue-700">Convert to Order</button>
-                  )}
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (piData.status === "draft") handleEditAndSend(piData);
-                      else _openPIEditor(piData.id);
-                    }}
-                    className="text-xs bg-teal-600 text-white px-3 py-1 rounded font-medium hover:bg-teal-700"
+                    onClick={(e) => { e.stopPropagation(); handleRevise(piData); }}
+                    className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"
+                    title="Client asked for changes — create a new version"
                   >
-                    {piData.status === "draft" ? "Edit & Send" : "View"}
+                    Revise (V{(piData.latest_version || piData.version || 1) + 1})
                   </button>
-                </div>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); _openPIEditor(piData.id); }}
+                    className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded font-medium hover:bg-teal-700"
+                  >
+                    Continue Draft
+                  </button>
+                )}
+                {!piData.order && piData.status === "sent" && (
+                  <button onClick={(e) => { e.stopPropagation(); handleConvertToOrder(piData); }} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded font-medium hover:bg-blue-700">
+                    Convert to Order
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -355,7 +519,7 @@ export default function ProformaInvoicesPage() {
         pi={pi} piForm={piForm} setPiForm={setPiForm}
         piItems={piItems} setPiItems={setPiItems}
         onSave={handleSavePI} onPreview={handlePreviewPI}
-        onSend={handleSendPI} sending={piSending}
+        onSend={handleSendPI} sending={piSending} sendLabel="Attach to Email"
       />
     </div>
   );

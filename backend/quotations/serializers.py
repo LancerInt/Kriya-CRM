@@ -34,9 +34,55 @@ class QuotationSerializer(serializers.ModelSerializer):
     approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default='')
     parent_number = serializers.CharField(source='parent.quotation_number', read_only=True, default='')
     revision_count = serializers.SerializerMethodField()
+    sent_by_name = serializers.SerializerMethodField()
 
     def get_revision_count(self, obj):
         return obj.revisions.count()
+
+    def get_sent_by_name(self, obj):
+        """Resolve who actually sent the email containing this quotation.
+
+        Resolution order:
+          1. EmailDraft(status='sent') tied to the quotation's source comm.
+          2. Latest outbound Communication in the same thread.
+          3. Latest outbound Communication for the same client after the
+             quotation was created (covers send-to-client action).
+          4. Final fallback: created_by if the quotation is in a sent state.
+        """
+        try:
+            from communications.models import QuoteRequest, EmailDraft, Communication
+            from django.db.models import Q
+            qr = QuoteRequest.objects.filter(linked_quotation=obj).first()
+            comm_id = qr.source_communication_id if qr else None
+            if comm_id:
+                draft = EmailDraft.objects.filter(
+                    communication_id=comm_id, status='sent'
+                ).select_related('created_by').order_by('-updated_at').first()
+                if draft and draft.created_by:
+                    return draft.created_by.full_name or draft.created_by.username or ''
+                comm = Communication.objects.filter(id=comm_id).first()
+                if comm:
+                    thread_id = comm.thread_id or comm.id
+                    out = Communication.objects.filter(
+                        Q(thread_id=thread_id) | Q(id=thread_id),
+                        direction='outbound', is_deleted=False,
+                    ).select_related('user').order_by('-created_at').first()
+                    if out and out.user:
+                        return out.user.full_name or out.user.username or ''
+            if obj.client_id:
+                out = Communication.objects.filter(
+                    client_id=obj.client_id,
+                    direction='outbound',
+                    is_deleted=False,
+                    created_at__gte=obj.created_at,
+                ).select_related('user').order_by('created_at').first()
+                if out and out.user:
+                    return out.user.full_name or out.user.username or ''
+            if obj.status in ['sent', 'approved', 'accepted'] and obj.created_by:
+                return obj.created_by.full_name or obj.created_by.username or ''
+        except Exception:
+            pass
+        return ''
 
     class Meta:
         model = Quotation
@@ -53,7 +99,7 @@ class QuotationSerializer(serializers.ModelSerializer):
                   'validity_days', 'subtotal', 'total', 'notes', 'sent_via', 'sent_at',
                   'created_by', 'created_by_name',
                   'approved_by', 'approved_by_name', 'approved_at',
-                  'parent_number', 'revision_count',
+                  'parent_number', 'revision_count', 'sent_by_name',
                   'items', 'created_at', 'updated_at']
         read_only_fields = ['id', 'quotation_number', 'created_by', 'approved_by', 'approved_at']
 

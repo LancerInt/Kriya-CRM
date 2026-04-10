@@ -148,6 +148,16 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Sample request detection failed for {comm.id}: {e}')
 
+            # Auto-revision: if this inbound email is a follow-up in a thread
+            # that already has a SENT quotation or PI, and mentions changes /
+            # modifications, auto-create a draft revision so the executive
+            # can jump straight into editing rates without a manual Revise click.
+            if direction == 'inbound' and client:
+                try:
+                    _auto_revise_if_needed(comm)
+                except Exception as e:
+                    logger.error(f'Auto-revision check failed for {comm.id}: {e}')
+
             total_synced += 1
 
         account.last_synced = timezone.now()
@@ -155,6 +165,345 @@ def sync_emails(email_account_id=None):
 
     logger.info(f'Email sync complete: {total_synced} new emails synced')
     return f'{total_synced} emails synced'
+
+
+def _auto_revise_if_needed(communication):
+    """Auto-create a draft revision of the most recent SENT quotation or PI
+    when a client replies in the same thread asking for changes.
+
+    Detection:
+      1. Find earlier messages in this thread (via email_in_reply_to chain).
+      2. Check if any of those messages have a linked SENT quotation or PI.
+      3. Check if the new message body contains revision keywords (change,
+         modify, revise, update price, different price, new quote, etc.).
+      4. If yes, create a draft V(n+1) using the existing revise logic,
+         which reuses an unsent draft if one already exists.
+
+    The resulting draft shows up on the Inquiries / PI page as an amber chip
+    that the executive can click to enter new rates and attach to email.
+    """
+    import re as _re
+
+    if not communication.client_id:
+        return
+
+    body = (communication.body or '').replace('\n', ' ').replace('\r', ' ')
+    text = _re.sub(r'<[^>]+>', ' ', body).lower()
+    subject = (communication.subject or '').lower()
+    full = f'{subject} {text}'
+
+    # ── Step 1: detect revision intent ──
+    REVISION_PATTERNS = [
+        # General revision words
+        r'\b(change|changes|changed)\b',
+        r'\b(modif|modify|modification|modifications)\b',
+        r'\b(revis|revise|revised|revision)\b',
+        r'\b(amendment|amend|amended)\b',
+        r'\b(update|updated)\b',
+        r'\b(rework|adjust|correction|reissue|resend)\b',
+        # Price revision
+        r'\b(update|updated)\s+(the\s+)?(price|quote|quotation|pi|proforma)',
+        r'\b(different|new|lower|better|reduced|revised)\s+(price|rate|pricing|quote|quotation)',
+        r'\b(price\s+change|rate\s+change)\b',
+        r'\b(can\s+you\s+)(change|update|revise|modify|reduce|lower)',
+        r'\b(please\s+)(change|update|revise|modify|reduce|lower|send\s+updated)',
+        r'\bnew\s+(quote|quotation|proforma|pi)\b',
+        r'\bupdated\s+(quote|quotation|proforma|pi)\b',
+        r'\brevised\s+(pi|proforma|quote|quotation)\b',
+        r'\b(reduce|lower|decrease|increase)\s+(the\s+)?(price|rate|cost)\b',
+        r'\b(best\s+price|final\s+price|offer\s+price)\b',
+        r'\b(discount|competitive\s+price|match\s+price)\b',
+        r'\bcan\s+you\s+do\s+better\b',
+        # Too expensive / budget
+        r'\b(too\s+high|too\s+expensive|not\s+acceptable|cannot\s+accept)\b',
+        r'\b(bit\s+high|slightly\s+high|higher\s+side)\b',
+        r'\b(above\s+budget|outside\s+budget|cost\s+is\s+an?\s+issue)\b',
+        # Negotiation
+        r'\b(counter\s*offer|negotiate|negotiation)\b',
+        r'\b(requote|re-quote|re\s+quote)\b',
+        # Incoterms / payment / freight
+        r'\bchange\s+(the\s+)?incoterms?\b',
+        r'\bchange\s+in\s+incoterms?\b',
+        r'\bchange\s+(the\s+)?payment\s+terms?\b',
+        r'\brevise\s+payment\s+terms?\b',
+        r'\b(give|include|add)\s+(us\s+)?freight\s+charges?\b',
+        r'\bchange\s+in\s+freight\s+charges?\b',
+        r'\bfreight\s+revision\b',
+        # Port / destination / delivery
+        r'\bchange\s+(in\s+)?port\b',
+        r'\bchange\s+destination\s+port\b',
+        r'\bchange\s+in\s+quantity\b',
+        r'\brevise\s+quantity\b',
+        r'\bchange\s+delivery\b',
+        r'\bdelivery\s+timeline\s+change\b',
+        # Packing
+        r'\bchange\s+in\s+packing\s+(size|numbers?)\b',
+        r'\bpacking\s+modification\b',
+        # HSN / description
+        r'\b(change|correct)\s+(in\s+)?hsn\s+code\b',
+        r'\b(change\s+in|update|correction)\s+(pdf\s+)?description\b',
+        r'\b(include|add)\s+manufacturing\s+details\b',
+        # Volume / conditional
+        r'\bbulk\s+order\b',
+        r'\bvolume\s+discount\b',
+        r'\bfor\s+higher\s+quantity\b',
+        r'\bif\s+you\s+reduce\b',
+        r'\bwe\s+can\s+proceed\s+if\b',
+        r'\bsubject\s+to\s+revision\b',
+        # Competitor
+        r'\bcompetitor\s+price\b',
+        r'\bbetter\s+price\s+elsewhere\b',
+        r'\blower\s+quote\s+from\s+others\b',
+    ]
+    has_revision_intent = any(_re.search(p, full) for p in REVISION_PATTERNS)
+    if not has_revision_intent:
+        return
+
+    # ── Step 2: find earlier messages in this thread ──
+    from .models import Communication, QuoteRequest
+    thread_comm_ids = set()
+
+    # Walk back via in_reply_to chain
+    reply_to = communication.email_in_reply_to
+    safety = 0
+    while reply_to and safety < 20:
+        earlier = Communication.objects.filter(
+            email_message_id=reply_to, is_deleted=False
+        ).first()
+        if not earlier:
+            break
+        thread_comm_ids.add(earlier.id)
+        reply_to = earlier.email_in_reply_to
+        safety += 1
+
+    # Also find any message whose in_reply_to points at our chain
+    if communication.email_message_id:
+        thread_comm_ids.update(
+            Communication.objects.filter(
+                email_in_reply_to=communication.email_message_id, is_deleted=False
+            ).values_list('id', flat=True)
+        )
+
+    # Add the current message's own ID for completeness
+    thread_comm_ids.add(communication.id)
+
+    if not thread_comm_ids:
+        return
+
+    # ── Step 3: find SENT quotations in this thread ──
+    from quotations.models import Quotation, QuotationItem
+    sent_qr = QuoteRequest.objects.filter(
+        source_communication_id__in=thread_comm_ids,
+        linked_quotation__isnull=False,
+        linked_quotation__status='sent',
+        linked_quotation__is_deleted=False,
+    ).select_related('linked_quotation').first()
+
+    if sent_qr and sent_qr.linked_quotation:
+        _auto_revise_quotation(sent_qr.linked_quotation, communication)
+
+    # ── Step 4: find SENT PIs in this thread ──
+    from finance.models import ProformaInvoice
+    sent_pi = ProformaInvoice.objects.filter(
+        source_communication_id__in=thread_comm_ids,
+        status='sent',
+        is_deleted=False,
+    ).order_by('-version', '-created_at').first()
+
+    if sent_pi:
+        _auto_revise_pi(sent_pi, communication)
+
+    if sent_qr or sent_pi:
+        logger.info(
+            f'Auto-revision triggered for comm {communication.id}: '
+            f'quotation={"yes" if sent_qr else "no"} pi={"yes" if sent_pi else "no"}'
+        )
+
+
+def _auto_revise_quotation(quotation, communication):
+    """Create a draft revision of a sent quotation, reusing an existing
+    unsent draft if one is sitting in the chain. Mirrors the manual Revise
+    button flow on the Inquiries page."""
+    from quotations.models import Quotation, QuotationItem, generate_quotation_number
+
+    # Walk to the latest version in the chain
+    root = quotation
+    while root.parent_id:
+        try:
+            root = Quotation.objects.get(id=root.parent_id)
+        except Quotation.DoesNotExist:
+            break
+    all_ids = {root.id}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        for child in Quotation.objects.filter(parent=node, is_deleted=False).only('id'):
+            if child.id not in all_ids:
+                all_ids.add(child.id)
+                stack.append(child)
+    latest = (
+        Quotation.objects.filter(id__in=all_ids, is_deleted=False)
+        .order_by('-version', '-created_at')
+        .first()
+    ) or quotation
+
+    # If the latest is already a draft revision, reuse it — don't inflate.
+    if latest.status == 'draft' and latest.parent_id:
+        logger.info(f'Auto-revise quotation: reusing existing draft {latest.quotation_number} V{latest.version}')
+        return latest
+
+    # Create new version
+    new_version = (latest.version or 1) + 1
+    q = Quotation.objects.create(
+        quotation_number=generate_quotation_number(),
+        client=latest.client,
+        inquiry=latest.inquiry,
+        version=new_version,
+        parent=latest,
+        currency=latest.currency,
+        delivery_terms=latest.delivery_terms,
+        payment_terms=latest.payment_terms,
+        payment_terms_detail=latest.payment_terms_detail,
+        freight_terms=latest.freight_terms,
+        country_of_origin=latest.country_of_origin,
+        country_of_final_destination=latest.country_of_final_destination,
+        port_of_loading=latest.port_of_loading,
+        port_of_discharge=latest.port_of_discharge,
+        vessel_flight_no=latest.vessel_flight_no,
+        final_destination=latest.final_destination,
+        packaging_details=latest.packaging_details,
+        display_overrides=latest.display_overrides,
+        validity_days=latest.validity_days,
+        notes=latest.notes,
+        created_by=latest.created_by,
+    )
+    total = 0
+    for item in latest.items.all():
+        QuotationItem.objects.create(
+            quotation=q, product=item.product,
+            product_name=item.product_name,
+            client_product_name=item.client_product_name,
+            description=item.description,
+            quantity=item.quantity, unit=item.unit,
+            unit_price=item.unit_price, total_price=item.total_price,
+        )
+        total += float(item.total_price)
+    q.subtotal = total
+    q.total = total
+    q.save(update_fields=['subtotal', 'total'])
+
+    # Notify
+    try:
+        from notifications.helpers import notify
+        notify(
+            title=f'Auto-revision: {q.quotation_number} (V{new_version})',
+            message=f'Client requested changes — draft V{new_version} created automatically from {latest.quotation_number}.',
+            notification_type='system', link='/quote-requests',
+            client=q.client,
+        )
+    except Exception:
+        pass
+
+    logger.info(f'Auto-revised quotation {latest.quotation_number} → {q.quotation_number} V{new_version}')
+    return q
+
+
+def _auto_revise_pi(pi, communication):
+    """Create a draft revision of a sent PI, reusing an existing unsent
+    draft if one is sitting in the chain. Mirrors the manual Revise button
+    flow on the Proforma Invoices page."""
+    from finance.models import ProformaInvoice, ProformaInvoiceItem
+    from datetime import date as dt_date
+
+    # Walk to the latest version in the chain
+    root = pi
+    while root.parent_id:
+        try:
+            root = ProformaInvoice.objects.get(id=root.parent_id)
+        except ProformaInvoice.DoesNotExist:
+            break
+    all_ids = {root.id}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        for child in ProformaInvoice.objects.filter(parent=node, is_deleted=False).only('id'):
+            if child.id not in all_ids:
+                all_ids.add(child.id)
+                stack.append(child)
+    latest = (
+        ProformaInvoice.objects.filter(id__in=all_ids, is_deleted=False)
+        .order_by('-version', '-created_at')
+        .first()
+    ) or pi
+
+    # If the latest is already a draft revision, reuse it — don't inflate.
+    if latest.status == 'draft' and latest.parent_id:
+        logger.info(f'Auto-revise PI: reusing existing draft {latest.invoice_number} V{latest.version}')
+        return latest
+
+    # Create new version
+    new_version = (latest.version or 1) + 1
+    count = ProformaInvoice.objects.count() + 1
+    today = dt_date.today()
+    invoice_number = f'{today.strftime("%y-%m")}/KB-{count:03d}'
+
+    new_pi = ProformaInvoice.objects.create(
+        client=latest.client,
+        order=latest.order,
+        source_communication=latest.source_communication,
+        invoice_number=invoice_number,
+        invoice_date=today,
+        version=new_version,
+        parent=latest,
+        client_company_name=latest.client_company_name,
+        client_tax_number=latest.client_tax_number,
+        client_address=latest.client_address,
+        client_pincode=latest.client_pincode,
+        client_city_state_country=latest.client_city_state_country,
+        client_phone=latest.client_phone,
+        country_of_origin=latest.country_of_origin,
+        country_of_final_destination=latest.country_of_final_destination,
+        port_of_loading=latest.port_of_loading,
+        port_of_discharge=latest.port_of_discharge,
+        vessel_flight_no=latest.vessel_flight_no,
+        final_destination=latest.final_destination,
+        terms_of_trade=latest.terms_of_trade,
+        terms_of_delivery=latest.terms_of_delivery,
+        buyer_reference=latest.buyer_reference,
+        currency=latest.currency,
+        total=latest.total,
+        amount_in_words=latest.amount_in_words,
+        bank_details=latest.bank_details,
+        display_overrides=latest.display_overrides,
+        created_by=latest.created_by,
+    )
+    for item in latest.items.all():
+        ProformaInvoiceItem.objects.create(
+            pi=new_pi,
+            product_name=item.product_name,
+            client_product_name=item.client_product_name,
+            packages_description=item.packages_description,
+            description_of_goods=item.description_of_goods,
+            quantity=item.quantity,
+            unit=item.unit,
+            unit_price=item.unit_price,
+            total_price=item.total_price,
+        )
+
+    # Notify
+    try:
+        from notifications.helpers import notify
+        notify(
+            title=f'Auto-revision: {new_pi.invoice_number} (V{new_version})',
+            message=f'Client requested changes — draft PI V{new_version} created automatically from {latest.invoice_number}.',
+            notification_type='system', link='/proforma-invoices',
+            client=new_pi.client,
+        )
+    except Exception:
+        pass
+
+    logger.info(f'Auto-revised PI {latest.invoice_number} → {new_pi.invoice_number} V{new_version}')
+    return new_pi
 
 
 def _auto_create_sample_request(communication):
