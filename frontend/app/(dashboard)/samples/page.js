@@ -156,7 +156,8 @@ export default function SamplesPage() {
     { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
     { key: "quantity", label: "Quantity", render: (row) => row.quantity || "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "dispatch_date", label: "Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "\u2014" },
+    { key: "created_at", label: "Requested", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "\u2014" },
+    { key: "dispatch_date", label: "Dispatched", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "\u2014" },
     { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "\u2014" },
     { key: "feedback", label: "Feedback", render: (row) => row.feedback ? (
       <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">{row.feedback.comments ? row.feedback.comments.slice(0, 30) + (row.feedback.comments.length > 30 ? "..." : "") : `Rating: ${row.feedback.rating}/5`}</span>

@@ -28,7 +28,7 @@ class ChatMessage(TimeStampedModel):
         FILE = 'file', 'File'
 
     room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, related_name='messages')
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='chat_messages')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='chat_messages')
     message_type = models.CharField(max_length=10, choices=MsgType.choices, default=MsgType.TEXT)
     content = models.TextField(blank=True)
     file = models.FileField(upload_to='chat/%Y/%m/', blank=True, null=True)

@@ -89,9 +89,42 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
 
     def get_permissions(self):
-        if self.action in ['create', 'destroy']:
+        if self.action in ['create', 'destroy', 'deactivate']:
             return [IsAdminOrManager()]
         return [permissions.IsAuthenticated()]
+
+    def destroy(self, request, *args, **kwargs):
+        """Block hard-deletion of users. Use the /deactivate/ endpoint instead
+        so all historical data (emails, tasks, quotations, etc.) stays intact
+        with the user's name preserved in "Created By" / "Assigned To" fields.
+        """
+        return Response(
+            {'error': 'Users cannot be deleted. Use the Deactivate option instead — '
+                      'this preserves all historical data while blocking login.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        """Deactivate a user account — blocks login but preserves every
+        record they ever created or were assigned to. Their name continues
+        to appear in Created By, Edited By, Assigned To, Sent By, etc.
+        """
+        user_obj = self.get_object()
+        if user_obj == request.user:
+            return Response({'error': 'You cannot deactivate your own account'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        user_obj.is_active = False
+        user_obj.save(update_fields=['is_active'])
+        return Response({'status': 'deactivated', 'user': user_obj.full_name})
+
+    @action(detail=True, methods=['post'])
+    def reactivate(self, request, pk=None):
+        """Re-enable a previously deactivated user account."""
+        user_obj = self.get_object()
+        user_obj.is_active = True
+        user_obj.save(update_fields=['is_active'])
+        return Response({'status': 'reactivated', 'user': user_obj.full_name})
 
     @action(detail=True, methods=['post'], url_path='assign-shadow')
     def assign_shadow(self, request, pk=None):

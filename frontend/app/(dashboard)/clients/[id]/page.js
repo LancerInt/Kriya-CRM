@@ -164,6 +164,22 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
           <h3 className="font-semibold mb-4">Account Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Status:</span> <StatusBadge status={client.status} /></div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">Tier:</span>
+              {client.tier === "tier_1" ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  VIP
+                </span>
+              ) : client.tier === "tier_2" ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  Priority
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Standard</span>
+              )}
+            </div>
             <div><span className="text-gray-500">Country:</span> <span className="ml-1">{client.country || "\u2014"}</span></div>
             <div><span className="text-gray-500">City:</span> <span className="ml-1">{client.city || "\u2014"}</span></div>
             <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
@@ -565,11 +581,17 @@ function CommunicationsTab({ clientId, activeTab, client }) {
           .filter(e => e.toLowerCase() !== myEmail);
       } catch {}
       try {
+        // Other contacts on this client (excluding the To recipient)
         (client?.contacts || []).forEach(c => {
           if (c?.email && c.email !== composeToEmail && c.email.toLowerCase() !== myEmail && !auditEmails.includes(c.email)) {
             auditEmails.push(c.email);
           }
         });
+        // Shadow executive for this client
+        const shadowEmail = client?.shadow_executive_email;
+        if (shadowEmail && shadowEmail.toLowerCase() !== myEmail && !auditEmails.includes(shadowEmail)) {
+          auditEmails.push(shadowEmail);
+        }
       } catch {}
 
       const savedCc = (res.data.cc || "")
@@ -956,6 +978,22 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   };
 
   const columns = [
+    { key: "is_starred", label: "", render: (row) => (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          api.post(`/communications/${row.id}/toggle-star/`).then(() => reload()).catch(() => {});
+        }}
+        className="p-0.5 hover:scale-125 transition-transform"
+        title={row.is_starred ? "Unstar" : "Star"}
+      >
+        {row.is_starred ? (
+          <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+        ) : (
+          <svg className="w-4 h-4 text-gray-300 hover:text-yellow-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
+        )}
+      </button>
+    )},
     { key: "comm_type", label: "Type", render: (row) => <StatusBadge status={row.comm_type} /> },
     { key: "direction", label: "Direction", render: (row) => {
       if (row.direction === "inbound" && row.draft_status === "draft") {
@@ -1003,9 +1041,9 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       <div className="flex items-center justify-between gap-2 mb-4">
         {/* Filters */}
         <div className="flex items-center gap-2">
-          {["all", "email", "whatsapp", "call", "note", "drafts"].map(t => (
-            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-xs font-medium rounded-full ${filterType === t ? (t === "drafts" ? "bg-purple-600 text-white" : "bg-indigo-600 text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-              {t === "all" ? "All" : t === "drafts" ? `Drafts (${data.filter(r => r.draft_id && r.draft_status === "draft").length})` : t.charAt(0).toUpperCase() + t.slice(1)}
+          {["all", "email", "whatsapp", "call", "note", "starred", "drafts"].map(t => (
+            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-xs font-medium rounded-full ${filterType === t ? (t === "drafts" ? "bg-purple-600 text-white" : t === "starred" ? "bg-yellow-500 text-white" : "bg-indigo-600 text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {t === "all" ? "All" : t === "starred" ? `Starred (${(data || []).filter(r => r.is_starred).length})` : t === "drafts" ? `Drafts (${(data || []).filter(r => r.draft_id && r.draft_status === "draft").length})` : t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
           <input value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} placeholder="Search subject, email..." className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 w-44" />
@@ -1019,6 +1057,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       </div>
       <DataTable columns={columns} data={data.filter(row => {
         if (filterType === "drafts") return row.draft_id && row.draft_status === "draft";
+        if (filterType === "starred") return row.is_starred;
         if (filterType !== "all" && row.comm_type !== filterType) return false;
         if (filterSearch) {
           const q = filterSearch.toLowerCase();

@@ -179,6 +179,14 @@ class CommunicationViewSet(viewsets.ModelViewSet):
         self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': 'all marked as read'})
 
+    @action(detail=True, methods=['post'], url_path='toggle-star')
+    def toggle_star(self, request, pk=None):
+        """Toggle the starred flag on a communication."""
+        comm = self.get_object()
+        comm.is_starred = not comm.is_starred
+        comm.save(update_fields=['is_starred'])
+        return Response({'is_starred': comm.is_starred})
+
     @action(detail=True, methods=['post'], url_path='archive')
     def archive(self, request, pk=None):
         """Archive a communication. Optionally auto-archive all future emails from this sender."""
@@ -1148,6 +1156,102 @@ def refine_email_text(request):
     from communications.ai_email_service import refine_email_body
     result = refine_email_body(body, action, contact_name=contact_name)
     return Response({'refined': result})
+
+
+@api_view(['POST'])
+def grammar_check_view(request):
+    """AI-powered grammar and spelling check.
+
+    Accepts { text: "..." } and returns a list of corrections:
+    [{ original: "teh", corrected: "the", reason: "Spelling" }, ...]
+
+    Uses the same Groq/Gemini AI backend as the email reply generator.
+    """
+    text = request.data.get('text', '').strip()
+    if not text or len(text) < 5:
+        return Response({'corrections': []})
+
+    import json
+    import logging
+    _log = logging.getLogger(__name__)
+
+    prompt = f"""You are an extremely strict English proofreader and spelling checker. Your job is to find EVERY single error in the text below. Be very thorough — do NOT skip any mistake.
+
+Check for ALL of these:
+1. SPELLING ERRORS — every misspelled word (e.g. "mesage" should be "message", "helth" should be "health", "infrom" should be "inform", "recieved" should be "received", "priceing" should be "pricing", "prodcut" should be "product", "amout" should be "amount", "guarentee" should be "guarantee", "quailty" should be "quality", "confrim" should be "confirm", "procede" should be "proceed", "quotaion" should be "quotation", "refrence" should be "reference", "quaries" should be "queries", "furthur" should be "further", "discus" should be "discuss", "detials" should be "details", "definately" should be "definitely", "servce" should be "service", "valueable" should be "valuable", "concentraton" should be "concentration", "timly" should be "timely", "hesitate" check carefully)
+2. GRAMMAR ERRORS — subject-verb agreement (e.g. "we has" should be "we have", "We is" should be "We are", "team is available" should be "team are available"), pronoun errors (e.g. "me and my team" should be "my team and I")
+3. WORD CHOICE — (e.g. "Looking forward for" should be "Looking forward to")
+4. PUNCTUATION — missing commas, periods, etc.
+
+You MUST catch every misspelled word. Compare each word against a dictionary. If a word is not a real English word, it is misspelled.
+
+Return a JSON array of objects. Each object must have:
+- "original": the EXACT wrong word/phrase as it appears in the text
+- "corrected": the fixed version
+- "reason": one of "Spelling", "Grammar", "Punctuation", "Word choice"
+
+Return ONLY the JSON array. No markdown fences, no explanation, no other text.
+If there are truly zero errors, return: []
+
+TEXT TO CHECK:
+{text[:3000]}"""
+
+    try:
+        from agents.models import AIConfig
+        from common.encryption import decrypt_value
+
+        config = AIConfig.objects.filter(is_active=True).first()
+        if not config:
+            return Response({'corrections': []})
+
+        api_key = decrypt_value(config.api_key)
+        result_text = ''
+
+        if config.provider == 'groq':
+            from groq import Groq
+            client = Groq(api_key=api_key)
+            response = client.chat.completions.create(
+                model=config.model_name or 'llama-3.3-70b-versatile',
+                messages=[
+                    {'role': 'system', 'content': 'You are a strict English proofreader. Find EVERY spelling and grammar error. Return ONLY a JSON array. Never return an empty array if there are misspelled words.'},
+                    {'role': 'user', 'content': prompt},
+                ],
+                temperature=0,
+                max_tokens=3000,
+            )
+            result_text = response.choices[0].message.content.strip()
+        elif config.provider == 'gemini':
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=config.model_name or 'gemini-2.0-flash',
+                contents=prompt,
+            )
+            result_text = response.text.strip()
+        else:
+            return Response({'corrections': []})
+
+        # Parse JSON from the AI response (strip markdown fences if present)
+        if result_text.startswith('```'):
+            result_text = result_text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        corrections = json.loads(result_text)
+        if not isinstance(corrections, list):
+            corrections = []
+        # Validate each correction has required fields
+        valid = []
+        for c in corrections:
+            if isinstance(c, dict) and c.get('original') and c.get('corrected'):
+                valid.append({
+                    'original': c['original'],
+                    'corrected': c['corrected'],
+                    'reason': c.get('reason', ''),
+                    'index': len(valid),
+                })
+        return Response({'corrections': valid})
+
+    except Exception as e:
+        _log.warning(f'Grammar check failed: {e}')
+        return Response({'corrections': []})
 
 
 @api_view(['GET', 'POST'])

@@ -95,6 +95,8 @@ export default function SampleDetailPage() {
   // Local copy of items for inline editing — saved on demand via "Save Items"
   const [itemsLocal, setItemsLocal] = useState([]);
   const [savingItems, setSavingItems] = useState(false);
+  // Checkbox state for each product — all must be checked before marking "Prepared"
+  const [checkedItems, setCheckedItems] = useState(new Set());
   // Inline edit state for the Shipping Details card
   const [editingShipping, setEditingShipping] = useState(false);
   const [shippingForm, setShippingForm] = useState({
@@ -134,6 +136,14 @@ export default function SampleDetailPage() {
     setItemsLocal((prev) => prev.filter((_, i) => i !== idx));
   };
   const resetItems = () => setItemsLocal(sample?.items || []);
+  const allItemsChecked = itemsLocal.length > 0 && itemsLocal.every((_, i) => checkedItems.has(i));
+  const toggleItemCheck = (idx) => {
+    setCheckedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  };
   const saveItems = async () => {
     setSavingItems(true);
     try {
@@ -313,6 +323,11 @@ export default function SampleDetailPage() {
           {nextAction && (
             <button
               onClick={() => {
+                // Guard: all products must be checked before marking Prepared
+                if (nextAction.target === "prepared" && !allItemsChecked) {
+                  toast.error("Please check all products in the Requested Products list before marking as Prepared");
+                  return;
+                }
                 if (nextAction.openFeedback) setShowFeedbackModal(true);
                 else if (nextAction.needsForm) setShowDispatchModal(true);
                 else advance(nextAction.target);
@@ -337,6 +352,10 @@ export default function SampleDetailPage() {
           } else if (step.key === "feedback") {
             if (!sample.feedback) setShowFeedbackModal(true);
           } else if (step.key === "prepared" && sample.status === "requested") {
+            if (!allItemsChecked) {
+              toast.error("Please check all products in the Requested Products list before marking as Prepared");
+              return;
+            }
             advance("prepared");
           } else if (step.key === "dispatched" && sample.status === "prepared") {
             setShowDispatchModal(true);
@@ -349,7 +368,14 @@ export default function SampleDetailPage() {
       {/* Items list — multiple products in one sample request */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-800">Requested Products ({itemsLocal.length})</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold text-gray-800">Requested Products ({itemsLocal.length})</h3>
+            {sample.status === "requested" && itemsLocal.length > 0 && (
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${allItemsChecked ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                {checkedItems.size} of {itemsLocal.length} ready
+              </span>
+            )}
+          </div>
           <button
             onClick={addItem}
             className="text-xs font-medium text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 px-3 py-1.5 rounded"
@@ -363,6 +389,18 @@ export default function SampleDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">
+                {sample.status === "requested" && <th className="pb-2 pr-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allItemsChecked}
+                    onChange={() => {
+                      if (allItemsChecked) setCheckedItems(new Set());
+                      else setCheckedItems(new Set(itemsLocal.map((_, i) => i)));
+                    }}
+                    className="h-4 w-4 text-green-600 border-gray-300 rounded cursor-pointer"
+                    title="Select all"
+                  />
+                </th>}
                 <th className="pb-2 pr-3">Product</th>
                 <th className="pb-2 pr-3">Client Name</th>
                 <th className="pb-2 pr-3">Quantity</th>
@@ -371,7 +409,17 @@ export default function SampleDetailPage() {
             </thead>
             <tbody>
               {itemsLocal.map((item, i) => (
-                <tr key={item.id || i} className="border-b border-gray-100 last:border-0">
+                <tr key={item.id || i} className={`border-b border-gray-100 last:border-0 ${checkedItems.has(i) ? "bg-green-50/50" : ""}`}>
+                  {sample.status === "requested" && (
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={checkedItems.has(i)}
+                        onChange={() => toggleItemCheck(i)}
+                        className="h-4 w-4 text-green-600 border-gray-300 rounded cursor-pointer"
+                      />
+                    </td>
+                  )}
                   <td className="py-2 pr-3">
                     <input
                       value={item.product_name || ""}

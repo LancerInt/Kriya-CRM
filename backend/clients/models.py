@@ -9,6 +9,11 @@ class Client(SoftDeleteModel):
         PROSPECT = 'prospect', 'Prospect'
         ON_HOLD = 'on_hold', 'On Hold'
 
+    class Tier(models.TextChoices):
+        TIER_1 = 'tier_1', 'Tier 1 - VIP'
+        TIER_2 = 'tier_2', 'Tier 2 - Priority'
+        TIER_3 = 'tier_3', 'Tier 3 - Standard'
+
     company_name = models.CharField(max_length=255, db_index=True)
     tax_number = models.CharField(max_length=100, blank=True, help_text='GSTIN / CNPJ / VAT etc.')
     phone_number = models.CharField(max_length=50, blank=True)
@@ -25,6 +30,8 @@ class Client(SoftDeleteModel):
     credit_limit = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     payment_mode = models.CharField(max_length=50, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    tier = models.CharField(max_length=10, choices=Tier.choices, default=Tier.TIER_3, db_index=True,
+                            help_text='Client priority tier — Tier 1 (VIP) gets fastest follow-ups and special alerts')
     primary_executive = models.ForeignKey(
         'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='primary_clients'
@@ -79,7 +86,7 @@ class ClientPort(models.Model):
 class ClientAssignment(models.Model):
     id = models.AutoField(primary_key=True)
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='assignments')
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='client_assignments')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='client_assignments')
     assigned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

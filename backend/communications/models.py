@@ -4,7 +4,7 @@ from common.encryption import encrypt_value, decrypt_value
 
 
 class EmailAccount(TimeStampedModel):
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='email_accounts')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='email_accounts')
     email = models.EmailField()
     display_name = models.CharField(max_length=255, blank=True)
     imap_host = models.CharField(max_length=255)
@@ -91,6 +91,7 @@ class Communication(TimeStampedModel):
     )
     is_classified = models.BooleanField(default=False, help_text='True if classification has been run')
     is_read = models.BooleanField(default=False, db_index=True, help_text='True if this communication has been read')
+    is_starred = models.BooleanField(default=False, db_index=True, help_text='Starred/flagged by user')
 
     # Email integration fields
     email_message_id = models.CharField(max_length=500, blank=True, db_index=True)

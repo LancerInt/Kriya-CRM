@@ -121,6 +121,9 @@ class OrderDocument(TimeStampedModel):
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to='order_documents/%Y/%m/')
     uploaded_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'order_documents'

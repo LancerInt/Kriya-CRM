@@ -16,5 +16,6 @@ urlpatterns = [
     path('refine-email/', views.refine_email_text, name='refine-email'),
     path('whatsapp-webhook/', views.whatsapp_webhook_view, name='whatsapp-webhook'),
     path('signature-logo.png', views.signature_logo_view, name='signature-logo'),
+    path('grammar-check/', views.grammar_check_view, name='grammar-check'),
     path('', include(router.urls)),
 ]

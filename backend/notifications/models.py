@@ -10,7 +10,7 @@ class Notification(TimeStampedModel):
         REMINDER = 'reminder', 'Reminder'
         SYSTEM = 'system', 'System'
 
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='notifications')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='notifications')
     notification_type = models.CharField(max_length=20, choices=Type.choices)
     title = models.CharField(max_length=255)
     message = models.TextField(blank=True)

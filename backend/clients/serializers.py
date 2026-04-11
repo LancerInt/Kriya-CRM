@@ -49,7 +49,7 @@ class ClientListSerializer(serializers.ModelSerializer):
         fields = ['id', 'company_name', 'country', 'city', 'business_type',
                   'preferred_currency', 'delivery_terms', 'status', 'primary_executive',
                   'primary_executive_name', 'shadow_executive', 'shadow_executive_name',
-                  'client_role', 'contact_count', 'order_count', 'created_at', 'updated_at']
+                  'tier', 'client_role', 'contact_count', 'order_count', 'created_at', 'updated_at']
 
 
 class ClientDetailSerializer(serializers.ModelSerializer):
@@ -58,6 +58,7 @@ class ClientDetailSerializer(serializers.ModelSerializer):
     executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
     primary_executive_name = serializers.CharField(source='primary_executive.full_name', read_only=True, default='')
     shadow_executive_name = serializers.CharField(source='shadow_executive.full_name', read_only=True, default='')
+    shadow_executive_email = serializers.CharField(source='shadow_executive.email', read_only=True, default='')
 
     class Meta:
         model = Client
@@ -72,7 +73,7 @@ class ClientCreateSerializer(serializers.ModelSerializer):
         model = Client
         fields = ['id', 'company_name', 'country', 'address', 'city', 'state', 'postal_code',
                   'business_type', 'website', 'delivery_terms', 'preferred_currency',
-                  'credit_days', 'credit_limit', 'payment_mode', 'status',
+                  'credit_days', 'credit_limit', 'payment_mode', 'status', 'tier',
                   'primary_executive', 'shadow_executive', 'notes', 'contacts', 'ports',
                   'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']

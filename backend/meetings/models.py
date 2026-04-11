@@ -21,7 +21,7 @@ class CallLog(TimeStampedModel):
 
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='call_logs')
     contact = models.ForeignKey('clients.Contact', on_delete=models.SET_NULL, null=True, blank=True)
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='call_logs')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='call_logs')
     scheduled_at = models.DateTimeField()
     agenda = models.TextField(blank=True)
     call_notes = models.TextField(blank=True)

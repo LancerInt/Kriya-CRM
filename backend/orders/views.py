@@ -151,18 +151,61 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     def documents(self, request, pk=None):
         """List all documents for this order."""
         order = self.get_object()
-        docs = order.order_documents.select_related('uploaded_by').all()
+        docs = order.order_documents.select_related('uploaded_by').filter(is_deleted=False)
         return Response(OrderDocumentSerializer(docs, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='delete-document')
     def delete_document(self, request, pk=None):
-        """Delete a specific document from this order."""
+        """Soft-delete a document from this order and log it in the status
+        history. The file is kept on disk so it can be restored via the
+        undo/restore action on the history timeline."""
+        from django.utils import timezone as tz
         order = self.get_object()
         doc_id = request.data.get('doc_id')
         if not doc_id:
             return Response({'error': 'doc_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        deleted, _ = OrderDocument.objects.filter(order=order, id=doc_id).delete()
-        return Response({'status': 'deleted', 'count': deleted})
+        doc = OrderDocument.objects.filter(order=order, id=doc_id, is_deleted=False).first()
+        if not doc:
+            return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        doc_name = doc.name or (doc.file.name if doc.file else 'Unknown')
+        doc_type = doc.doc_type or 'other'
+        # Soft-delete — file stays on disk for restoration
+        doc.is_deleted = True
+        doc.deleted_by = request.user
+        doc.deleted_at = tz.now()
+        doc.save(update_fields=['is_deleted', 'deleted_by', 'deleted_at'])
+        # Audit trail with the doc ID so restore can find it
+        OrderStatusHistory.objects.create(
+            order=order,
+            from_status='document_deleted',
+            to_status=order.status,
+            changed_by=request.user,
+            remarks=f'Deleted document: "{doc_name}" (type: {doc_type}) [doc_id:{doc.id}]',
+        )
+        return Response({'status': 'deleted', 'doc_id': doc.id})
+
+    @action(detail=True, methods=['post'], url_path='restore-document')
+    def restore_document(self, request, pk=None):
+        """Restore a previously soft-deleted document."""
+        order = self.get_object()
+        doc_id = request.data.get('doc_id')
+        if not doc_id:
+            return Response({'error': 'doc_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        doc = OrderDocument.objects.filter(order=order, id=doc_id, is_deleted=True).first()
+        if not doc:
+            return Response({'error': 'Document not found or already restored'}, status=status.HTTP_404_NOT_FOUND)
+        doc.is_deleted = False
+        doc.deleted_by = None
+        doc.deleted_at = None
+        doc.save(update_fields=['is_deleted', 'deleted_by', 'deleted_at'])
+        OrderStatusHistory.objects.create(
+            order=order,
+            from_status='document_restored',
+            to_status=order.status,
+            changed_by=request.user,
+            remarks=f'Restored document: "{doc.name}" (type: {doc.doc_type})',
+        )
+        return Response({'status': 'restored'})
 
     # ── Upload Document ──
     @action(detail=True, methods=['post'], url_path='upload-document')

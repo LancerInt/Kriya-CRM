@@ -36,6 +36,14 @@ export default function ClientsPage() {
     } catch { toast.error("Failed to update status"); }
   };
 
+  const handleTierChange = async (clientId, newTier) => {
+    try {
+      await api.patch(`/clients/${clientId}/`, { tier: newTier });
+      toast.success(`Tier updated`);
+      loadClients();
+    } catch { toast.error("Failed to update tier"); }
+  };
+
   // For executives: split into my clients and shadow clients
   const myClients = useMemo(() => list.filter((c) => c.client_role === "primary"), [list]);
   const shadowClients = useMemo(() => list.filter((c) => c.client_role === "shadow"), [list]);
@@ -49,10 +57,21 @@ export default function ClientsPage() {
   const columns = [
     { key: "company_name", label: "Account Name", render: (row) => (
       <div className="flex items-center gap-2">
-        <span className="font-medium text-gray-900">{row.company_name}</span>
+        {row.tier === "tier_1" && <span className="shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-200 animate-pulse" />}
+        {row.tier === "tier_2" && <span className="shrink-0 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200" />}
+        <span className={`font-medium ${row.tier === "tier_1" ? "text-red-700" : row.tier === "tier_2" ? "text-amber-700" : "text-gray-900"}`}>{row.company_name}</span>
         {isExecutive && row.client_role === "shadow" && (
           <span className="text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded-full font-medium">Shadow</span>
         )}
+      </div>
+    )},
+    { key: "tier", label: "Tier", render: (row) => (
+      <div onClick={e => e.stopPropagation()}>
+        <ModernSelect value={row.tier || "tier_3"} onChange={(v) => handleTierChange(row.id, v)} size="xs" options={[
+          { value: "tier_1", label: "Tier 1 - VIP", color: "#dc2626", dot: true },
+          { value: "tier_2", label: "Tier 2 - Priority", color: "#d97706", dot: true },
+          { value: "tier_3", label: "Tier 3 - Standard", color: "#6b7280", dot: true },
+        ]} />
       </div>
     )},
     { key: "country", label: "Country" },

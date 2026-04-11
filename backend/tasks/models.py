@@ -20,7 +20,7 @@ class Task(TimeStampedModel):
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, null=True, blank=True, related_name='tasks')
     linked_type = models.CharField(max_length=50, blank=True, help_text='e.g. quotation, order, shipment')
     linked_id = models.UUIDField(null=True, blank=True)
-    owner = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='owned_tasks')
+    owner = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='owned_tasks')
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_tasks')
     due_date = models.DateTimeField(null=True, blank=True, db_index=True)
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)

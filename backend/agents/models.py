@@ -24,7 +24,7 @@ class AIConfig(TimeStampedModel):
 
 class AgentConversation(TimeStampedModel):
     """Stores chat conversations with AI agents."""
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='agent_conversations')
+    user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='agent_conversations')
     title = models.CharField(max_length=255, default='New Chat')
 
     class Meta:

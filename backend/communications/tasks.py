@@ -100,14 +100,19 @@ def sync_emails(email_account_id=None):
                 except Exception as e:
                     logger.error(f'Auto-contact creation failed for {comm.id}: {e}')
 
-            # Notify executive about new inbound email from client
+            # Notify executive about new inbound email from client.
+            # Tier 1 (VIP) clients get an urgent 'alert' type notification
+            # so they stand out in the notification bell.
             if direction == 'inbound' and client:
                 try:
                     from notifications.helpers import notify
+                    is_vip = getattr(client, 'tier', 'tier_3') == 'tier_1'
+                    is_priority = getattr(client, 'tier', 'tier_3') == 'tier_2'
                     notify(
                         title=f'New email from {external}',
-                        message=f'{em["subject"][:80]}' if em.get('subject') else 'New email received',
-                        notification_type='system',
+                        message=(f'{em["subject"][:80]}' if em.get('subject') else 'New email received')
+                                + (' — Respond ASAP!' if is_vip else (' — Priority client' if is_priority else '')),
+                        notification_type='alert' if is_vip else 'system',
                         link=f'/clients/{client.id}',
                         client=client,
                     )

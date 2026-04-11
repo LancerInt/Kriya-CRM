@@ -869,20 +869,13 @@ function UserManagementTab() {
   };
 
   const handleToggleActive = async (user) => {
+    const action = user.is_active ? "deactivate" : "reactivate";
+    if (user.is_active && !confirm(`Deactivate ${user.first_name} ${user.last_name}?\n\nThey will no longer be able to log in, but all their data (emails, tasks, quotations, etc.) will remain intact.`)) return;
     try {
-      await api.patch(`/auth/users/${user.id}/`, { is_active: !user.is_active });
-      toast.success(user.is_active ? "User deactivated" : "User activated");
+      await api.post(`/auth/users/${user.id}/${action}/`);
+      toast.success(user.is_active ? "User deactivated — login blocked, data preserved" : "User reactivated");
       loadUsers();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to update user")); }
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm("Permanently delete this user?")) return;
-    try {
-      await api.delete(`/auth/users/${id}/`);
-      toast.success("User deleted");
-      loadUsers();
-    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete user")); }
+    } catch (err) { toast.error(getErrorMessage(err, `Failed to ${action} user`)); }
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>;
@@ -916,12 +909,9 @@ function UserManagementTab() {
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-2">
                     {u.role !== "admin" && (
-                      <>
-                        <button onClick={() => handleToggleActive(u)} className={`text-xs font-medium ${u.is_active ? "text-amber-600 hover:text-amber-700" : "text-green-600 hover:text-green-700"}`}>
-                          {u.is_active ? "Deactivate" : "Activate"}
-                        </button>
-                        <button onClick={() => handleDelete(u.id)} className="text-xs text-red-600 hover:text-red-700 font-medium">Delete</button>
-                      </>
+                      <button onClick={() => handleToggleActive(u)} className={`text-xs font-medium ${u.is_active ? "text-amber-600 hover:text-amber-700" : "text-green-600 hover:text-green-700"}`}>
+                        {u.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
                     )}
                   </div>
                 </td>
@@ -1041,7 +1031,6 @@ function ShadowAssignmentsTab() {
             <tr>
               <th className="text-left px-4 py-3 font-medium text-gray-700">Executive</th>
               <th className="text-left px-4 py-3 font-medium text-gray-700">Shadowed By</th>
-              <th className="text-left px-4 py-3 font-medium text-gray-700">Shadows (has access to)</th>
               <th className="text-right px-4 py-3 font-medium text-gray-700">Actions</th>
             </tr>
           </thead>
@@ -1069,14 +1058,6 @@ function ShadowAssignmentsTab() {
                           {s.name}
                           <button onClick={() => handleRemove(exec.id, s.id)} className="hover:text-red-600">&times;</button>
                         </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {data.shadowing.length === 0 && <span className="text-xs text-gray-400">None</span>}
-                      {data.shadowing.map((s) => (
-                        <span key={s.id} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">{s.name}</span>
                       ))}
                     </div>
                   </td>

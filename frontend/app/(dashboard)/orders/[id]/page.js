@@ -590,6 +590,8 @@ export default function OrderDetailPage() {
               <div className="space-y-0">
                 {history.map((h, i) => {
                   const isRevert = h.remarks?.toLowerCase().includes("revert");
+                  const isDocDelete = h.from_status === "document_deleted";
+                  const isDocRestore = h.from_status === "document_restored";
                   const timeDiff = i > 0 ? (() => {
                     const prev = new Date(history[i-1].created_at);
                     const curr = new Date(h.created_at);
@@ -604,14 +606,22 @@ export default function OrderDetailPage() {
                     <div key={h.id} className="relative pl-10 pb-6">
                       {/* Dot */}
                       <div className={`absolute left-2.5 top-1 w-3.5 h-3.5 rounded-full border-2 border-white z-10 ${
-                        isRevert ? "bg-amber-400" : i === history.length - 1 ? "bg-indigo-600" : "bg-green-500"
+                        isDocDelete ? "bg-red-400" : isDocRestore ? "bg-blue-400" : isRevert ? "bg-amber-400" : i === history.length - 1 ? "bg-indigo-600" : "bg-green-500"
                       }`} />
                       {/* Content */}
-                      <div className={`p-3 rounded-lg ${isRevert ? "bg-amber-50 border border-amber-200" : "bg-gray-50"}`}>
+                      <div className={`p-3 rounded-lg ${isDocDelete ? "bg-red-50 border border-red-200" : isDocRestore ? "bg-blue-50 border border-blue-200" : isRevert ? "bg-amber-50 border border-amber-200" : "bg-gray-50"}`}>
                         <div className="flex items-center gap-2 mb-1">
-                          <StatusBadge status={h.from_status} />
-                          <span className="text-gray-400">&rarr;</span>
-                          <StatusBadge status={h.to_status} />
+                          {isDocDelete ? (
+                            <span className="text-xs font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">Document Deleted</span>
+                          ) : isDocRestore ? (
+                            <span className="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Document Restored</span>
+                          ) : (
+                            <>
+                              <StatusBadge status={h.from_status} />
+                              <span className="text-gray-400">&rarr;</span>
+                              <StatusBadge status={h.to_status} />
+                            </>
+                          )}
                           {isRevert && <span className="text-[10px] px-1.5 py-0.5 bg-amber-200 text-amber-800 rounded-full font-medium">Reverted</span>}
                         </div>
                         <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
@@ -625,7 +635,33 @@ export default function OrderDetailPage() {
                           </span>
                           {timeDiff && <span className="text-gray-400">({timeDiff} after previous)</span>}
                         </div>
-                        {h.remarks && <p className="text-xs mt-2 text-gray-600 bg-white rounded px-2 py-1 border border-gray-100">💬 {h.remarks}</p>}
+                        {h.remarks && (
+                          <div className="flex items-center justify-between mt-2">
+                            <p className="text-xs text-gray-600 bg-white rounded px-2 py-1 border border-gray-100 flex-1">
+                              💬 {h.remarks.replace(/\s*\[doc_id:\w+[-\w]*\]/, '')}
+                            </p>
+                            {isDocDelete && (() => {
+                              const match = h.remarks.match(/\[doc_id:([\w-]+)\]/);
+                              const docId = match ? match[1] : null;
+                              if (!docId) return null;
+                              return (
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      await api.post(`/orders/${id}/restore-document/`, { doc_id: docId });
+                                      toast.success("Document restored");
+                                      loadOrder();
+                                    } catch { toast.error("Failed to restore — document may already be restored"); }
+                                  }}
+                                  className="ml-2 shrink-0 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
+                                >
+                                  Undo
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -671,7 +707,7 @@ export default function OrderDetailPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-indigo-600 font-medium">View</span>
-                  {isAdminOrManager && <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
+                  <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                 </div>
               </div>
             ))}</div>

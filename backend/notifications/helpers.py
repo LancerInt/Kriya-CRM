@@ -65,7 +65,22 @@ def notify(title, message='', notification_type='system', link='',
     if actor_id:
         recipients.discard(actor_id)
 
-    # 5. Bulk create notifications
+    # 5. Determine if this is a high-priority notification (Tier 1 / Tier 2 client)
+    client_tier = None
+    if client and hasattr(client, 'tier'):
+        client_tier = client.tier
+
+    # Prepend tier badge to the title so VIP/Priority notifications stand out
+    # in the notification dropdown without any frontend changes.
+    final_title = title
+    if client_tier == 'tier_1':
+        final_title = f'🔴 VIP: {title}'
+        if notification_type == 'system':
+            notification_type = 'alert'  # Escalate to alert type for VIP
+    elif client_tier == 'tier_2':
+        final_title = f'🟠 Priority: {title}'
+
+    # 6. Bulk create notifications
     if not recipients:
         return
 
@@ -73,11 +88,11 @@ def notify(title, message='', notification_type='system', link='',
         Notification(
             user_id=uid,
             notification_type=notification_type,
-            title=title,
+            title=final_title,
             message=message,
             link=link,
         )
         for uid in recipients
     ]
     Notification.objects.bulk_create(notifications)
-    logger.debug(f'Sent {len(notifications)} notifications: {title}')
+    logger.debug(f'Sent {len(notifications)} notifications: {final_title}')

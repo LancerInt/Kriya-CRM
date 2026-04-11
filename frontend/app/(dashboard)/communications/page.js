@@ -40,6 +40,7 @@ const FILTER_TABS = [
   { key: "unread_whatsapp", label: "Unread WhatsApp", color: "text-green-600" },
   { key: "call", label: "Calls" },
   { key: "note", label: "Notes" },
+  { key: "starred", label: "Starred", color: "text-yellow-600" },
   { key: "drafts", label: "Drafts" },
   { key: "unmatched", label: "Unmatched" },
 ];
@@ -123,6 +124,8 @@ export default function CommunicationsPage() {
       filtered = filtered.filter((item) => !item.is_read && item.comm_type === "email" && item.is_client_mail);
     } else if (filterTab === "unread_whatsapp") {
       filtered = filtered.filter((item) => !item.is_read && item.comm_type === "whatsapp" && item.is_client_mail);
+    } else if (filterTab === "starred") {
+      filtered = filtered.filter((item) => item.is_starred);
     } else if (filterTab === "drafts") {
       filtered = filtered.filter((item) => item.draft_id && item.draft_status === "draft");
     } else if (filterTab === "unmatched") {
@@ -145,7 +148,12 @@ export default function CommunicationsPage() {
     //   - latest is INBOUND  → we owe the client a reply  → kind=reply
     //   - latest is OUTBOUND → client hasn't responded    → kind=followup
     // Tagged rows bubble to the top, sorted by most-overdue first.
-    const FOLLOWUP_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
+    // Tier-aware follow-up thresholds — VIP clients get flagged much faster
+    const TIER_THRESHOLDS = {
+      tier_1: 4 * 60 * 60 * 1000,       // Tier 1 (VIP): 4 hours
+      tier_2: 24 * 60 * 60 * 1000,      // Tier 2 (Priority): 1 day
+      tier_3: 5 * 24 * 60 * 60 * 1000,  // Tier 3 (Standard): 5 days
+    };
     if (filterTab !== "drafts" && filterTab !== "unmatched") {
       // Group by conversation key
       const groups = new Map();
@@ -170,7 +178,9 @@ export default function CommunicationsPage() {
           return;
         }
         const ageMs = now - new Date(latest.created_at).getTime();
-        if (ageMs >= FOLLOWUP_THRESHOLD_MS) {
+        const clientTier = latest.client_tier || "tier_3";
+        const threshold = TIER_THRESHOLDS[clientTier] || TIER_THRESHOLDS.tier_3;
+        if (ageMs >= threshold) {
           // Pick the largest unit that fits, so the badge reads naturally
           const days = Math.floor(ageMs / (1000 * 60 * 60 * 24));
           const hours = Math.floor(ageMs / (1000 * 60 * 60));
@@ -360,6 +370,24 @@ export default function CommunicationsPage() {
         <span className="w-2.5 h-2.5 bg-blue-500 rounded-full inline-block" title="Unread" />
       ) : null
     )},
+    { key: "is_starred", label: "", render: (row) => (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          api.post(`/communications/${row.id}/toggle-star/`).then((r) => {
+            dispatch(fetchCommunications());
+          }).catch(() => {});
+        }}
+        className="p-0.5 hover:scale-125 transition-transform"
+        title={row.is_starred ? "Unstar" : "Star"}
+      >
+        {row.is_starred ? (
+          <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+        ) : (
+          <svg className="w-4 h-4 text-gray-300 hover:text-yellow-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
+        )}
+      </button>
+    )},
     { key: "comm_type", label: "Type", render: (row) => <StatusBadge status={row.comm_type} /> },
     { key: "direction", label: "Direction", render: (row) => <span className={`text-xs font-medium ${row.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>{row.direction}</span> },
     { key: "subject", label: "Subject", render: (row) => (
@@ -393,7 +421,12 @@ export default function CommunicationsPage() {
       </div>
     )},
     { key: "client_name", label: "Account", render: (row) => row.client_name ? (
-      <span className={row.is_read ? "" : "font-medium"}>{row.client_name}</span>
+      <div className="flex items-center gap-1.5">
+        {row.client_tier === "tier_1" && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
+        {row.client_tier === "tier_2" && <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-amber-500" />}
+        <span className={`${row.is_read ? "" : "font-medium"} ${row.client_tier === "tier_1" ? "text-red-700" : ""}`}>{row.client_name}</span>
+        {row.client_tier === "tier_1" && <span className="text-[8px] font-bold px-1 py-px rounded bg-red-500 text-white leading-none">VIP</span>}
+      </div>
     ) : (
       <button onClick={(e) => { e.stopPropagation(); setAssignModal(row.id); setAssignClient(""); }} className="text-xs text-orange-600 hover:text-orange-700 font-medium bg-orange-50 px-2 py-1 rounded">
         Assign Account
@@ -469,39 +502,79 @@ export default function CommunicationsPage() {
         }
       />
 
-      {/* Filter Tabs + Dropdowns */}
-      <div className="flex items-center justify-between gap-2 mb-4">
-        <div className="flex gap-2">
-          {FILTER_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
-              className={`px-4 py-1.5 text-sm font-medium rounded-lg ${
-                filterTab === tab.key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              {tab.label}{tab.key === "unmatched" && unmatchedCount > 0 ? ` (${unmatchedCount})` : ""}{tab.key === "drafts" ? ` (${list.filter(i => i.draft_id && i.draft_status === "draft").length})` : ""}{tab.key === "unread_email" ? ` (${list.filter(i => !i.is_read && i.comm_type === "email" && i.is_client_mail).length})` : ""}{tab.key === "unread_whatsapp" ? ` (${list.filter(i => !i.is_read && i.comm_type === "whatsapp" && i.is_client_mail).length})` : ""}
-            </button>
-          ))}
-        </div>
-        {!isUnmatched && (
-          <div className="flex gap-2" style={{ minWidth: "360px" }}>
-            <SearchableSelect
-              value={filterClient}
-              onChange={(v) => setFilterClient(v)}
-              options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
-              placeholder="All Accounts"
-              className="w-44"
-            />
-            <SearchableSelect
-              value={filterExec}
-              onChange={(v) => setFilterExec(v)}
-              options={executives.map((u) => ({ value: u.id, label: u.full_name }))}
-              placeholder="All Owners"
-              className="w-44"
-            />
+      {/* Filter bar — compact two-row layout */}
+      <div className="mb-4 space-y-2">
+        {/* Row 1: Primary tabs (most used) + filters */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5">
+            {[
+              { key: "all", label: "All" },
+              { key: "email", label: "Emails" },
+              { key: "whatsapp", label: "WhatsApp" },
+              { key: "call", label: "Calls" },
+              { key: "note", label: "Notes" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); }}
+                className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                  filterTab === tab.key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <span className="w-px h-5 bg-gray-200 mx-1" />
+            {/* Badge tabs — show counts, stand out visually */}
+            {[
+              { key: "unread_email", label: "Unread", count: list.filter(i => !i.is_read && i.comm_type === "email" && i.is_client_mail).length, color: "blue" },
+              { key: "starred", label: "Starred", count: list.filter(i => i.is_starred).length, color: "yellow" },
+              { key: "drafts", label: "Drafts", count: list.filter(i => i.draft_id && i.draft_status === "draft").length, color: "purple" },
+              { key: "unmatched", label: "Unmatched", count: unmatchedCount, color: "gray" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
+                className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors flex items-center gap-1 ${
+                  filterTab === tab.key
+                    ? `bg-${tab.color}-600 text-white`
+                    : `text-${tab.color}-700 bg-${tab.color}-50 hover:bg-${tab.color}-100 border border-${tab.color}-200`
+                }`}
+                style={filterTab === tab.key ? {
+                  backgroundColor: tab.color === "blue" ? "#2563eb" : tab.color === "yellow" ? "#ca8a04" : tab.color === "purple" ? "#7c3aed" : "#4b5563",
+                  color: "white"
+                } : {}}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={`text-[10px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full ${
+                    filterTab === tab.key ? "bg-white/20" : "bg-white"
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
-        )}
+          {!isUnmatched && (
+            <div className="flex gap-2 shrink-0">
+              <SearchableSelect
+                value={filterClient}
+                onChange={(v) => setFilterClient(v)}
+                options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+                placeholder="All Accounts"
+                className="w-40"
+              />
+              <SearchableSelect
+                value={filterExec}
+                onChange={(v) => setFilterExec(v)}
+                options={executives.map((u) => ({ value: u.id, label: u.full_name }))}
+                placeholder="All Owners"
+                className="w-40"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Unmatched category sub-tabs */}
@@ -564,13 +637,14 @@ export default function CommunicationsPage() {
         emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
         emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
         onRowClick={(row) => router.push(`/communications/${row.id}`)}
-        rowClassName={(row) =>
-          row._followUp
-            ? row._followUp.kind === "reply"
-              ? "bg-red-50/60 hover:bg-red-50"
-              : "bg-amber-50/60 hover:bg-amber-50"
-            : ""
-        }
+        rowClassName={(row) => {
+          if (row._followUp) {
+            return row._followUp.kind === "reply" ? "bg-red-50/60 hover:bg-red-50" : "bg-amber-50/60 hover:bg-amber-50";
+          }
+          if (row.client_tier === "tier_1") return "border-l-4 border-l-red-500 bg-red-50/30 hover:bg-red-50/50";
+          if (row.client_tier === "tier_2") return "border-l-4 border-l-amber-400 bg-amber-50/20 hover:bg-amber-50/40";
+          return "";
+        }}
       />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">
