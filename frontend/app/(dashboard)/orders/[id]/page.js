@@ -640,26 +640,39 @@ export default function OrderDetailPage() {
                             <p className="text-xs text-gray-600 bg-white rounded px-2 py-1 border border-gray-100 flex-1">
                               💬 {h.remarks.replace(/\s*\[doc_id:\w+[-\w]*\]/, '')}
                             </p>
-                            {isDocDelete && (() => {
-                              const match = h.remarks.match(/\[doc_id:([\w-]+)\]/);
-                              const docId = match ? match[1] : null;
-                              if (!docId) return null;
-                              return (
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    try {
-                                      await api.post(`/orders/${id}/restore-document/`, { doc_id: docId });
-                                      toast.success("Document restored");
-                                      loadOrder();
-                                    } catch { toast.error("Failed to restore — document may already be restored"); }
-                                  }}
-                                  className="ml-2 shrink-0 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
-                                >
-                                  Undo
-                                </button>
-                              );
-                            })()}
+                            {isDocDelete && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  // Try doc_id from remarks tag first, fallback to searching by name
+                                  const match = h.remarks?.match(/\[doc_id:([\w-]+)\]/);
+                                  let docId = match ? match[1] : null;
+                                  if (!docId) {
+                                    // Fallback: extract doc name from remarks and search
+                                    const nameMatch = h.remarks?.match(/Deleted document:\s*"([^"]+)"/);
+                                    if (nameMatch) {
+                                      try {
+                                        // Try to find the soft-deleted doc by name via restore with name
+                                        const res = await api.post(`/orders/${id}/restore-document/`, { doc_name: nameMatch[1] });
+                                        toast.success("Document restored");
+                                        loadOrder();
+                                        return;
+                                      } catch { toast.error("Failed to restore"); return; }
+                                    }
+                                    toast.error("Cannot identify document to restore");
+                                    return;
+                                  }
+                                  try {
+                                    await api.post(`/orders/${id}/restore-document/`, { doc_id: docId });
+                                    toast.success("Document restored");
+                                    loadOrder();
+                                  } catch { toast.error("Failed to restore — document may already be restored"); }
+                                }}
+                                className="ml-2 shrink-0 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
+                              >
+                                Undo
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>

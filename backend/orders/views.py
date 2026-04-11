@@ -186,12 +186,17 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='restore-document')
     def restore_document(self, request, pk=None):
-        """Restore a previously soft-deleted document."""
+        """Restore a previously soft-deleted document. Accepts either doc_id
+        or doc_name as a fallback for older deletion entries that didn't store
+        the doc_id in the audit trail."""
         order = self.get_object()
         doc_id = request.data.get('doc_id')
-        if not doc_id:
-            return Response({'error': 'doc_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        doc = OrderDocument.objects.filter(order=order, id=doc_id, is_deleted=True).first()
+        doc_name = request.data.get('doc_name')
+        doc = None
+        if doc_id:
+            doc = OrderDocument.objects.filter(order=order, id=doc_id, is_deleted=True).first()
+        elif doc_name:
+            doc = OrderDocument.objects.filter(order=order, name=doc_name, is_deleted=True).order_by('-deleted_at').first()
         if not doc:
             return Response({'error': 'Document not found or already restored'}, status=status.HTTP_404_NOT_FOUND)
         doc.is_deleted = False
