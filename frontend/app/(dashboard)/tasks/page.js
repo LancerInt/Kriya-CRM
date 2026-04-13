@@ -19,6 +19,7 @@ export default function TasksPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", priority: "medium", due_date: "", owner: "" });
   const [users, setUsers] = useState([]);
+  const [viewTask, setViewTask] = useState(null);
 
   useEffect(() => {
     dispatch(fetchTasks());
@@ -66,9 +67,13 @@ export default function TasksPage() {
 
   const columns = [
     { key: "title", label: "Task", render: (row) => (
-      <div>
+      <div style={{ maxWidth: 280 }}>
         <span className="font-medium">{row.title}</span>
-        {row.status_note && <p className="text-[10px] text-gray-400 mt-0.5">{row.status_note}</p>}
+        {row.status_note && (
+          <p className="text-[11px] text-indigo-600 mt-1 bg-indigo-50 px-2 py-1 rounded whitespace-pre-wrap" style={{ wordBreak: "break-word" }}>
+            💬 {row.status_note}
+          </p>
+        )}
       </div>
     )},
     { key: "priority", label: "Priority", render: (row) => <StatusBadge status={row.priority} /> },
@@ -106,7 +111,70 @@ export default function TasksPage() {
           </button>
         }
       />
-      <DataTable columns={columns} data={list} loading={loading} emptyTitle="No tasks" emptyDescription="Create your first task" />
+      <DataTable columns={columns} data={list} loading={loading} emptyTitle="No tasks" emptyDescription="Create your first task" onRowClick={(row) => setViewTask(row)} />
+
+      {/* Task Detail Modal */}
+      <Modal open={!!viewTask} onClose={() => setViewTask(null)} title="Task Details" size="md">
+        {viewTask && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">{viewTask.title}</h3>
+              {viewTask.description && <p className="text-sm text-gray-600 mt-1">{viewTask.description}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Status</span>
+                <StatusBadge status={viewTask.status} />
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Priority</span>
+                <StatusBadge status={viewTask.priority} />
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Assigned To</span>
+                <span className="font-medium text-gray-800">{viewTask.owner_name || "—"}</span>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Assigned By</span>
+                <span className="font-medium text-gray-800">{viewTask.creator_name || "—"}</span>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Due Date</span>
+                <span className="font-medium text-gray-800">{viewTask.due_date ? format(new Date(viewTask.due_date), "MMM d, yyyy h:mm a") : "—"}</span>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-xs text-gray-500 block mb-1">Created</span>
+                <span className="font-medium text-gray-800">{viewTask.created_at ? format(new Date(viewTask.created_at), "MMM d, yyyy h:mm a") : "—"}</span>
+              </div>
+              {viewTask.completed_at && (
+                <div className="bg-green-50 rounded-lg p-3 col-span-2">
+                  <span className="text-xs text-green-600 block mb-1">Completed At</span>
+                  <span className="font-medium text-green-800">{format(new Date(viewTask.completed_at), "MMM d, yyyy h:mm a")}</span>
+                </div>
+              )}
+            </div>
+            {viewTask.status_note && (
+              <div className="bg-indigo-50 rounded-lg p-3">
+                <span className="text-xs text-indigo-600 block mb-1">Note</span>
+                <p className="text-sm text-indigo-800 whitespace-pre-wrap" style={{ wordBreak: "break-word" }}>{viewTask.status_note}</p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              {viewTask.status !== "completed" && viewTask.status !== "cancelled" && (
+                <button
+                  onClick={() => { handleComplete(viewTask.id); setViewTask(null); }}
+                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+                >
+                  Mark Complete
+                </button>
+              )}
+              <button onClick={() => setViewTask(null)} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Task">
         <form onSubmit={handleCreate} className="space-y-4">

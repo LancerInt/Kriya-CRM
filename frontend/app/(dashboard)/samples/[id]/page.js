@@ -159,6 +159,21 @@ export default function SampleDetailPage() {
 
   useEffect(() => { loadSample(); }, [id]);
 
+  // Reload sample data when the tab becomes visible again — covers the case
+  // where the user navigated to the email composition page, sent the email,
+  // and came back. Without this, dispatch_notified_at stays stale and the
+  // "Notify Client" button incorrectly persists.
+  useEffect(() => {
+    const handler = () => { if (document.visibilityState === "visible") loadSample(); };
+    document.addEventListener("visibilitychange", handler);
+    // Also reload on popstate (browser back button)
+    window.addEventListener("popstate", loadSample);
+    return () => {
+      document.removeEventListener("visibilitychange", handler);
+      window.removeEventListener("popstate", loadSample);
+    };
+  }, [id]);
+
   const advance = async (target, extra = {}, onSuccess = null) => {
     setAdvancing(true);
     try {
@@ -289,11 +304,7 @@ export default function SampleDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {/* Reply to Client — opens the AI Draft modal for the source email
-              so the executive can use the same compose flow (RichTextEditor,
-              CC chips, AI draft body, attachments, signature). When the email
-              is sent, the backend automatically stamps replied_at on this
-              sample, advancing the workflow to step 2. */}
+          {/* Reply to Client */}
           {sample.source_communication && (
             <button
               onClick={() => router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`)}
@@ -305,6 +316,21 @@ export default function SampleDetailPage() {
               title="Open the AI Draft for this email"
             >
               {sample.replied_at ? "↻ Reply Again" : "💬 Reply to Client"}
+            </button>
+          )}
+          {/* Notify Client about dispatch — shows when dispatched but email not sent */}
+          {sample.status === "dispatched" && !sample.dispatch_notified_at && sample.source_communication && (
+            <button
+              onClick={() => {
+                const params = new URLSearchParams();
+                params.set("openDraftFor", sample.source_communication);
+                params.set("dispatchSampleId", sample.id);
+                router.push(`/clients/${sample.client}?${params.toString()}`);
+              }}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 ring-2 ring-green-200 animate-pulse"
+              title="Client has NOT been notified about this dispatch — click to send notification email"
+            >
+              📧 Notify Client of Dispatch
             </button>
           )}
           {/* Revert — walks one step backwards through the workflow.
@@ -724,11 +750,14 @@ export default function SampleDetailPage() {
               Cancel
             </button>
             <button
-              onClick={() => advance("dispatched", { tracking_number: trackingNumber, courier_details: courierDetails })}
+              onClick={() => {
+                if (sample.source_communication && !confirm("You are dispatching WITHOUT notifying the client via email.\n\nAre you sure? You can still notify them later from the sample page.")) return;
+                advance("dispatched", { tracking_number: trackingNumber, courier_details: courierDetails });
+              }}
               disabled={advancing}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+              className="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-lg hover:bg-gray-600 disabled:opacity-50 whitespace-nowrap"
             >
-              Confirm Dispatch
+              Dispatch Only
             </button>
             {sample.source_communication && (
               <button
@@ -736,8 +765,6 @@ export default function SampleDetailPage() {
                   "dispatched",
                   { tracking_number: trackingNumber, courier_details: courierDetails },
                   () => {
-                    // After save, jump to the AI Draft with the dispatch info
-                    // pre-filled. Same email thread as the original reply.
                     const params = new URLSearchParams();
                     params.set("openDraftFor", sample.source_communication);
                     params.set("dispatchSampleId", sample.id);
@@ -746,9 +773,9 @@ export default function SampleDetailPage() {
                 )}
                 disabled={advancing}
                 className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
-                title="Mark as dispatched and immediately reply to the client with tracking info"
+                title="Mark as dispatched and immediately notify the client with tracking info"
               >
-                💬 Confirm & Notify Client
+                💬 Dispatch & Notify Client
               </button>
             )}
           </div>

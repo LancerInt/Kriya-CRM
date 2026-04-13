@@ -1,6 +1,41 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Quill CSS bleed fix
+   ─────────────────────────────────────────────────────────────────────────
+   quill.snow.css sets font, line-height, color, and spacing on generic
+   selectors that bleed into the sidebar/header. We neutralise all of it
+   by locking the layout shell to Tailwind's defaults and ensuring every
+   Quill rule that operates outside .ql-* is overridden.
+*/
+
+/* 1. Body font — Quill replaces it with Helvetica/serif */
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif !important;
+  line-height: 1.5 !important;
+}
+
+/* 2. Sidebar + Header — full isolation from Quill */
+aside, aside *,
+header, header * {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif !important;
+}
+
+/* Quill sets h1-h6, p, a, button line-height and margin — reset inside layout */
+aside h1, aside h2, aside h3, aside h4, aside h5, aside h6,
+aside p, aside a, aside button, aside span, aside svg,
+header h1, header h2, header h3, header h4, header h5, header h6,
+header p, header a, header button, header span, header svg {
+  line-height: normal !important;
+}
+aside a, header a {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Modern <select> dropdowns
    ─────────────────────────────────────────────────────────────────────────
    Replaces the OS-default native select chrome with a clean modern look:

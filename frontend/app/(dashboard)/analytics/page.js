@@ -104,6 +104,7 @@ export default function AnalyticsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showShadow, setShowShadow] = useState(false);
+  const [viewMode, setViewMode] = useState("my"); // "my" | "shared" | "combined"
   const user = useSelector((state) => state.auth.user);
   const isExecutive = user?.role === "executive";
 
@@ -121,33 +122,62 @@ export default function AnalyticsPage() {
 
   if (loading) return <LoadingSpinner size="lg" />;
 
-  const pipelineStages = data?.pipeline_by_stage || [];
+  const shadowClients = data?.shadow_clients || [];
+  const hasShadow = isExecutive && shadowClients.length > 0;
+  const ss = data?.shadow_stats || {};
+
+  // Pick the active dataset based on view mode
+  const active = (() => {
+    if (!isExecutive || viewMode === "my") return data;
+    if (viewMode === "shared") return {
+      ...data,
+      clients: ss.clients || { total: 0, active: 0 },
+      tasks: ss.tasks || {},
+      orders: ss.orders || {},
+      revenue: { total: (ss.orders?.total || 0) },
+      pipeline: ss.pipeline || {},
+      pipeline_by_stage: ss.pipeline_by_stage || [],
+      clients_by_country: ss.clients_by_country || [],
+    };
+    // combined
+    return {
+      ...data,
+      clients: {
+        total: (data?.clients?.total || 0) + (ss.clients?.total || 0),
+        active: (data?.clients?.active || 0) + (ss.clients?.active || 0),
+      },
+      tasks: {
+        pending: (data?.tasks?.pending || 0) + (ss.tasks?.pending || 0),
+        in_progress: (data?.tasks?.in_progress || 0) + (ss.tasks?.in_progress || 0),
+        completed: (data?.tasks?.completed || 0) + (ss.tasks?.completed || 0),
+        overdue: (data?.tasks?.overdue || 0) + (ss.tasks?.overdue || 0),
+      },
+      orders: {
+        total: (data?.orders?.total || 0) + (ss.orders?.total || 0),
+        active: (data?.orders?.active || 0) + (ss.orders?.active || 0),
+      },
+      revenue: { total: (data?.revenue?.total || 0) },
+      pipeline: {
+        active_inquiries: (data?.pipeline?.active_inquiries || 0) + (ss.pipeline?.active_inquiries || 0),
+      },
+    };
+  })();
+
+  const pipelineStages = active?.pipeline_by_stage || [];
   const maxStageCount = Math.max(...pipelineStages.map((s) => s.count), 1);
 
-  const clientsByCountry = (data?.clients_by_country || []).slice(0, 10);
+  const clientsByCountry = (active?.clients_by_country || []).slice(0, 10);
   const maxCountryCount = Math.max(...clientsByCountry.map((c) => c.count), 1);
-
-  const shadowClients = data?.shadow_clients || [];
 
   return (
     <div>
       <PageHeader
         title="Analytics"
-        subtitle={isExecutive ? "Your portfolio performance" : "Business intelligence and reports"}
+        subtitle={isExecutive
+          ? viewMode === "shared" ? "Shared accounts performance" : viewMode === "combined" ? "Combined portfolio" : "Your portfolio performance"
+          : "Business intelligence and reports"}
         action={
           <div className="flex items-center gap-2">
-            {isExecutive && shadowClients.length > 0 && (
-              <button
-                onClick={() => setShowShadow(true)}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100"
-              >
-                <HiOutlineUserGroup className="w-4 h-4" />
-                Shared Accounts
-                <span className="ml-1 bg-amber-200 text-amber-800 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                  {shadowClients.length}
-                </span>
-              </button>
-            )}
             <button
               onClick={fetchData}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
@@ -159,41 +189,71 @@ export default function AnalyticsPage() {
         }
       />
 
+      {/* View Mode Toggle — executives with shared accounts */}
+      {hasShadow && (
+        <div className="flex items-center gap-2 mb-6">
+          {[
+            { key: "my", label: "My Accounts", count: data?.clients?.total || 0 },
+            { key: "shared", label: "Shared Accounts", count: ss.clients?.total || 0 },
+            { key: "combined", label: "Combined", count: (data?.clients?.total || 0) + (ss.clients?.total || 0) },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setViewMode(tab.key)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                viewMode === tab.key
+                  ? tab.key === "shared" ? "bg-amber-600 text-white" : tab.key === "combined" ? "bg-purple-600 text-white" : "bg-indigo-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+          {viewMode === "shared" && (
+            <button onClick={() => setShowShadow(true)} className="text-xs text-amber-700 hover:text-amber-800 ml-2 underline">
+              View accounts
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatsCard
-          title={isExecutive ? "My Accounts" : "Total Clients"}
-          value={data?.clients?.total || 0}
+          title={viewMode === "shared" ? "Shared Accounts" : viewMode === "combined" ? "All Accounts" : isExecutive ? "My Accounts" : "Total Clients"}
+          value={active?.clients?.total || 0}
           icon={HiOutlineUsers}
           color="indigo"
         />
         <StatsCard
           title="Active Clients"
-          value={data?.clients?.active || 0}
+          value={active?.clients?.active || 0}
           icon={HiOutlineUserGroup}
           color="green"
         />
         <StatsCard
           title="Total Orders"
-          value={data?.orders?.total || 0}
+          value={active?.orders?.total || 0}
           icon={HiOutlineShoppingCart}
           color="blue"
         />
-        <StatsCard
-          title="Revenue"
-          value={`$${Number(data?.revenue?.total || 0).toLocaleString()}`}
-          icon={HiOutlineBanknotes}
-          color="purple"
-        />
+        {!isExecutive && (
+          <StatsCard
+            title="Revenue"
+            value={`$${Number(active?.revenue?.total || 0).toLocaleString()}`}
+            icon={HiOutlineBanknotes}
+            color="purple"
+          />
+        )}
         <StatsCard
           title="Pending Tasks"
-          value={data?.tasks?.pending || 0}
+          value={active?.tasks?.pending || 0}
           icon={HiOutlineClock}
           color="yellow"
         />
         <StatsCard
           title="Overdue Tasks"
-          value={data?.tasks?.overdue || 0}
+          value={active?.tasks?.overdue || 0}
           icon={HiOutlineExclamationTriangle}
           color="red"
         />
@@ -274,7 +334,7 @@ export default function AnalyticsPage() {
               <div>
                 <p className="text-sm text-purple-600 font-medium">Active Inquiries</p>
                 <p className="text-2xl font-bold text-purple-900">
-                  {data?.pipeline?.active_inquiries || 0}
+                  {active?.pipeline?.active_inquiries || 0}
                 </p>
               </div>
             </div>
@@ -287,7 +347,7 @@ export default function AnalyticsPage() {
               <div>
                 <p className="text-sm text-yellow-600 font-medium">Pending Approvals</p>
                 <p className="text-2xl font-bold text-yellow-900">
-                  {data?.pipeline?.pending_approvals || 0}
+                  {active?.pipeline?.pending_approvals || 0}
                 </p>
               </div>
             </div>
@@ -300,7 +360,7 @@ export default function AnalyticsPage() {
               <div>
                 <p className="text-sm text-green-600 font-medium">Active Orders</p>
                 <p className="text-2xl font-bold text-green-900">
-                  {data?.orders?.active || 0}
+                  {active?.orders?.active || 0}
                 </p>
               </div>
             </div>

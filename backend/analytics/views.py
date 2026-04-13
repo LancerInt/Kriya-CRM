@@ -184,6 +184,12 @@ def dashboard_stats(request):
                 'pending_quotations': list(s_quotation_qs.filter(status__in=['draft', 'pending_approval']).order_by('-created_at')[:5].values('id', 'quotation_number', 'status', 'total', 'currency', 'client__company_name', 'created_at')),
                 'recent_orders': list(s_order_qs.exclude(status__in=['delivered', 'cancelled']).order_by('-created_at')[:5].values('id', 'order_number', 'status', 'total', 'currency', 'client__company_name', 'created_at')),
                 'pipeline_by_stage': list(s_inquiry_qs.exclude(stage__in=['order_confirmed', 'lost']).values('stage').annotate(count=Count('id'), value=Sum('expected_value'))),
+                'clients_by_country': list(
+                    Client.objects.filter(id__in=shadow_client_ids, is_deleted=False)
+                    .exclude(country='')
+                    .values('country').annotate(count=Count('id')).order_by('-count')[:10]
+                ),
+                'revenue': {'total': s_order_qs.aggregate(total=Sum('total'))['total'] or 0},
             }
 
     return Response(stats)

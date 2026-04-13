@@ -20,6 +20,7 @@ class Sample(TimeStampedModel):
     reminder_sent_at = models.DateTimeField(null=True, blank=True, help_text='When the post-reply follow-up reminder was sent to the executive')
     prepared_at = models.DateTimeField(null=True, blank=True)
     dispatch_date = models.DateField(null=True, blank=True)
+    dispatch_notified_at = models.DateTimeField(null=True, blank=True, help_text='When the client was notified about dispatch via email')
     delivered_at = models.DateTimeField(null=True, blank=True)
     courier_details = models.CharField(max_length=255, blank=True)
     tracking_number = models.CharField(max_length=100, blank=True)

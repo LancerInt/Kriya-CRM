@@ -652,6 +652,22 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         except Exception as e:
             _log.warning(f'Could not stamp Sample replied_at for sent draft {draft.id}: {e}')
 
+        # Stamp dispatch_notified_at on any dispatched samples linked to this
+        # email that haven't been notified yet — covers the case where the
+        # executive clicked "Confirm Dispatch" without "Notify Client" and
+        # later sent the email manually.
+        try:
+            from samples.models import Sample
+            from django.utils import timezone as _tz
+            Sample.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+                status='dispatched',
+                dispatch_notified_at__isnull=True,
+            ).update(dispatch_notified_at=_tz.now())
+        except Exception as e:
+            _log.warning(f'Could not stamp Sample dispatch_notified_at: {e}')
+
         # Create outgoing Communication record — store the body that was
         # actually sent (with the signature appended) so the thread view
         # matches what the recipient received.

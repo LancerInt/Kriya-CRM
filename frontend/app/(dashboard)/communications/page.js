@@ -150,8 +150,8 @@ export default function CommunicationsPage() {
     // Tagged rows bubble to the top, sorted by most-overdue first.
     // Tier-aware follow-up thresholds — VIP clients get flagged much faster
     const TIER_THRESHOLDS = {
-      tier_1: 4 * 60 * 60 * 1000,       // Tier 1 (VIP): 4 hours
-      tier_2: 24 * 60 * 60 * 1000,      // Tier 2 (Priority): 1 day
+      tier_1: 1 * 24 * 60 * 60 * 1000,  // Tier 1 (VIP): 1 day
+      tier_2: 2 * 24 * 60 * 60 * 1000,  // Tier 2 (Priority): 2 days
       tier_3: 5 * 24 * 60 * 60 * 1000,  // Tier 3 (Standard): 5 days
     };
     if (filterTab !== "drafts" && filterTab !== "unmatched") {

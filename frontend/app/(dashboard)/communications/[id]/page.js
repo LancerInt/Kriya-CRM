@@ -432,11 +432,11 @@ export default function CommunicationDetailPage() {
             </div>
 
             {/* Message body */}
-            <div className="px-5 py-4">
+            <div className="px-5 py-4 overflow-hidden">
               {msg.comm_type === "email" && msg.body?.includes("<") ? (
-                <div className="prose prose-sm max-w-none text-gray-700" dangerouslySetInnerHTML={{ __html: msg.body }} />
+                <div className="prose prose-sm max-w-none text-gray-700 break-words overflow-wrap-anywhere" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: msg.body }} />
               ) : (
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{msg.body || "No content"}</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{msg.body || "No content"}</p>
               )}
             </div>
 

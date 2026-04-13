@@ -22,8 +22,8 @@ class SampleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sample
         fields = ['id', 'client', 'client_name', 'product', 'product_name', 'client_product_name',
-                  'quantity', 'replied_at', 'prepared_at', 'dispatch_date', 'delivered_at',
-                  'courier_details', 'tracking_number', 'status',
+                  'quantity', 'replied_at', 'prepared_at', 'dispatch_date', 'dispatch_notified_at',
+                  'delivered_at', 'courier_details', 'tracking_number', 'status',
                   'notes', 'source_communication', 'created_by', 'feedback',
                   'items', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_by']
