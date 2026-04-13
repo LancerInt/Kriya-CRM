@@ -17,5 +17,6 @@ urlpatterns = [
     path('whatsapp-webhook/', views.whatsapp_webhook_view, name='whatsapp-webhook'),
     path('signature-logo.png', views.signature_logo_view, name='signature-logo'),
     path('grammar-check/', views.grammar_check_view, name='grammar-check'),
+    path('generate-coa-pdf/', views.generate_coa_pdf_view, name='generate-coa-pdf'),
     path('', include(router.urls)),
 ]

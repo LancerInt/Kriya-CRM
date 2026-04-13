@@ -1,5 +1,14 @@
 from rest_framework import serializers
-from .models import Product, CountryCompliance
+from .models import Product, ProductDocument, CountryCompliance
+
+
+class ProductDocumentSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True, default='')
+
+    class Meta:
+        model = ProductDocument
+        fields = ['id', 'product', 'product_name', 'name', 'file', 'doc_type', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:

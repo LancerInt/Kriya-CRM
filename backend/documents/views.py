@@ -25,7 +25,7 @@ from .serializers import DocumentSerializer, FolderSerializer
 # action on each viewset.
 
 def _scope_folders(user):
-    qs = Folder.objects.all()
+    qs = Folder.objects.filter(is_deleted=False)
     if user.role in ('admin', 'manager'):
         return qs  # admin/manager see everything
     # Executive: see public + their own private folders
@@ -33,7 +33,7 @@ def _scope_folders(user):
 
 
 def _scope_documents(user):
-    qs = Document.objects.select_related('uploaded_by', 'folder').all()
+    qs = Document.objects.filter(is_deleted=False).select_related('uploaded_by', 'folder')
     if user.role in ('admin', 'manager'):
         return qs
     return qs.filter(Q(visibility='public') | Q(uploaded_by=user))

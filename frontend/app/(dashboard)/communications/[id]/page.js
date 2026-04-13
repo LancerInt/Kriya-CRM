@@ -13,6 +13,7 @@ import PIEditorModal from "@/components/finance/PIEditorModal";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import EmailChips from "@/components/ui/EmailChips";
 import PdfViewer from "@/components/ui/PdfViewer";
+import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -100,6 +101,7 @@ export default function CommunicationDetailPage() {
   const [attachPi, setAttachPi] = useState(null);
   const [attachMode, setAttachMode] = useState(null); // 'quote' | 'pi' | null
   const [pdfView, setPdfView] = useState(null);
+  const [showDocLibPicker, setShowDocLibPicker] = useState(false);
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -480,6 +482,41 @@ export default function CommunicationDetailPage() {
 
       <div id="reply-form-anchor" />
 
+      {/* Document Suggestions — COA/MSDS/TDS detected in inbound email */}
+      {comm.comm_type === "email" && comm.client && (() => {
+        const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
+        const sourceText = `${lastInbound?.subject || ""} ${lastInbound?.body || ""}`.replace(/<[^>]+>/g, " ").toLowerCase();
+        const DOC_PATTERNS = [
+          { key: "coa", label: "COA", pattern: /\b(coa|certificate\s+of\s+analysis)\b/i },
+          { key: "msds", label: "MSDS/SDS", pattern: /\b(msds|sds|material\s+safety\s+data\s+sheet|safety\s+data\s+sheet)\b/i },
+          { key: "tds", label: "TDS", pattern: /\b(tds|technical\s+data\s+sheet)\b/i },
+          { key: "certificate", label: "Certificate", pattern: /\b(certificate|certification|organic\s+cert|halal\s+cert)\b/i },
+        ];
+        const detected = DOC_PATTERNS.filter(d => d.pattern.test(sourceText));
+        if (detected.length === 0) return null;
+
+        const labels = detected.map(d => d.label).join(", ");
+
+        return (
+          <div className="mt-4 p-3 bg-amber-50/50 border border-amber-100 rounded-xl flex flex-wrap items-center gap-2">
+            <span className="text-xs text-amber-700 font-medium">📋 Client requested: <strong>{labels}</strong></span>
+            <button
+              onClick={async () => {
+                // Open reply if not already open, so they can attach
+                if (!showReply) {
+                  if (emailAccounts.length > 0 && !selectedAccount) setSelectedAccount(emailAccounts[0].id);
+                  openReply(comm, thread);
+                }
+                toast("Open the reply form and attach the requested documents", { icon: "📎" });
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg text-amber-700 bg-white border border-amber-200 hover:bg-amber-50"
+            >
+              Reply & Attach Documents
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Quick-Save action bar — visible on any thread that contains quote / PI
           / sample keywords, even before the user clicks Reply. Lets the user
           push the message into the Quotations / PI tab in one click without
@@ -658,6 +695,30 @@ export default function CommunicationDetailPage() {
               {lastSavedAt && (
                 <div className="px-5"><p className="text-[10px] text-gray-400">Last saved: {new Date(lastSavedAt).toLocaleString()}</p></div>
               )}
+
+              {/* COA/MSDS/TDS detection + Attach from Library (inline reply) */}
+              {(() => {
+                const targetForDoc = (replyTargetId && thread.find(m => m.id === replyTargetId)) || [...thread].reverse().find(m => m.direction === "inbound") || comm;
+                const docText = `${targetForDoc?.subject || ""} ${targetForDoc?.body || ""}`.replace(/<[^>]+>/g, " ").toLowerCase();
+                const DOC_PAT = [
+                  { key: "coa", label: "COA", pattern: /\b(coa|certificate\s+of\s+analysis)\b/i },
+                  { key: "msds", label: "MSDS", pattern: /\b(msds|sds|material\s+safety|safety\s+data\s+sheet)\b/i },
+                  { key: "tds", label: "TDS", pattern: /\b(tds|technical\s+data\s+sheet)\b/i },
+                  { key: "certificate", label: "Certificate", pattern: /\b(certificate|certification)\b/i },
+                ];
+                const det = DOC_PAT.filter(d => d.pattern.test(docText));
+                if (det.length === 0) return null;
+                return (
+                  <div className="px-5 py-2">
+                    <button
+                      onClick={() => setShowDocLibPicker(true)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+                    >
+                      📋 Attach {det.map(d => d.label).join("/")} from Library
+                    </button>
+                  </div>
+                );
+              })()}
 
               {/* Smart Generate Buttons — open editor (pre-filled from email),
                   let user edit/preview, then attach the final PDF.
@@ -970,6 +1031,13 @@ export default function CommunicationDetailPage() {
         }}
       />
       <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
+      {showDocLibPicker && (
+        <DocLibraryPicker
+          onPickFile={(file) => setAttachments(prev => [...prev, file])}
+          onClose={() => setShowDocLibPicker(false)}
+          onAttached={() => setShowDocLibPicker(false)}
+        />
+      )}
     </div>
   );
 }

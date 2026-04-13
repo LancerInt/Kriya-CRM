@@ -27,11 +27,21 @@ class Product(SoftDeleteModel):
 
 
 class ProductDocument(models.Model):
+    class DocType(models.TextChoices):
+        COA = 'coa', 'Certificate of Analysis (COA)'
+        MSDS = 'msds', 'Material Safety Data Sheet (MSDS)'
+        TDS = 'tds', 'Technical Data Sheet (TDS)'
+        CERTIFICATE = 'certificate', 'Certificate'
+        BROCHURE = 'brochure', 'Brochure'
+        REGULATORY = 'regulatory', 'Regulatory Document'
+        TECHNICAL = 'technical', 'Technical Document'
+        OTHER = 'other', 'Other'
+
     id = models.AutoField(primary_key=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='documents')
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to='product_docs/%Y/%m/')
-    doc_type = models.CharField(max_length=50, blank=True, help_text='regulatory, technical, etc.')
+    doc_type = models.CharField(max_length=50, choices=DocType.choices, default=DocType.OTHER, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

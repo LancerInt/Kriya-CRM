@@ -21,6 +21,8 @@ import PIEditorModal from "@/components/finance/PIEditorModal";
 import ModernSelect from "@/components/ui/ModernSelect";
 import EmailChips from "@/components/ui/EmailChips";
 import RichTextEditor from "@/components/ui/RichTextEditor";
+import DocLibraryPickerShared from "@/components/ui/DocLibraryPicker";
+import COAEditorModal from "@/components/finance/COAEditorModal";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -470,6 +472,44 @@ function RefineDropdown({ body, onRefined, contactName }) {
   );
 }
 
+// ── Document Suggestion Bar — appears in AI Draft when COA/MSDS/TDS detected ──
+function DocSuggestionBar({ detected, clientId, draftId, onAttached }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const labels = detected.map(d => d.label).join(", ");
+
+  return (
+    <>
+      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-600 text-sm">📋</span>
+            <span className="text-xs font-medium text-amber-800">
+              Client requested: <strong>{labels}</strong>
+            </span>
+          </div>
+          <button
+            onClick={() => setShowPicker(true)}
+            className="text-[11px] font-medium px-2 py-1 bg-amber-600 text-white rounded hover:bg-amber-700"
+          >
+            Attach from Library
+          </button>
+        </div>
+      </div>
+      {showPicker && (
+        <DocLibraryPickerShared
+          draftId={draftId}
+          onClose={() => setShowPicker(false)}
+          onAttached={onAttached}
+        />
+      )}
+    </>
+  );
+}
+
+// Remove the old inline DocLibraryPicker — now using the shared component
+// imported as DocLibraryPickerShared at the top of the file.
+
+
 // ── Communications Tab ──
 function CommunicationsTab({ clientId, activeTab, client }) {
   const currentUser = useSelector((state) => state.auth.user);
@@ -479,6 +519,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [selectedComm, setSelectedComm] = useState(null);
   const [showDraftModal, setShowDraftModal] = useState(false);
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [showCOAEditor, setShowCOAEditor] = useState(false);
   const [draft, setDraft] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
@@ -1322,7 +1364,17 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               const wantsQuote = hasContextAttachment ? hasQuoteAttached : kwQuote;
               const wantsPI = hasContextAttachment ? hasPiAttached : kwPI;
 
-              if (!wantsQuote && !wantsPI && !wantsSample) return null;
+              // COA/MSDS/TDS/Certificate detection
+              const DOC_PATTERNS = [
+                { key: "coa", label: "COA", pattern: /\b(coa|certificate\s+of\s+analysis)\b/i },
+                { key: "msds", label: "MSDS", pattern: /\b(msds|sds|material\s+safety|safety\s+data\s+sheet)\b/i },
+                { key: "tds", label: "TDS", pattern: /\b(tds|technical\s+data\s+sheet)\b/i },
+                { key: "certificate", label: "Certificate", pattern: /\b(certificate|certification|organic\s+cert|halal\s+cert)\b/i },
+              ];
+              const detectedDocs = DOC_PATTERNS.filter(d => d.pattern.test(draftText));
+              const wantsDocs = detectedDocs.length > 0;
+
+              if (!wantsQuote && !wantsPI && !wantsSample && !wantsDocs) return null;
 
               const openQuoteEditor = async () => {
                 try {
@@ -1408,6 +1460,45 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                       🧪 Create Sample Request
                     </button>
                   )}
+                  {wantsDocs && (
+                    <>
+                      <button
+                        onClick={() => setShowDocPicker(true)}
+                        title={`Attach from Document Library`}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                      >
+                        📋 Attach {detectedDocs.map(d => d.label).join("/")} from Library
+                      </button>
+                      <label
+                        title={`Upload a new file and attach`}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer"
+                      >
+                        ⬆ Upload New
+                        <input type="file" className="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file || !draft?.id) return;
+                          try {
+                            const fd = new FormData();
+                            fd.append("attachments", file);
+                            await api.post(`/communications/drafts/${draft.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+                            toast.success(`${file.name} attached`);
+                            const r = await api.get(`/communications/drafts/${draft.id}/`);
+                            setSavedAttachments(r.data.attachments || []);
+                          } catch { toast.error("Failed to upload"); }
+                          e.target.value = "";
+                        }} />
+                      </label>
+                      {detectedDocs.some(d => d.key === "coa") && (
+                        <button
+                          onClick={() => setShowCOAEditor(true)}
+                          title="Create a new Certificate of Analysis"
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                        >
+                          📝 Create COA
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               );
             })()}
@@ -1438,6 +1529,39 @@ function CommunicationsTab({ clientId, activeTab, client }) {
           </div>
         )}
       </Modal>
+
+      {/* COA Editor — create and attach Certificate of Analysis */}
+      <COAEditorModal
+        open={showCOAEditor}
+        onClose={() => setShowCOAEditor(false)}
+        productName=""
+        clientName={client?.company_name || ""}
+        onGenerate={async (formData) => {
+          if (!draft?.id) { toast.error("No draft to attach to"); return; }
+          try {
+            await api.post("/communications/generate-coa-pdf/", { ...formData, draft_id: draft.id });
+            toast.success("COA generated and attached");
+            setShowCOAEditor(false);
+            const r = await api.get(`/communications/drafts/${draft.id}/`);
+            setSavedAttachments(r.data.attachments || []);
+          } catch { toast.error("Failed to generate COA"); }
+        }}
+      />
+
+      {/* Document Library Picker — browse CRM documents and attach */}
+      {showDocPicker && (
+        <DocLibraryPickerShared
+          draftId={draft?.id}
+          onClose={() => setShowDocPicker(false)}
+          onAttached={() => {
+            if (draft?.id) {
+              api.get(`/communications/drafts/${draft.id}/`).then(r => {
+                setSavedAttachments(r.data.attachments || []);
+              }).catch(() => {});
+            }
+          }}
+        />
+      )}
 
       {/* Quotation Editor for Attach */}
       <QuotationEditorModal

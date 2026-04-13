@@ -1158,6 +1158,179 @@ Email body:"""
 
 
 @api_view(['POST'])
+def generate_coa_pdf_view(request):
+    """Generate a Certificate of Analysis PDF from form data and attach it
+    to the specified email draft."""
+    from io import BytesIO
+    from django.core.files.base import ContentFile
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+
+    data = request.data
+    draft_id = data.get('draft_id')
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    el = []
+
+    # Logo
+    import os
+    from django.conf import settings
+    logo_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
+    if os.path.exists(logo_path):
+        try:
+            el.append(Image(logo_path, width=100, height=45))
+        except Exception:
+            pass
+    el.append(Spacer(1, 5*mm))
+
+    # Title
+    title_style = ParagraphStyle('coa_title', fontSize=14, fontName='Helvetica-Bold', alignment=1, spaceAfter=10)
+    el.append(Paragraph('<u>CERTIFICATE OF ANALYSIS</u>', title_style))
+    el.append(Spacer(1, 5*mm))
+
+    # Helper styles
+    lb = ParagraphStyle('lb', fontSize=10, fontName='Helvetica-Bold', leading=13)
+    lv = ParagraphStyle('lv', fontSize=10, fontName='Helvetica', leading=13)
+
+    # Report No + Date
+    report_table = Table([
+        [Paragraph('<b>REPORT NO:</b>', lb), Paragraph(data.get('report_no', ''), lv),
+         Paragraph('<b>DATE:</b>', lb), Paragraph(data.get('date', ''), lv)],
+    ], colWidths=[80, 140, 50, 100])
+    report_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    el.append(report_table)
+    el.append(Spacer(1, 3*mm))
+
+    # Product details
+    detail_rows = [
+        ('Product Name', data.get('product_name', '')),
+        ('Sample Description', data.get('sample_description', '')),
+        ('Manufacturing Date', data.get('manufacturing_date', '')),
+        ('Expiration Date', data.get('expiration_date', '')),
+        ('Date of Receipt of Sample', data.get('receipt_date', '')),
+        ('Date of Start of Analysis', data.get('start_date', '')),
+        ('Date of Completion of Analysis', data.get('completion_date', '')),
+    ]
+    detail_table = Table(
+        [[Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)] for label, val in detail_rows],
+        colWidths=[200, 270],
+    )
+    detail_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('BACKGROUND', (0,0), (0,-1), colors.Color(0.96, 0.96, 0.96)),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+    ]))
+    el.append(detail_table)
+    el.append(Spacer(1, 4*mm))
+
+    # Test results
+    test_rows = [
+        ('Appearance', data.get('appearance', '')),
+        ('Odour', data.get('odour', '')),
+        ('pH', data.get('ph', '')),
+        ('Specific Gravity', data.get('specific_gravity', '')),
+        ('Solubility', data.get('solubility', '')),
+        (data.get('active_label', 'Active Content'), data.get('active_content', '')),
+    ]
+    th = ParagraphStyle('th', fontSize=10, fontName='Helvetica-Bold', alignment=1, leading=13)
+    test_table_data = [
+        [Paragraph('<b>TEST RESULT</b>', ParagraphStyle('tr_h', fontSize=11, fontName='Helvetica-Bold', alignment=1))],
+    ]
+    # Merge first row across 2 cols handled via spanning
+    test_data = [
+        [Paragraph('<b>TESTING PARAMETERS</b>', th), Paragraph('<b>RESULTS</b>', th)],
+    ] + [[Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)] for label, val in test_rows]
+
+    # Header row
+    header_row = Table([[Paragraph('<b>TEST RESULT</b>', th)]], colWidths=[470])
+    header_row.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+        ('BACKGROUND', (0,0), (-1,-1), colors.Color(0.96, 0.96, 0.96)),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    el.append(header_row)
+
+    test_table = Table(test_data, colWidths=[235, 235])
+    test_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('BACKGROUND', (0,0), (0,0), colors.Color(0.93, 0.93, 0.93)),
+        ('BACKGROUND', (1,0), (1,0), colors.Color(0.93, 0.93, 0.93)),
+        ('BACKGROUND', (0,1), (0,-1), colors.Color(0.96, 0.96, 0.96)),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+    ]))
+    el.append(test_table)
+    el.append(Spacer(1, 10*mm))
+
+    # Signature
+    el.append(Paragraph('Checked by', ParagraphStyle('sig_label', fontSize=10, fontName='Helvetica', leading=13)))
+    el.append(Spacer(1, 15*mm))
+
+    # Signature + seal
+    sign_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'sign.png')
+    seal_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'seal.png')
+    sig_elements = []
+    if os.path.exists(sign_path):
+        try:
+            sig_elements.append(Image(sign_path, width=60, height=30))
+        except Exception:
+            pass
+    sig_elements.append(Paragraph(f'<b>{data.get("checked_by", "Technical Manager")}</b>', lb))
+
+    seal_elements = []
+    if os.path.exists(seal_path):
+        try:
+            seal_elements.append(Image(seal_path, width=50, height=50))
+        except Exception:
+            pass
+
+    if sig_elements or seal_elements:
+        sig_table = Table([[sig_elements, seal_elements]], colWidths=[300, 170])
+        sig_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM')]))
+        el.append(sig_table)
+
+    doc.build(el)
+    pdf_bytes = buf.getvalue()
+
+    # Attach to draft if draft_id provided
+    if draft_id:
+        try:
+            from .models import EmailDraft, DraftAttachment
+            draft = EmailDraft.objects.get(id=draft_id)
+            product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
+            filename = f'COA_{product_name}.pdf'
+            # Remove existing COA attachment
+            DraftAttachment.objects.filter(draft=draft, filename__startswith='COA_').delete()
+            att = DraftAttachment(draft=draft, filename=filename, file_size=len(pdf_bytes))
+            att.file.save(filename, ContentFile(pdf_bytes), save=True)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f'COA attach failed: {e}')
+
+    from django.http import HttpResponse
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="COA_{data.get("product_name", "Product")}.pdf"'
+    return response
+
+
+@api_view(['POST'])
 def refine_email_text(request):
     """Refine email body: polish, formalize, elaborate, or shorten."""
     body = request.data.get('body', '').strip()

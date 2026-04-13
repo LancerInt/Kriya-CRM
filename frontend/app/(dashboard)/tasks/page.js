@@ -21,6 +21,16 @@ export default function TasksPage() {
   const [users, setUsers] = useState([]);
   const [viewTask, setViewTask] = useState(null);
 
+  const handleDelete = async (taskId) => {
+    if (!confirm("Delete this task? It will be moved to the recycle bin.")) return;
+    try {
+      await api.delete(`/tasks/${taskId}/`);
+      toast.success("Task deleted");
+      dispatch(fetchTasks());
+      setViewTask(null);
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete task")); }
+  };
+
   useEffect(() => {
     dispatch(fetchTasks());
     api.get("/auth/users/").then(r => setUsers(r.data.results || r.data)).catch(() => {});
@@ -159,18 +169,26 @@ export default function TasksPage() {
                 <p className="text-sm text-indigo-800 whitespace-pre-wrap" style={{ wordBreak: "break-word" }}>{viewTask.status_note}</p>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2">
-              {viewTask.status !== "completed" && viewTask.status !== "cancelled" && (
-                <button
-                  onClick={() => { handleComplete(viewTask.id); setViewTask(null); }}
-                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
-                >
-                  Mark Complete
-                </button>
-              )}
-              <button onClick={() => setViewTask(null)} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
-                Close
+            <div className="flex justify-between pt-2">
+              <button
+                onClick={() => handleDelete(viewTask.id)}
+                className="px-4 py-2 text-red-600 bg-red-50 border border-red-200 text-sm font-medium rounded-lg hover:bg-red-100"
+              >
+                Delete
               </button>
+              <div className="flex gap-2">
+                {viewTask.status !== "completed" && viewTask.status !== "cancelled" && (
+                  <button
+                    onClick={() => { handleComplete(viewTask.id); setViewTask(null); }}
+                    className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+                  >
+                    Mark Complete
+                  </button>
+                )}
+                <button onClick={() => setViewTask(null)} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}
