@@ -225,8 +225,15 @@ class EmailService:
     ]
 
     @staticmethod
-    def fetch_emails(email_account, max_count=50):
-        """Fetch new emails from Inbox, Sent, and Spam via IMAP."""
+    def fetch_emails(email_account, max_count=50, days_back=None):
+        """Fetch emails from Inbox, Sent, and Spam via IMAP.
+
+        Args:
+            email_account: EmailAccount instance
+            max_count: max emails per folder
+            days_back: if set, fetch emails from this many days ago
+                       (overrides last_synced for historical pulls)
+        """
         from common.encryption import decrypt_value
         password = decrypt_value(email_account.password)
 
@@ -244,32 +251,33 @@ class EmailService:
             available_folders = set()
             for f in folder_list:
                 decoded = f.decode() if isinstance(f, bytes) else str(f)
-                # Extract folder name from IMAP LIST response
-                # Format: '(\\flags) "delimiter" "folder_name"'
                 parts = decoded.split('"')
                 if len(parts) >= 3:
                     available_folders.add(parts[-2])
-                # Also try the last part after space
                 name = decoded.rsplit(' ', 1)[-1].strip('"')
                 available_folders.add(name)
 
             per_folder_limit = max(max_count // 3, 20)
+            # For historical pulls, increase the per-folder limit
+            if days_back and days_back > 30:
+                per_folder_limit = max(max_count, 500)
 
             for folder_name, default_direction in EmailService.FOLDER_MAP:
-                # Try to select the folder — skip if it doesn't exist
                 status, _ = mail.select(f'"{folder_name}"', readonly=True)
                 if status != 'OK':
                     continue
 
                 logger.info(f'Scanning folder: {folder_name} for {email_account.email}')
 
-                # Search for emails since last sync
-                if email_account.last_synced:
+                # Search for emails — days_back overrides last_synced
+                from datetime import datetime, timedelta
+                if days_back:
+                    since = (datetime.now() - timedelta(days=days_back)).strftime('%d-%b-%Y')
+                    _, message_ids = mail.search(None, f'(SINCE {since})')
+                elif email_account.last_synced:
                     date_str = email_account.last_synced.strftime('%d-%b-%Y')
                     _, message_ids = mail.search(None, f'(SINCE {date_str})')
                 else:
-                    # First sync: only get last 30 days
-                    from datetime import datetime, timedelta
                     since = (datetime.now() - timedelta(days=30)).strftime('%d-%b-%Y')
                     _, message_ids = mail.search(None, f'(SINCE {since})')
 

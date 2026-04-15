@@ -5,8 +5,13 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name='communications.sync_emails')
-def sync_emails(email_account_id=None):
-    """Sync emails from IMAP for one or all active EmailAccounts."""
+def sync_emails(email_account_id=None, days_back=None):
+    """Sync emails from IMAP for one or all active EmailAccounts.
+
+    Args:
+        email_account_id: sync a specific account (or all if None)
+        days_back: if set, fetch historical emails from N days ago
+    """
     from communications.models import EmailAccount, Communication
     from communications.services import EmailService, ContactMatcher
     from django.utils import timezone
@@ -18,7 +23,7 @@ def sync_emails(email_account_id=None):
 
     total_synced = 0
     for account in accounts:
-        emails = EmailService.fetch_emails(account)
+        emails = EmailService.fetch_emails(account, days_back=days_back)
         for em in emails:
             # Dedup by message_id (primary)
             if em['message_id'] and Communication.objects.filter(

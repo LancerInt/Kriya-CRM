@@ -1175,66 +1175,66 @@ def generate_coa_pdf_view(request):
     buf = BytesIO()
     # Use the full available width (A4 = 210mm, margins 20mm each = 170mm usable)
     TW = 160 * mm  # total table width
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=20*mm, bottomMargin=20*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=15*mm, bottomMargin=15*mm)
     el = []
 
     import os
     from django.conf import settings as _s
 
-    # ═══ LOGO (left-aligned) ═══
+    # ═══ LOGO (top-left, bigger — matching original COA) ═══
     logo_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
     if os.path.exists(logo_path):
         try:
-            img = Image(logo_path, width=100, height=50)
+            img = Image(logo_path, width=160, height=80)
             img.hAlign = 'LEFT'
             el.append(img)
         except Exception:
             pass
-    el.append(Spacer(1, 8*mm))
+    el.append(Spacer(1, 10*mm))
 
-    # ═══ TITLE (centered, bold, underlined) ═══
-    title_s = ParagraphStyle('coa_title', fontSize=13, fontName='Helvetica-Bold', alignment=1, spaceAfter=8*mm)
+    # ═══ TITLE — Times New Roman 12pt, centered, bold, underlined ═══
+    title_s = ParagraphStyle('coa_title', fontSize=12, fontName='Times-Bold', alignment=1, spaceAfter=8*mm)
     el.append(Paragraph('<u>CERTIFICATE OF ANALYSIS</u>', title_s))
 
-    # ═══ HELPER STYLES ═══
-    lb = ParagraphStyle('lb', fontSize=9.5, fontName='Helvetica-Bold', leading=12)
-    lv = ParagraphStyle('lv', fontSize=9.5, fontName='Helvetica', leading=12)
-    th_c = ParagraphStyle('th_c', fontSize=9.5, fontName='Helvetica-Bold', alignment=1, leading=12)
+    # ═══ HELPER STYLES — Times New Roman 11pt for all fields ═══
+    lb = ParagraphStyle('lb', fontSize=11, fontName='Times-Bold', leading=14)
+    lv = ParagraphStyle('lv', fontSize=11, fontName='Times-Roman', leading=14)
+    th_c = ParagraphStyle('th_c', fontSize=11, fontName='Times-Bold', alignment=1, leading=14)
     BORDER = 0.5
     BC = colors.Color(0.3, 0.3, 0.3)  # dark gray border
     # Label column and value column widths (matching original proportions ~40/60)
     LW = TW * 0.42
     VW = TW * 0.58
 
-    # ═══ REPORT NO + DATE (single row, right-aligned date) ═══
-    rpt = Table([
-        [Paragraph('<b>REPORT NO:</b>', lb), Paragraph(data.get('report_no', ''), lv),
-         Paragraph('<b>DATE:</b>', lb), Paragraph(data.get('date', ''), lv)],
-    ], colWidths=[LW * 0.45, VW * 0.55, LW * 0.30, VW * 0.25])
-    rpt.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), BORDER, BC),
-        ('INNERGRID', (0,0), (-1,-1), BORDER, BC),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-    ]))
-    el.append(rpt)
-
-    # ═══ PRODUCT DETAILS TABLE (no gap — shares border with report row) ═══
-    detail_rows = [
-        ('Product Name', data.get('product_name', '')),
-        ('Sample Description', data.get('sample_description', '')),
-        ('Manufacturing Date', data.get('manufacturing_date', '')),
-        ('Expiration Date', data.get('expiration_date', '')),
-        ('Date of Receipt of Sample', data.get('receipt_date', '')),
-        ('Date of Start of Analysis', data.get('start_date', '')),
-        ('Date of Completion of Analysis', data.get('completion_date', '')),
+    # ═══ UNIFIED TABLE: Report No/Date + Product Details — all same width ═══
+    report_no = data.get('report_no', '')
+    date_val = data.get('date', '')
+    # First row: REPORT NO on left, DATE on right — inside the same 2 columns
+    all_rows = [
+        [Paragraph(f'<b>REPORT NO:</b> {report_no}', lb),
+         Paragraph(f'<b>DATE:</b> {date_val}', ParagraphStyle('rv', fontSize=11, fontName='Times-Bold', leading=14, alignment=2))],
     ]
-    dt = Table(
-        [[Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)] for label, val in detail_rows],
-        colWidths=[LW, VW],
-    )
+    # Product detail rows — accept dynamic array from frontend, fallback to static
+    detail_rows_data = data.get('detail_rows', None)
+    if detail_rows_data and isinstance(detail_rows_data, list):
+        for row in detail_rows_data:
+            label = row.get('label', '') if isinstance(row, dict) else ''
+            val = row.get('value', '') if isinstance(row, dict) else ''
+            if label or val:
+                all_rows.append([Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)])
+    else:
+        for label, val in [
+            ('Product Name', data.get('product_name', '')),
+            ('Sample Description', data.get('sample_description', '')),
+            ('Manufacturing Date', data.get('manufacturing_date', '')),
+            ('Expiration Date', data.get('expiration_date', '')),
+            ('Date of Receipt of Sample', data.get('receipt_date', '')),
+            ('Date of Start of Analysis', data.get('start_date', '')),
+            ('Date of Completion of Analysis', data.get('completion_date', '')),
+        ]:
+            all_rows.append([Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)])
+
+    dt = Table(all_rows, colWidths=[LW, VW])
     dt.setStyle(TableStyle([
         ('BOX', (0,0), (-1,-1), BORDER, BC),
         ('INNERGRID', (0,0), (-1,-1), BORDER, BC),
@@ -1245,15 +1245,19 @@ def generate_coa_pdf_view(request):
     ]))
     el.append(dt)
 
-    # ═══ TEST RESULT — single unified table with header row spanning 2 cols ═══
-    test_rows = [
-        ('Appearance', data.get('appearance', '')),
-        ('Odour', data.get('odour', '')),
-        ('pH', data.get('ph', '')),
-        ('Specific Gravity', data.get('specific_gravity', '')),
-        ('Solubility', data.get('solubility', '')),
-        (data.get('active_label', 'Active Content'), data.get('active_content', '')),
-    ]
+    # ═══ TEST RESULT — dynamic rows from frontend, fallback to static ═══
+    test_rows_data = data.get('test_rows', None)
+    if test_rows_data and isinstance(test_rows_data, list):
+        test_rows = [(r.get('label', ''), r.get('value', '')) for r in test_rows_data if isinstance(r, dict) and (r.get('label') or r.get('value'))]
+    else:
+        test_rows = [
+            ('Appearance', data.get('appearance', '')),
+            ('Odour', data.get('odour', '')),
+            ('pH', data.get('ph', '')),
+            ('Specific Gravity', data.get('specific_gravity', '')),
+            ('Solubility', data.get('solubility', '')),
+            (data.get('active_label', 'Active Content'), data.get('active_content', '')),
+        ]
     test_data = [
         [Paragraph('<b>TEST RESULT</b>', th_c), ''],
         [Paragraph('<b>TESTING PARAMETERS</b>', th_c), Paragraph('<b>RESULTS</b>', th_c)],
@@ -1273,7 +1277,7 @@ def generate_coa_pdf_view(request):
     el.append(Spacer(1, 12*mm))
 
     # ═══ SIGNATURE SECTION ═══
-    sig_s = ParagraphStyle('sig', fontSize=10, fontName='Helvetica', leading=13)
+    sig_s = ParagraphStyle('sig', fontSize=11, fontName='Times-Roman', leading=14)
     el.append(Paragraph('Checked by', sig_s))
     el.append(Spacer(1, 12*mm))
 
