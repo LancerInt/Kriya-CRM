@@ -787,7 +787,7 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
             'final_destination', 'pre_carriage_by', 'place_of_receipt',
             'terms_of_delivery', 'payment_terms',
-            'currency', 'exchange_rate', 'freight', 'insurance',
+            'currency', 'exchange_rate', 'batch_no', 'freight', 'insurance',
             'total_fob_usd', 'total_fob_inr', 'freight_inr', 'insurance_inr',
             'total_invoice_usd', 'total_invoice_inr',
             'igst_rate', 'igst_amount', 'grand_total_inr',

@@ -183,6 +183,10 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
                   <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Exchange Rate per USD</span></td>
                   <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={ciForm.exchange_rate || ""} onChange={(e) => setCiForm({ ...ciForm, exchange_rate: e.target.value })} placeholder="₹0.00" className={ic} /></td>
                 </tr>
+                <tr>
+                  <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Batch No.</span></td>
+                  <td className="border border-gray-400 p-0"><input value={ciForm.batch_no || ""} onChange={(e) => setCiForm({ ...ciForm, batch_no: e.target.value })} placeholder="e.g. B-2026-001" className={ic} /></td>
+                </tr>
               </tbody>
             </table>
           </div>

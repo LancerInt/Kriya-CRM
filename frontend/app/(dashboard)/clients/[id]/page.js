@@ -23,6 +23,7 @@ import EmailChips from "@/components/ui/EmailChips";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import DocLibraryPickerShared from "@/components/ui/DocLibraryPicker";
 import COAEditorModal from "@/components/finance/COAEditorModal";
+import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -521,6 +522,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [showDraftModal, setShowDraftModal] = useState(false);
   const [showDocPicker, setShowDocPicker] = useState(false);
   const [showCOAEditor, setShowCOAEditor] = useState(false);
+  const [showMSDSEditor, setShowMSDSEditor] = useState(false);
   const [draft, setDraft] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
@@ -1497,6 +1499,15 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                           📝 Create COA
                         </button>
                       )}
+                      {detectedDocs.some(d => d.key === "msds") && (
+                        <button
+                          onClick={() => setShowMSDSEditor(true)}
+                          title="Create a new Material Safety Data Sheet"
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                        >
+                          📝 Create MSDS
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1545,6 +1556,23 @@ function CommunicationsTab({ clientId, activeTab, client }) {
             const r = await api.get(`/communications/drafts/${draft.id}/`);
             setSavedAttachments(r.data.attachments || []);
           } catch { toast.error("Failed to generate COA"); }
+        }}
+      />
+
+      {/* MSDS Editor — create and attach Material Safety Data Sheet */}
+      <MSDSEditorModal
+        open={showMSDSEditor}
+        onClose={() => setShowMSDSEditor(false)}
+        productName=""
+        onGenerate={async (formData) => {
+          if (!draft?.id) { toast.error("No draft to attach to"); return; }
+          try {
+            await api.post("/communications/generate-msds-pdf/", { ...formData, draft_id: draft.id });
+            toast.success("MSDS generated and attached");
+            setShowMSDSEditor(false);
+            const r = await api.get(`/communications/drafts/${draft.id}/`);
+            setSavedAttachments(r.data.attachments || []);
+          } catch { toast.error("Failed to generate MSDS"); }
         }}
       />
 

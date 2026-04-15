@@ -281,6 +281,7 @@ class CommercialInvoice(TimeStampedModel):
 
     # INR equivalents
     exchange_rate = models.DecimalField(max_digits=10, decimal_places=4, default=0, help_text='USD to INR rate')
+    batch_no = models.CharField(max_length=100, blank=True, help_text='Batch/Lot number for the shipment')
     total_fob_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     freight_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     insurance_inr = models.DecimalField(max_digits=15, decimal_places=2, default=0)

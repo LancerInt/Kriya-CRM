@@ -18,5 +18,6 @@ urlpatterns = [
     path('signature-logo.png', views.signature_logo_view, name='signature-logo'),
     path('grammar-check/', views.grammar_check_view, name='grammar-check'),
     path('generate-coa-pdf/', views.generate_coa_pdf_view, name='generate-coa-pdf'),
+    path('generate-msds-pdf/', views.generate_msds_pdf_view, name='generate-msds-pdf'),
     path('', include(router.urls)),
 ]

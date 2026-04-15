@@ -279,7 +279,7 @@ def generate_ci_pdf(ci):
         [Paragraph('<b>Consignee</b>', s8b)],
         [Paragraph(f'To the Order {ci.client_city_state_country or ci.country_of_final_destination or ""}', s7)],
     ]
-    cn = Table(consignee_rows, colWidths=[EW + CW2])
+    cn = Table(consignee_rows, colWidths=[PW])
     cn.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d5d5d5')),
         ('LINEBELOW', (0,0), (0,0), 0.3, GR),
@@ -287,7 +287,9 @@ def generate_ci_pdf(ci):
         ('TOPPADDING', (0,0), (-1,-1), 1),
         ('BOTTOMPADDING', (0,0), (-1,-1), 1),
         ('LEFTPADDING', (0,0), (-1,-1), 3),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
     ]))
+    cn.hAlign = 'LEFT'
     el.append(cn)
     el.append(Spacer(1, 2*mm))
 
@@ -344,8 +346,10 @@ def generate_ci_pdf(ci):
          Paragraph('<b>A/C Type</b>', lb), Paragraph(bkv("A/C Type"), vl)],
         [Paragraph('<b>Exchange Rate per USD</b>', lb), Paragraph(f': Rs.{ci.exchange_rate}' if ci.exchange_rate else '', vl),
          '', ''],
+        [Paragraph('<b>Batch No.</b>', lb), Paragraph(sv(ci.batch_no) if hasattr(ci, 'batch_no') else '', vl),
+         '', ''],
     ]
-    st = Table(grid, colWidths=sc, rowHeights=[_rh]*9)
+    st = Table(grid, colWidths=sc, rowHeights=[_rh]*10)
     st.setStyle(TableStyle([
         ('FONTSIZE', (0,0), (-1,-1), 7),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -355,7 +359,7 @@ def generate_ci_pdf(ci):
         ('SPAN', (2,0), (3,0)),  # "Bank Details" header spans 2 cols
     ]))
 
-    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 9*_rh, G, 9, _mt)
+    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 10*_rh, G, 9, _mt)
     combo = Table([[sidebar, st]], colWidths=[10*mm, _sw])
     combo.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),

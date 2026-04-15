@@ -1173,46 +1173,55 @@ def generate_coa_pdf_view(request):
     draft_id = data.get('draft_id')
 
     buf = BytesIO()
+    # Use the full available width (A4 = 210mm, margins 20mm each = 170mm usable)
+    TW = 160 * mm  # total table width
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=20*mm, bottomMargin=20*mm)
-    styles = getSampleStyleSheet()
     el = []
 
-    # Logo
     import os
-    from django.conf import settings
-    logo_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
+    from django.conf import settings as _s
+
+    # ═══ LOGO (left-aligned) ═══
+    logo_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
     if os.path.exists(logo_path):
         try:
-            el.append(Image(logo_path, width=100, height=45))
+            img = Image(logo_path, width=100, height=50)
+            img.hAlign = 'LEFT'
+            el.append(img)
         except Exception:
             pass
-    el.append(Spacer(1, 5*mm))
+    el.append(Spacer(1, 8*mm))
 
-    # Title
-    title_style = ParagraphStyle('coa_title', fontSize=14, fontName='Helvetica-Bold', alignment=1, spaceAfter=10)
-    el.append(Paragraph('<u>CERTIFICATE OF ANALYSIS</u>', title_style))
-    el.append(Spacer(1, 5*mm))
+    # ═══ TITLE (centered, bold, underlined) ═══
+    title_s = ParagraphStyle('coa_title', fontSize=13, fontName='Helvetica-Bold', alignment=1, spaceAfter=8*mm)
+    el.append(Paragraph('<u>CERTIFICATE OF ANALYSIS</u>', title_s))
 
-    # Helper styles
-    lb = ParagraphStyle('lb', fontSize=10, fontName='Helvetica-Bold', leading=13)
-    lv = ParagraphStyle('lv', fontSize=10, fontName='Helvetica', leading=13)
+    # ═══ HELPER STYLES ═══
+    lb = ParagraphStyle('lb', fontSize=9.5, fontName='Helvetica-Bold', leading=12)
+    lv = ParagraphStyle('lv', fontSize=9.5, fontName='Helvetica', leading=12)
+    th_c = ParagraphStyle('th_c', fontSize=9.5, fontName='Helvetica-Bold', alignment=1, leading=12)
+    BORDER = 0.5
+    BC = colors.Color(0.3, 0.3, 0.3)  # dark gray border
+    # Label column and value column widths (matching original proportions ~40/60)
+    LW = TW * 0.42
+    VW = TW * 0.58
 
-    # Report No + Date
-    report_table = Table([
+    # ═══ REPORT NO + DATE (single row, right-aligned date) ═══
+    rpt = Table([
         [Paragraph('<b>REPORT NO:</b>', lb), Paragraph(data.get('report_no', ''), lv),
          Paragraph('<b>DATE:</b>', lb), Paragraph(data.get('date', ''), lv)],
-    ], colWidths=[80, 140, 50, 100])
-    report_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
+    ], colWidths=[LW * 0.45, VW * 0.55, LW * 0.30, VW * 0.25])
+    rpt.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), BORDER, BC),
+        ('INNERGRID', (0,0), (-1,-1), BORDER, BC),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
     ]))
-    el.append(report_table)
-    el.append(Spacer(1, 3*mm))
+    el.append(rpt)
 
-    # Product details
+    # ═══ PRODUCT DETAILS TABLE (no gap — shares border with report row) ═══
     detail_rows = [
         ('Product Name', data.get('product_name', '')),
         ('Sample Description', data.get('sample_description', '')),
@@ -1222,22 +1231,21 @@ def generate_coa_pdf_view(request):
         ('Date of Start of Analysis', data.get('start_date', '')),
         ('Date of Completion of Analysis', data.get('completion_date', '')),
     ]
-    detail_table = Table(
+    dt = Table(
         [[Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)] for label, val in detail_rows],
-        colWidths=[200, 270],
+        colWidths=[LW, VW],
     )
-    detail_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('BACKGROUND', (0,0), (0,-1), colors.Color(0.96, 0.96, 0.96)),
+    dt.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), BORDER, BC),
+        ('INNERGRID', (0,0), (-1,-1), BORDER, BC),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 5),
         ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
     ]))
-    el.append(detail_table)
-    el.append(Spacer(1, 4*mm))
+    el.append(dt)
 
-    # Test results
+    # ═══ TEST RESULT — single unified table with header row spanning 2 cols ═══
     test_rows = [
         ('Appearance', data.get('appearance', '')),
         ('Odour', data.get('odour', '')),
@@ -1246,64 +1254,58 @@ def generate_coa_pdf_view(request):
         ('Solubility', data.get('solubility', '')),
         (data.get('active_label', 'Active Content'), data.get('active_content', '')),
     ]
-    th = ParagraphStyle('th', fontSize=10, fontName='Helvetica-Bold', alignment=1, leading=13)
-    test_table_data = [
-        [Paragraph('<b>TEST RESULT</b>', ParagraphStyle('tr_h', fontSize=11, fontName='Helvetica-Bold', alignment=1))],
-    ]
-    # Merge first row across 2 cols handled via spanning
     test_data = [
-        [Paragraph('<b>TESTING PARAMETERS</b>', th), Paragraph('<b>RESULTS</b>', th)],
+        [Paragraph('<b>TEST RESULT</b>', th_c), ''],
+        [Paragraph('<b>TESTING PARAMETERS</b>', th_c), Paragraph('<b>RESULTS</b>', th_c)],
     ] + [[Paragraph(f'<b>{label}</b>', lb), Paragraph(val, lv)] for label, val in test_rows]
 
-    # Header row
-    header_row = Table([[Paragraph('<b>TEST RESULT</b>', th)]], colWidths=[470])
-    header_row.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
-        ('BACKGROUND', (0,0), (-1,-1), colors.Color(0.96, 0.96, 0.96)),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-    ]))
-    el.append(header_row)
-
-    test_table = Table(test_data, colWidths=[235, 235])
-    test_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('BACKGROUND', (0,0), (0,0), colors.Color(0.93, 0.93, 0.93)),
-        ('BACKGROUND', (1,0), (1,0), colors.Color(0.93, 0.93, 0.93)),
-        ('BACKGROUND', (0,1), (0,-1), colors.Color(0.96, 0.96, 0.96)),
+    tt = Table(test_data, colWidths=[LW, VW])
+    tt.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), BORDER, BC),
+        ('INNERGRID', (0,0), (-1,-1), BORDER, BC),
+        ('SPAN', (0,0), (1,0)),  # "TEST RESULT" spans both columns
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 5),
         ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
     ]))
-    el.append(test_table)
-    el.append(Spacer(1, 10*mm))
+    el.append(tt)
+    el.append(Spacer(1, 12*mm))
 
-    # Signature
-    el.append(Paragraph('Checked by', ParagraphStyle('sig_label', fontSize=10, fontName='Helvetica', leading=13)))
-    el.append(Spacer(1, 15*mm))
+    # ═══ SIGNATURE SECTION ═══
+    sig_s = ParagraphStyle('sig', fontSize=10, fontName='Helvetica', leading=13)
+    el.append(Paragraph('Checked by', sig_s))
+    el.append(Spacer(1, 12*mm))
 
-    # Signature + seal
-    sign_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'sign.png')
-    seal_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'seal.png')
-    sig_elements = []
+    sign_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'sign.png')
+    seal_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'seal.png')
+
+    sig_col = []
     if os.path.exists(sign_path):
         try:
-            sig_elements.append(Image(sign_path, width=60, height=30))
+            sign_img = Image(sign_path, width=70, height=35)
+            sign_img.hAlign = 'LEFT'
+            sig_col.append(sign_img)
         except Exception:
             pass
-    sig_elements.append(Paragraph(f'<b>{data.get("checked_by", "Technical Manager")}</b>', lb))
+    sig_col.append(Paragraph(f'<b>{data.get("checked_by", "Technical Manager")}</b>', lb))
 
-    seal_elements = []
+    seal_col = []
     if os.path.exists(seal_path):
         try:
-            seal_elements.append(Image(seal_path, width=50, height=50))
+            seal_img = Image(seal_path, width=55, height=55)
+            seal_img.hAlign = 'LEFT'
+            seal_col.append(seal_img)
         except Exception:
             pass
 
-    if sig_elements or seal_elements:
-        sig_table = Table([[sig_elements, seal_elements]], colWidths=[300, 170])
-        sig_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM')]))
+    if sig_col or seal_col:
+        sig_table = Table([[sig_col, seal_col]], colWidths=[TW * 0.5, TW * 0.5])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        sig_table.hAlign = 'LEFT'
         el.append(sig_table)
 
     doc.build(el)
@@ -1327,6 +1329,284 @@ def generate_coa_pdf_view(request):
     from django.http import HttpResponse
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="COA_{data.get("product_name", "Product")}.pdf"'
+    return response
+
+
+@api_view(['POST'])
+def generate_msds_pdf_view(request):
+    """Generate a Material Safety Data Sheet PDF from form data."""
+    from io import BytesIO
+    from django.core.files.base import ContentFile
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    import os
+    from django.conf import settings as _s
+
+    data = request.data
+    draft_id = data.get('draft_id')
+
+    buf = BytesIO()
+    TW = 160 * mm
+
+    import os
+    from django.conf import settings as _s
+    from reportlab.lib.pagesizes import A4 as _A4
+
+    # ── Page template: draw logo on EVERY page (top-left) ──
+    logo_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
+    _logo_exists = os.path.exists(logo_path)
+
+    def _msds_header_footer(canvas, doc_obj):
+        """Draw the Kriya logo on every page — top-left corner.
+        Logo sits in the header zone above the 1.5cm content spacing.
+        Text content starts 1.5cm below the logo (topMargin=35mm).
+        """
+        canvas.saveState()
+        if _logo_exists:
+            try:
+                canvas.drawImage(logo_path, 20*mm, _A4[1] - 25*mm, width=130, height=65, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+        canvas.restoreState()
+
+    # Top margin = logo height (~20mm) + 1.5cm spacing = 35mm
+    # Bottom margin = 1.5cm = 15mm
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=35*mm, bottomMargin=15*mm)
+    el = []
+
+    # Italic labels (left column), regular values (right column) — NO borders
+    li = ParagraphStyle('msds_li', fontSize=10, fontName='Helvetica-Oblique', leading=13)
+    rv = ParagraphStyle('msds_rv', fontSize=10, fontName='Helvetica', leading=13)
+    lb = ParagraphStyle('msds_lb', fontSize=10, fontName='Helvetica-Bold', leading=13)
+    # Section heading: centered, bold, underlined
+    sec_h = ParagraphStyle('msds_sec', fontSize=11, fontName='Helvetica-Bold', alignment=1, leading=14, spaceAfter=3*mm)
+    title_s = ParagraphStyle('msds_title', fontSize=13, fontName='Helvetica-Bold', alignment=1, leading=16)
+    sub_s = ParagraphStyle('msds_sub', fontSize=12, fontName='Helvetica-Bold', alignment=1, leading=15)
+    sm = ParagraphStyle('msds_sm', fontSize=9, fontName='Helvetica', leading=11, textColor=colors.Color(0.3, 0.3, 0.3))
+    body_s = ParagraphStyle('msds_body', fontSize=10, fontName='Helvetica', leading=13, alignment=4)  # justified
+    disc_s = ParagraphStyle('msds_disc', fontSize=9, fontName='Helvetica', leading=12, alignment=4)
+    LW = TW * 0.40
+    VW = TW * 0.60
+
+    # Logo is drawn on every page via _msds_header_footer — no inline logo needed
+    el.append(Spacer(1, 2*mm))
+
+    el.append(Paragraph('<b>SAFETY DATA SHEET</b>', title_s))
+    el.append(Paragraph(f'<b>{data.get("product_name", "")}</b>', sub_s))
+    el.append(Spacer(1, 3*mm))
+
+    # Company + Contact — no borders, just text
+    addr = Paragraph(
+        '<b>M/s. KRIYA BIOSYS (P) LTD,</b><br/>'
+        'D.no : 233, Aarthi Nagar,<br/>'
+        'Mohan Nagar, Narasothipatti,<br/>'
+        'Salem - 636004, Tamilnadu', sm)
+    contact = Paragraph(
+        'Mail: info@kriya.ltd<br/>'
+        'Tel: +91 6385848466',
+        ParagraphStyle('contact_r', fontSize=9, fontName='Helvetica', leading=11, alignment=2, textColor=colors.Color(0.3, 0.3, 0.3)))
+    addr_t = Table([[addr, contact]], colWidths=[TW * 0.55, TW * 0.45])
+    addr_t.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+    el.append(addr_t)
+    el.append(Spacer(1, 6*mm))
+
+    # ═══ HELPER: borderless 2-column table (italic label, regular value) ═══
+    def borderless_rows(rows):
+        t = Table(
+            [[Paragraph(f'<i>{label}</i>', li), Paragraph((val or '').replace('\n', '<br/>'), rv)]
+             for label, val in rows],
+            colWidths=[LW, VW],
+        )
+        t.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('LEFTPADDING', (0,0), (0,-1), 10),
+            ('LEFTPADDING', (1,0), (1,-1), 6),
+        ]))
+        return t
+
+    def section_heading(num, title):
+        el.append(Spacer(1, 4*mm))
+        el.append(Paragraph(f'<b>{num}.&nbsp;&nbsp;&nbsp;<u>{title.upper()}</u></b>', sec_h))
+
+    def build_section(num, title, rows_data):
+        section_heading(num, title)
+        if rows_data == "comp":
+            # Underlined column headers + borderless rows
+            comp_hdr = Table([
+                [Paragraph('<i><u>Chemical Components</u></i>', li),
+                 Paragraph('<i><u>Percentage Range</u></i>', li)],
+            ], colWidths=[LW, VW])
+            comp_hdr.setStyle(TableStyle([
+                ('LEFTPADDING', (0,0), (0,-1), 10),
+                ('TOPPADDING', (0,0), (-1,-1), 2),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ]))
+            el.append(comp_hdr)
+            el.append(borderless_rows([
+                (data.get('comp_1_name', ''), data.get('comp_1_pct', '')),
+                (data.get('comp_2_name', ''), data.get('comp_2_pct', '')),
+            ]))
+        elif rows_data == "eco":
+            el.append(Spacer(1, 2*mm))
+            eco_text = (data.get('ecological_info', '') or '').replace('\n', '<br/>')
+            p = Paragraph(f'<b>{eco_text}</b>', ParagraphStyle('eco_b', fontSize=10, fontName='Helvetica-Bold', leading=13, leftIndent=10))
+            el.append(p)
+        elif rows_data == "other":
+            el.append(Spacer(1, 2*mm))
+            info = data.get('other_info', '') or ''
+            disclaimer = data.get('disclaimer', '') or ''
+            if info:
+                el.append(Paragraph(f'N/A – Not applicable; <i>{info}</i>', ParagraphStyle('oi', fontSize=10, fontName='Helvetica', leading=13, leftIndent=10)))
+            if disclaimer:
+                el.append(Spacer(1, 3*mm))
+                el.append(Paragraph(disclaimer.replace('\n', '<br/>'), disc_s))
+        elif rows_data == "hazard":
+            # Special: Emergency Overview box + regular rows
+            overview = data.get('emergency_overview', '')
+            if overview:
+                el.append(Spacer(1, 2*mm))
+                # Boxed Emergency Overview
+                box_title = Paragraph('<b><u>EMERGENCY OVERVIEW</u></b>', ParagraphStyle('eo_t', fontSize=10, fontName='Helvetica-Bold', alignment=1, leading=13))
+                box_body = Paragraph(overview.replace('\n', '<br/>'), body_s)
+                box = Table([[box_title], [box_body]], colWidths=[TW - 20])
+                box.setStyle(TableStyle([
+                    ('BOX', (0,0), (-1,-1), 0.5, colors.Color(0.3, 0.3, 0.3)),
+                    ('TOPPADDING', (0,0), (-1,-1), 4),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ('LEFTPADDING', (0,0), (-1,-1), 8),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 8),
+                ]))
+                el.append(box)
+                el.append(Spacer(1, 3*mm))
+            # Rest of hazard rows (skip emergency_overview)
+            hazard_rows = [
+                ("Central Insecticides Board signal word", data.get("signal_word", "")),
+                ("Potential Health Effects", data.get("potential_health_effects", "")),
+                ("Route(s) Of Entry", data.get("routes_of_entry", "")),
+                ("Human Effects And Symptoms Of Overexposure", data.get("human_effects", "")),
+                ("Acute Eye Contact", data.get("acute_eye", "")),
+                ("Chronic Eye Contact", data.get("chronic_eye", "")),
+                ("Acute Skin Contact", data.get("acute_skin", "")),
+                ("Chronic Ingestion", data.get("chronic_ingestion", "")),
+                ("Medical Conditions Aggravated By Exposure", data.get("medical_conditions", "")),
+            ]
+            el.append(borderless_rows(hazard_rows))
+        elif rows_data == "first_aid":
+            # First aid has a preamble paragraph + rows
+            preamble = "If poisoning is suspected, immediately contact a physician or the nearest hospital, tell the person contacted the complete product name and the type and amount of exposure. Describe any symptoms and follow the advice given."
+            el.append(Spacer(1, 2*mm))
+            el.append(Paragraph(preamble, body_s))
+            el.append(Spacer(1, 2*mm))
+            el.append(borderless_rows([
+                ("First Aid For Eyes", data.get("first_aid_eyes", "")),
+                ("First Aid For Skin", data.get("first_aid_skin", "")),
+                ("First Aid For Inhalation", data.get("first_aid_inhalation", "")),
+                ("First Aid For Ingestion", data.get("first_aid_ingestion", "")),
+            ]))
+        else:
+            el.append(borderless_rows(rows_data))
+
+    # All 16 sections — matching the original MSDS format exactly
+    sections = [
+        ("1", "Product Name", [
+            ("Product Name", data.get("product_name", "")),
+            ("Common Name", data.get("common_name", "")),
+        ]),
+        ("2", "Composition / Information of Ingredients", "comp"),
+        ("3", "Hazardous Identification", "hazard"),
+        ("4", "First Aid Measures", "first_aid"),
+        ("5", "Fire Fighting Measures", [
+            ("Extinguishing Media", data.get("extinguishing_media", "")),
+            ("Unusual Fire & Explosion Hazards", data.get("explosion_hazards", "")),
+            ("Special Fire Fighting Procedures", data.get("fire_procedures", "")),
+        ]),
+        ("6", "Accidental Release Measures", [
+            ("Spill Or Leak Procedures", data.get("spill_procedures", "")),
+        ]),
+        ("7", "Handling and Storage", [
+            ("Storage Temperature", data.get("storage_temp", "")),
+            ("Shelf Life", data.get("shelf_life", "")),
+            ("Special Sensitivity", data.get("special_sensitivity", "")),
+            ("Handling & Storage Precautions", data.get("handling_precautions", "")),
+        ]),
+        ("8", "Exposure Controls / Personal Protection", [
+            ("Oral Protection", data.get("oral_protection", "")),
+            ("Eye Protection", data.get("eye_protection", "")),
+            ("Skin Protection", data.get("skin_protection", "")),
+            ("Respiratory / Ventilation", data.get("respiratory", "")),
+        ]),
+        ("9", "Physical and Chemical Properties", [
+            ("Physical Form", data.get("physical_form", "")),
+            ("Colour", data.get("colour", "")),
+            ("Flash Point", data.get("flash_point", "")),
+            ("Corrosion", data.get("corrosion", "")),
+            ("Miscibility", data.get("miscibility", "")),
+        ]),
+        ("10", "Stability and Reactivity", [
+            ("Stability", data.get("stability", "")),
+            ("Hazardous Polymerization", data.get("hazardous_polymerization", "")),
+            ("Incompatibilities", data.get("incompatibilities", "")),
+            ("Decomposition", data.get("decomposition", "")),
+        ]),
+        ("11", "Toxicological Information", [
+            ("Acute Oral Toxicity", data.get("oral_toxicity", "")),
+            ("Acute Inhalation Toxicity", data.get("inhalation_toxicity", "")),
+            ("Acute Dermal Toxicity", data.get("dermal_toxicity", "")),
+            ("Eye Contact", data.get("eye_irritation", "")),
+            ("Skin Irritation", data.get("skin_irritation", "")),
+            ("Skin Sensitization", data.get("skin_sensitization", "")),
+        ]),
+        ("12", "Ecological Information", "eco"),
+        ("13", "Disposal Considerations", [
+            ("Waste Disposal Method", data.get("waste_disposal", "")),
+            ("Pesticidal Disposal", data.get("pesticidal_disposal", "")),
+        ]),
+        ("14", "Transport Information", [
+            ("Shipping Name", data.get("shipping_name", "")),
+            ("Flammability", data.get("flammability", "")),
+            ("ADR/RID/IMDG/IATA/DOT", data.get("transport_class", "")),
+        ]),
+        ("15", "Regulatory Information", [
+            ("OSHA Status", data.get("osha", "")),
+            ("TSCA Status", data.get("tsca", "")),
+            ("CERCLA Reportable Qty", data.get("cercla", "")),
+            ("RCRA Status", data.get("rcra", "")),
+        ]),
+        ("16", "Other Information", "other"),
+    ]
+
+    from reportlab.platypus import PageBreak as _PB
+    for num, title, rows_data in sections:
+        # Section 16 (Other Information) + disclaimer always on a new page
+        if rows_data == "other":
+            el.append(_PB())
+        build_section(num, title, rows_data)
+        el.append(Spacer(1, 1*mm))
+
+    doc.build(el, onFirstPage=_msds_header_footer, onLaterPages=_msds_header_footer)
+    pdf_bytes = buf.getvalue()
+
+    if draft_id:
+        try:
+            from .models import EmailDraft, DraftAttachment
+            draft = EmailDraft.objects.get(id=draft_id)
+            product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
+            filename = f'MSDS_{product_name}.pdf'
+            DraftAttachment.objects.filter(draft=draft, filename__startswith='MSDS_').delete()
+            att = DraftAttachment(draft=draft, filename=filename, file_size=len(pdf_bytes))
+            att.file.save(filename, ContentFile(pdf_bytes), save=True)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f'MSDS attach failed: {e}')
+
+    from django.http import HttpResponse
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="MSDS_{data.get("product_name", "Product")}.pdf"'
     return response
 
 

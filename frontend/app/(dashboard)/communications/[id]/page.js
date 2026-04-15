@@ -14,6 +14,8 @@ import RichTextEditor from "@/components/ui/RichTextEditor";
 import EmailChips from "@/components/ui/EmailChips";
 import PdfViewer from "@/components/ui/PdfViewer";
 import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
+import COAEditorModal from "@/components/finance/COAEditorModal";
+import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -102,6 +104,8 @@ export default function CommunicationDetailPage() {
   const [attachMode, setAttachMode] = useState(null); // 'quote' | 'pi' | null
   const [pdfView, setPdfView] = useState(null);
   const [showDocLibPicker, setShowDocLibPicker] = useState(false);
+  const [showCOAEditor, setShowCOAEditor] = useState(false);
+  const [showMSDSEditor, setShowMSDSEditor] = useState(false);
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -709,13 +713,23 @@ export default function CommunicationDetailPage() {
                 const det = DOC_PAT.filter(d => d.pattern.test(docText));
                 if (det.length === 0) return null;
                 return (
-                  <div className="px-5 py-2">
+                  <div className="px-5 py-2 flex flex-wrap gap-2">
                     <button
                       onClick={() => setShowDocLibPicker(true)}
                       className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
                     >
                       📋 Attach {det.map(d => d.label).join("/")} from Library
                     </button>
+                    {det.some(d => d.key === "coa") && (
+                      <button onClick={() => setShowCOAEditor(true)} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100">
+                        📝 Create COA
+                      </button>
+                    )}
+                    {det.some(d => d.key === "msds") && (
+                      <button onClick={() => setShowMSDSEditor(true)} className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 text-blue-700 bg-blue-50 hover:bg-blue-100">
+                        📝 Create MSDS
+                      </button>
+                    )}
                   </div>
                 );
               })()}
@@ -1038,6 +1052,36 @@ export default function CommunicationDetailPage() {
           onAttached={() => setShowDocLibPicker(false)}
         />
       )}
+      <COAEditorModal
+        open={showCOAEditor}
+        onClose={() => setShowCOAEditor(false)}
+        productName=""
+        onGenerate={async (formData) => {
+          try {
+            const res = await api.post("/communications/generate-coa-pdf/", formData, { responseType: "blob" });
+            const filename = `COA_${(formData.product_name || "Product").replace(/\s/g, "_")}.pdf`;
+            const file = new File([res.data], filename, { type: "application/pdf" });
+            setAttachments(prev => [...prev, file]);
+            toast.success(`${filename} created and added to attachments`);
+            setShowCOAEditor(false);
+          } catch { toast.error("Failed to generate COA"); }
+        }}
+      />
+      <MSDSEditorModal
+        open={showMSDSEditor}
+        onClose={() => setShowMSDSEditor(false)}
+        productName=""
+        onGenerate={async (formData) => {
+          try {
+            const res = await api.post("/communications/generate-msds-pdf/", formData, { responseType: "blob" });
+            const filename = `MSDS_${(formData.product_name || "Product").replace(/\s/g, "_")}.pdf`;
+            const file = new File([res.data], filename, { type: "application/pdf" });
+            setAttachments(prev => [...prev, file]);
+            toast.success(`${filename} created and added to attachments`);
+            setShowMSDSEditor(false);
+          } catch { toast.error("Failed to generate MSDS"); }
+        }}
+      />
     </div>
   );
 }
