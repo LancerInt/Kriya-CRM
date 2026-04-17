@@ -524,6 +524,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [showCOAEditor, setShowCOAEditor] = useState(false);
   const [showMSDSEditor, setShowMSDSEditor] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [editorData, setEditorData] = useState({});
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
   const [draftForm, setDraftForm] = useState({ subject: "", body: "", cc: "" });
@@ -647,6 +648,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setDraftForm({ subject: res.data.subject, body: textToHtml(res.data.body), cc: merged.join(", ") });
       setDraftAttachments([]);
       setSavedAttachments(res.data.attachments || []);
+      setEditorData(res.data.editor_data || {});
       setLastSavedAt(res.data.last_saved_at);
       setShowDraftModal(true);
       // Check whether a Sample already exists for this email so the
@@ -830,6 +832,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       fd.append("subject", draftForm.subject);
       fd.append("body", draftForm.body);
       fd.append("cc", draftForm.cc);
+      fd.append("editor_data", JSON.stringify(editorData));
       draftAttachments.forEach(f => fd.append("attachments", f));
       const res = await api.post(`/communications/drafts/${draft.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       setDraft(res.data);
@@ -1547,10 +1550,21 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         onClose={() => setShowCOAEditor(false)}
         productName=""
         clientName={client?.company_name || ""}
+        initialData={editorData.coa || null}
+        onStateChange={(state) => setEditorData(prev => ({ ...prev, coa: state }))}
         onGenerate={async (formData) => {
           if (!draft?.id) { toast.error("No draft to attach to"); return; }
           try {
-            await api.post("/communications/generate-coa-pdf/", { ...formData, draft_id: draft.id });
+            const isFormData = formData instanceof FormData;
+            if (isFormData) {
+              // Inject draft_id into the JSON payload inside FormData
+              const existing = JSON.parse(formData.get("payload"));
+              existing.draft_id = draft.id;
+              formData.set("payload", JSON.stringify(existing));
+              await api.post("/communications/generate-coa-pdf/", formData, { headers: { "Content-Type": "multipart/form-data" } });
+            } else {
+              await api.post("/communications/generate-coa-pdf/", { ...formData, draft_id: draft.id });
+            }
             toast.success("COA generated and attached");
             setShowCOAEditor(false);
             const r = await api.get(`/communications/drafts/${draft.id}/`);
@@ -1564,6 +1578,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         open={showMSDSEditor}
         onClose={() => setShowMSDSEditor(false)}
         productName=""
+        initialData={editorData.msds || null}
+        onStateChange={(state) => setEditorData(prev => ({ ...prev, msds: state }))}
         onGenerate={async (formData) => {
           if (!draft?.id) { toast.error("No draft to attach to"); return; }
           try {

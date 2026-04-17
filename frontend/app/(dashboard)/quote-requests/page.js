@@ -50,6 +50,7 @@ export default function QuoteRequestsPage() {
   const [selectedQR, setSelectedQR] = useState(null);
   const [showReview, setShowReview] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [expandedHistory, setExpandedHistory] = useState(null); // qr.id of expanded version history
 
   // Quotation editor state
   const [showQtModal, setShowQtModal] = useState(false);
@@ -242,13 +243,8 @@ export default function QuoteRequestsPage() {
   //     viewer. Once a version has been mailed out it must NOT be re-edited
   //     or re-sent — locked as a historical record.
   const openVersionInDraft = (qr, version) => {
-    const isSentVersion = version && (
-      version.status === "sent" || version.status === "approved" || version.status === "accepted"
-    );
-    if (isSentVersion) {
-      _viewQuotationPdf(version.id);
-      return;
-    }
+    // Always open in the Quotation Editor — for sent versions the editor
+    // loads read-only data so the user can see the original quotation details.
     _openQuotationEditor(version.id);
   };
 
@@ -326,14 +322,11 @@ export default function QuoteRequestsPage() {
                   <div className="flex-1 cursor-pointer" onClick={() => handleReview(qr)}>
                   <div className="flex items-center gap-2 mb-1">
                     <ChannelBadge channel={qr.source_channel} />
-                    <ConfidenceBadge value={qr.ai_confidence} />
-                    <StatusBadge status={qr.status} />
                     {qr.client_auto_created && <span className="text-xs text-orange-600 font-medium">New Client</span>}
                   </div>
-                  <h3 className="font-semibold text-sm">{qr.extracted_product || "Product not detected"}</h3>
+                  <h3 className="font-semibold text-sm">{qr.client_name || qr.sender_name || qr.sender_email || qr.sender_phone || "Unknown"}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {qr.sender_name || qr.sender_email || qr.sender_phone || "Unknown sender"}
-                    {qr.client_name ? ` · ${qr.client_name}` : ""}
+                    {qr.extracted_product || "Product not detected"}
                     {qr.extracted_quantity ? ` · ${qr.extracted_quantity} ${qr.extracted_unit}` : ""}
                     {qr.extracted_destination_country ? ` · ${qr.extracted_destination_country}` : ""}
                   </p>
@@ -345,71 +338,149 @@ export default function QuoteRequestsPage() {
                   {qr.assigned_to_name && <p className="text-gray-500 mt-0.5">{qr.assigned_to_name}</p>}
                 </div>
               </div>
-              {/* Version history chips — every Quotation revision and every PI
-                  spawned from this email, with creator + sender attribution so
-                  the full negotiation audit trail is visible at a glance. */}
-              {((qr.linked_quotation_versions?.length || 0) > 0 || (qr.linked_pi_versions?.length || 0) > 0) && (
-                <div className="mt-2 flex flex-wrap items-stretch gap-1.5">
-                  {qr.linked_quotation_versions?.map((v) => {
-                    const sent = v.status === "sent" || v.status === "approved" || v.status === "accepted";
-                    const cls = sent
-                      ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-                      : v.status === "rejected"
-                      ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
-                    return (
-                      <button
-                        key={`q-${v.id}`}
-                        onClick={(e) => { e.stopPropagation(); openVersionInDraft(qr, v); }}
-                        title={sent ? `${v.quotation_number} · sent — view PDF` : `${v.quotation_number} · draft — open AI Draft`}
-                        className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
-                      >
-                        <div className="font-semibold">Quote V{v.version} · {v.quotation_number}</div>
-                        {(v.created_by_name || v.sent_by_name) && (
-                          <div className="font-normal opacity-80 leading-tight mt-0.5">
-                            {v.created_by_name && <>Edited: {v.created_by_name}</>}
-                            {v.created_by_name && v.sent_by_name && " · "}
-                            {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                  {qr.linked_pi_versions?.map((v) => {
-                    const cls = v.status === "sent"
-                      ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
-                    const piSent = v.status === "sent";
-                    return (
-                      <button
-                        key={`pi-${v.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (piSent) {
-                            _viewPiPdf(v.id);
-                          } else {
-                            // Drafts open in the PI editor on the Proforma
-                            // Invoices page (this page doesn't host the PI
-                            // editor itself).
-                            router.push(`/proforma-invoices?open=${v.id}`);
+              {/* Latest version chip + Version History toggle */}
+              {(() => {
+                const allQ = qr.linked_quotation_versions || [];
+                const allPI = qr.linked_pi_versions || [];
+                if (allQ.length === 0 && allPI.length === 0) return null;
+
+                // Find the latest quotation and PI (prefer sent, then latest by date)
+                const latestQ = [...allQ].reverse().find(v => v.status === "sent" || v.status === "approved" || v.status === "accepted") || allQ[allQ.length - 1];
+                const latestPI = [...allPI].reverse().find(v => v.status === "sent") || (allPI.length > 0 ? allPI[allPI.length - 1] : null);
+                const totalVersions = allQ.length + allPI.length;
+
+                const renderChip = (v, type) => {
+                  const isQuote = type === "quote";
+                  const sent = isQuote ? (v.status === "sent" || v.status === "approved" || v.status === "accepted") : v.status === "sent";
+                  const cls = sent
+                    ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                    : v.status === "rejected"
+                    ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+                  const label = isQuote ? `Quote V${v.version} · ${v.quotation_number}` : `PI V${v.version} · ${v.invoice_number}`;
+                  return (
+                    <button
+                      key={`${type}-${v.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isQuote) { openVersionInDraft(qr, v); }
+                        else if (sent) { _viewPiPdf(v.id); }
+                        else { router.push(`/proforma-invoices?open=${v.id}`); }
+                      }}
+                      title={sent ? `${isQuote ? v.quotation_number : v.invoice_number} · sent — view PDF` : `${isQuote ? v.quotation_number : v.invoice_number} · draft`}
+                      className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
+                    >
+                      <div className="font-semibold">{label} {sent ? "· Sent" : "· Draft"}</div>
+                      <div className="font-normal opacity-80 leading-tight mt-0.5">
+                        {v.created_by_name && <>Edited: {v.created_by_name}</>}
+                        {v.created_at && <span className="ml-1 opacity-70">{format(new Date(v.created_at), "dd/MM HH:mm")}</span>}
+                        {(isQuote ? v.sent_at : null) && <> · Sent: <span className="opacity-70">{format(new Date(v.sent_at), "dd/MM HH:mm")}</span></>}
+                      </div>
+                    </button>
+                  );
+                };
+
+                return (
+                  <>
+                    <div className="mt-2 flex items-center gap-2">
+                      {latestQ && renderChip(latestQ, "quote")}
+                      {latestPI && renderChip(latestPI, "pi")}
+                      {totalVersions > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setExpandedHistory(prev => prev === qr.id ? null : qr.id); }}
+                          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-0.5"
+                        >
+                          {expandedHistory === qr.id ? "▾ Hide History" : `▸ Version History (${totalVersions})`}
+                        </button>
+                      )}
+                    </div>
+                    {expandedHistory === qr.id && (
+                      <div className="mt-2 ml-7 p-2 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                        <p className="text-[10px] font-semibold text-gray-500 mb-1">Version History</p>
+                        {allQ.map((v, idx) => {
+                          const sent = v.status === "sent" || v.status === "approved" || v.status === "accepted";
+                          const prev = idx > 0 ? allQ[idx - 1] : null;
+                          // Compute changes from previous version
+                          const changes = [];
+                          if (prev && v.items && prev.items) {
+                            const vi = v.items || []; const pi = prev.items || [];
+                            vi.forEach((item, i) => {
+                              const old = pi[i];
+                              if (!old) { changes.push(`Added ${item.product_name || "item"}`); return; }
+                              if (item.product_name !== old.product_name && item.product_name) changes.push(`Product: ${old.product_name || "—"} → ${item.product_name}`);
+                              if (Number(item.unit_price) !== Number(old.unit_price)) changes.push(`Price: ${old.unit_price || 0} → ${item.unit_price}`);
+                              if (Number(item.quantity) !== Number(old.quantity)) changes.push(`Qty: ${old.quantity || 0} → ${item.quantity} ${item.unit || ""}`);
+                            });
+                            if (vi.length < pi.length) changes.push(`Removed ${pi.length - vi.length} item(s)`);
+                            if (v.currency !== prev.currency) changes.push(`Currency: ${prev.currency} → ${v.currency}`);
+                            if (v.delivery_terms !== prev.delivery_terms) changes.push(`Terms: ${prev.delivery_terms} → ${v.delivery_terms}`);
                           }
-                        }}
-                        title={piSent ? `${v.invoice_number} · sent — view PDF` : `${v.invoice_number} · draft — open editor`}
-                        className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
-                      >
-                        <div className="font-semibold">PI V{v.version} · {v.invoice_number}</div>
-                        {(v.created_by_name || v.sent_by_name) && (
-                          <div className="font-normal opacity-80 leading-tight mt-0.5">
-                            {v.created_by_name && <>Edited: {v.created_by_name}</>}
-                            {v.created_by_name && v.sent_by_name && " · "}
-                            {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                          return (
+                            <div key={`qh-${v.id}`} className="text-[10px] py-1.5 border-b border-gray-100 last:border-0">
+                              <div className="flex items-center justify-between">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openVersionInDraft(qr, v); }}
+                                  className={`font-semibold hover:underline ${sent ? "text-green-700" : v.status === "rejected" ? "text-red-700" : "text-amber-700"}`}
+                                >
+                                  Quote V{v.version} · {v.quotation_number}
+                                </button>
+                                <div className="text-gray-500 flex items-center gap-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${sent ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                                    {sent ? "Sent" : "Draft"}
+                                  </span>
+                                  {v.created_by_name && <span>by {v.created_by_name}</span>}
+                                  {v.created_at && <span>{format(new Date(v.created_at), "dd/MM/yy HH:mm")}</span>}
+                                  {v.sent_at && <span className="text-green-600">Sent {format(new Date(v.sent_at), "dd/MM/yy HH:mm")}</span>}
+                                </div>
+                              </div>
+                              {/* Items summary */}
+                              {v.items && v.items.length > 0 && (
+                                <div className="mt-1 ml-2 text-gray-500">
+                                  {v.items.map((item, i) => (
+                                    <span key={i} className="inline-block mr-2">
+                                      {item.product_name}{item.quantity ? ` · ${item.quantity} ${item.unit || ""}` : ""}{item.unit_price ? ` · ${v.currency || "$"}${Number(item.unit_price).toLocaleString()}` : ""}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {/* Changes from previous version */}
+                              {changes.length > 0 && (
+                                <div className="mt-1 ml-2 flex flex-wrap gap-1">
+                                  {changes.map((c, i) => (
+                                    <span key={i} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px]">{c}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {allPI.map((v) => {
+                          const sent = v.status === "sent";
+                          return (
+                            <div key={`pih-${v.id}`} className="text-[10px] py-1.5 border-b border-gray-100 last:border-0">
+                              <div className="flex items-center justify-between">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); sent ? _viewPiPdf(v.id) : router.push(`/proforma-invoices?open=${v.id}`); }}
+                                  className={`font-semibold hover:underline ${sent ? "text-green-700" : "text-amber-700"}`}
+                                >
+                                  PI V{v.version} · {v.invoice_number}
+                                </button>
+                                <div className="text-gray-500 flex items-center gap-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${sent ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                                    {sent ? "Sent" : "Draft"}
+                                  </span>
+                                  {v.created_by_name && <span>by {v.created_by_name}</span>}
+                                  {v.created_at && <span>{format(new Date(v.created_at), "dd/MM/yy HH:mm")}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-end">
                 {qr.linked_quotation_status === "sent" ? (

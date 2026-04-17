@@ -133,6 +133,19 @@ def process_communication_for_pi(communication):
             logger.debug(f'PI keyword only in quoted thread for comm {communication.id}, skipping')
             return None
 
+    # Check if a PI already exists in the same email thread (avoid duplicates)
+    if communication.comm_type == 'email':
+        from .auto_quote_service import _find_thread_communication_ids
+        thread_comm_ids = _find_thread_communication_ids(communication)
+        thread_comm_ids.append(communication.id)
+        existing_thread_pi = ProformaInvoice.objects.filter(
+            source_communication_id__in=thread_comm_ids,
+            is_deleted=False,
+        ).first()
+        if existing_thread_pi:
+            logger.info(f'Skipping PI for comm {communication.id} — PI {existing_thread_pi.invoice_number} already exists in same thread')
+            return existing_thread_pi
+
     # Check if this exact communication already produced a PI (avoid re-processing)
     existing = ProformaInvoice.objects.filter(
         client=communication.client,

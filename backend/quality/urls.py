@@ -4,4 +4,8 @@ from . import views
 router = DefaultRouter()
 router.register('inspections', views.InspectionViewSet, basename='inspection')
 router.register('coa', views.COADocumentViewSet, basename='coa')
-urlpatterns = [path('', include(router.urls))]
+urlpatterns = [
+    path('coa-next-report-number/', views.coa_next_report_number, name='coa-next-report-number'),
+    path('coa-consume-report-number/', views.coa_consume_report_number, name='coa-consume-report-number'),
+    path('', include(router.urls)),
+]

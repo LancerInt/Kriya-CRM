@@ -147,7 +147,7 @@ class EmailDraftSerializer(serializers.ModelSerializer):
                   'original_direction', 'subject', 'body', 'to_email', 'cc', 'status',
                   'generated_by_ai', 'created_by', 'edited_by',
                   'sent_at', 'last_saved_at', 'draft_version',
-                  'created_at', 'updated_at', 'attachments']
+                  'created_at', 'updated_at', 'attachments', 'editor_data']
         # `client` and `communication` must be writable on create so the
         # frontend can build a draft for any thread (replies, follow-ups,
         # standalone composes). They were marked read-only by mistake which
@@ -251,21 +251,24 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
         return ''
 
     def get_linked_quotation_versions(self, obj):
+        """Return quotation versions linked to THIS QuoteRequest's communication.
+        Walks the parent-child revision chain starting from the linked quotation
+        so that Revise V2/V3/… appear. Quotations from other email threads
+        for the same client do NOT appear here."""
         if not obj.linked_quotation_id:
             return []
         try:
             from quotations.models import Quotation
+            # Start from the linked quotation, walk up to find the root
             root = obj.linked_quotation
             while root.parent_id:
                 root = root.parent
             chain = self._walk_chain(root)
-            # Always resolve the sender from the outbound email — the
-            # quotation's own status flag doesn't always flip to 'sent' when
-            # the user just emailed the PDF as a reply attachment, so we
-            # attribute based on whoever actually sent the reply mail.
             sent_by = self._resolve_sent_by(obj.source_communication_id)
-            return [
-                {
+            result = []
+            for q in chain:
+                items = list(q.items.all().values('product_name', 'quantity', 'unit', 'unit_price', 'total_price'))
+                result.append({
                     'id': str(q.id),
                     'quotation_number': q.quotation_number,
                     'version': q.version or 1,
@@ -275,21 +278,25 @@ class QuoteRequestSerializer(serializers.ModelSerializer):
                     'sent_by_name': sent_by,
                     'sent_at': q.sent_at.isoformat() if q.sent_at else '',
                     'created_at': q.created_at.isoformat() if q.created_at else '',
-                }
-                for q in chain
-            ]
+                    'items': items,
+                    'currency': q.currency or 'USD',
+                    'delivery_terms': q.delivery_terms or '',
+                })
+            return result
         except Exception:
             return []
 
     def get_linked_pi_versions(self, obj):
+        """Return PI versions scoped to this communication."""
+        if not obj.source_communication_id:
+            return []
         try:
             from finance.models import ProformaInvoice
             qs = ProformaInvoice.objects.filter(
                 source_communication_id=obj.source_communication_id,
                 is_deleted=False,
             ).select_related('created_by').order_by('version', 'created_at')
-            # Also pull any descendants (revisions) of those PIs so the chain
-            # is complete even when create_standalone auto-versioned them.
+            # Also pull any descendants (revisions) of those PIs
             seen = {pi.id: pi for pi in qs}
             stack = list(qs)
             while stack:

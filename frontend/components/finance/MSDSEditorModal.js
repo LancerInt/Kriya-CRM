@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
  * the Kriya Biosys standard MSDS template. All values are editable, labels
  * are static. Generates a professional PDF for email attachment.
  */
-export default function MSDSEditorModal({ open, onClose, onGenerate, productName }) {
+export default function MSDSEditorModal({ open, onClose, onGenerate, productName, initialData, onStateChange }) {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [form, setForm] = useState({
     // Section 1
@@ -84,8 +84,15 @@ export default function MSDSEditorModal({ open, onClose, onGenerate, productName
     disclaimer: "To the best of our knowledge, the information contained herein is accurate. However, neither Kriya Biosys (P) Ltd nor any of its subsidiaries assume any liability whatsoever for the accuracy or completeness of the information contained herein.",
   });
 
+  // Restore saved editor state when modal opens
   useEffect(() => {
-    if (open && productName) {
+    if (open && initialData?.form) {
+      setForm(prev => ({ ...prev, ...initialData.form }));
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (open && productName && !initialData) {
       setForm(prev => ({
         ...prev,
         product_name: prev.product_name || productName,
@@ -93,6 +100,13 @@ export default function MSDSEditorModal({ open, onClose, onGenerate, productName
       }));
     }
   }, [open, productName]);
+
+  // Notify parent of state changes for draft persistence
+  useEffect(() => {
+    if (open && onStateChange) {
+      onStateChange({ form });
+    }
+  }, [form, open]);
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   if (!open) return null;

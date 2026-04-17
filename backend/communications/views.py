@@ -562,6 +562,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                     attached_qnums.discard(old_number)
                     attached_qnums.add(q.quotation_number)
 
+            # Find QuoteRequest by source_communication OR by linked quotation
             qr = QuoteRequest.objects.filter(
                 source_communication=draft.communication,
                 is_deleted=False,
@@ -579,6 +580,18 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                 if qr.status != 'converted':
                     qr.status = 'converted'
                     qr.save(update_fields=['status'])
+            # Also mark any QuoteRequest whose linked quotation was just sent
+            # (handles case where QR source_communication differs from draft.communication)
+            if attached_qnums:
+                sent_q_ids = list(Quotation.objects.filter(
+                    quotation_number__in=attached_qnums, is_deleted=False,
+                ).values_list('id', flat=True))
+                if sent_q_ids:
+                    for other_qr in QuoteRequest.objects.filter(
+                        linked_quotation_id__in=sent_q_ids, is_deleted=False,
+                    ).exclude(status='converted'):
+                        other_qr.status = 'converted'
+                        other_qr.save(update_fields=['status'])
         except Exception as e:
             _log.warning(f'Could not update QuoteRequest status for sent draft {draft.id}: {e}')
 
@@ -720,6 +733,10 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             draft.body = request.data['body']
         if 'cc' in request.data:
             draft.cc = request.data['cc']
+        if 'editor_data' in request.data:
+            import json
+            ed = request.data['editor_data']
+            draft.editor_data = json.loads(ed) if isinstance(ed, str) else ed
 
         draft.edited_by = request.user
         draft.last_saved_at = timezone.now()
@@ -1169,8 +1186,19 @@ def generate_coa_pdf_view(request):
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
 
-    data = request.data
+    import os, json
+    from django.conf import settings as _s
+
+    # Handle both JSON body and multipart/form-data (when custom logo is uploaded)
+    if request.content_type and 'multipart' in request.content_type:
+        data = json.loads(request.data.get('payload', '{}'))
+        logo_file = request.FILES.get('logo_file', None)
+    else:
+        data = request.data
+        logo_file = None
+
     draft_id = data.get('draft_id')
+    hide_logo = data.get('hide_logo', False)
 
     buf = BytesIO()
     # Use the full available width (A4 = 210mm, margins 20mm each = 170mm usable)
@@ -1178,18 +1206,27 @@ def generate_coa_pdf_view(request):
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=15*mm, bottomMargin=15*mm)
     el = []
 
-    import os
-    from django.conf import settings as _s
-
     # ═══ LOGO (top-left, bigger — matching original COA) ═══
-    logo_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
-    if os.path.exists(logo_path):
-        try:
-            img = Image(logo_path, width=160, height=80)
-            img.hAlign = 'LEFT'
-            el.append(img)
-        except Exception:
-            pass
+    if not hide_logo:
+        if logo_file:
+            # Custom uploaded logo
+            try:
+                logo_bytes = BytesIO(logo_file.read())
+                img = Image(logo_bytes, width=160, height=80)
+                img.hAlign = 'LEFT'
+                el.append(img)
+            except Exception:
+                pass
+        else:
+            # Default logo from filesystem
+            logo_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'logo.png')
+            if os.path.exists(logo_path):
+                try:
+                    img = Image(logo_path, width=160, height=80)
+                    img.hAlign = 'LEFT'
+                    el.append(img)
+                except Exception:
+                    pass
     el.append(Spacer(1, 10*mm))
 
     # ═══ TITLE — Times New Roman 12pt, centered, bold, underlined ═══
@@ -1277,6 +1314,11 @@ def generate_coa_pdf_view(request):
     el.append(Spacer(1, 12*mm))
 
     # ═══ SIGNATURE SECTION ═══
+    hide_sign = data.get('hide_sign', False)
+    hide_seal = data.get('hide_seal', False)
+    sign_file = request.FILES.get('sign_file', None) if request.content_type and 'multipart' in request.content_type else None
+    seal_file = request.FILES.get('seal_file', None) if request.content_type and 'multipart' in request.content_type else None
+
     sig_s = ParagraphStyle('sig', fontSize=11, fontName='Times-Roman', leading=14)
     el.append(Paragraph('Checked by', sig_s))
     el.append(Spacer(1, 12*mm))
@@ -1285,23 +1327,41 @@ def generate_coa_pdf_view(request):
     seal_path = os.path.join(_s.BASE_DIR, '..', 'frontend', 'public', 'seal.png')
 
     sig_col = []
-    if os.path.exists(sign_path):
-        try:
-            sign_img = Image(sign_path, width=70, height=35)
-            sign_img.hAlign = 'LEFT'
-            sig_col.append(sign_img)
-        except Exception:
-            pass
+    if not hide_sign:
+        if sign_file:
+            try:
+                sign_bytes = BytesIO(sign_file.read())
+                sign_img = Image(sign_bytes, width=70, height=35)
+                sign_img.hAlign = 'LEFT'
+                sig_col.append(sign_img)
+            except Exception:
+                pass
+        elif os.path.exists(sign_path):
+            try:
+                sign_img = Image(sign_path, width=70, height=35)
+                sign_img.hAlign = 'LEFT'
+                sig_col.append(sign_img)
+            except Exception:
+                pass
     sig_col.append(Paragraph(f'<b>{data.get("checked_by", "Technical Manager")}</b>', lb))
 
     seal_col = []
-    if os.path.exists(seal_path):
-        try:
-            seal_img = Image(seal_path, width=55, height=55)
-            seal_img.hAlign = 'LEFT'
-            seal_col.append(seal_img)
-        except Exception:
-            pass
+    if not hide_seal:
+        if seal_file:
+            try:
+                seal_bytes = BytesIO(seal_file.read())
+                seal_img = Image(seal_bytes, width=55, height=55)
+                seal_img.hAlign = 'LEFT'
+                seal_col.append(seal_img)
+            except Exception:
+                pass
+        elif os.path.exists(seal_path):
+            try:
+                seal_img = Image(seal_path, width=55, height=55)
+                seal_img.hAlign = 'LEFT'
+                seal_col.append(seal_img)
+            except Exception:
+                pass
 
     if sig_col or seal_col:
         sig_table = Table([[sig_col, seal_col]], colWidths=[TW * 0.5, TW * 0.5])
@@ -1364,21 +1424,22 @@ def generate_msds_pdf_view(request):
     _logo_exists = os.path.exists(logo_path)
 
     def _msds_header_footer(canvas, doc_obj):
-        """Draw the Kriya logo on every page — top-left corner.
+        """Draw the Kriya logo on every page — flush to the left margin.
         Logo sits in the header zone above the 1.5cm content spacing.
         Text content starts 1.5cm below the logo (topMargin=35mm).
         """
         canvas.saveState()
         if _logo_exists:
             try:
-                canvas.drawImage(logo_path, 20*mm, _A4[1] - 25*mm, width=130, height=65, preserveAspectRatio=True, mask='auto')
+                canvas.drawImage(logo_path, 10*mm, _A4[1] - 25*mm, width=130, height=65, preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass
         canvas.restoreState()
 
-    # Top margin = logo height (~20mm) + 1.5cm spacing = 35mm
-    # Bottom margin = 1.5cm = 15mm
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=35*mm, bottomMargin=15*mm)
+    # Top margin = logo zone (~25mm) + 1.5cm gap = 40mm on first page.
+    # But we want text to start just 1.5cm below the logo, so use 28mm
+    # (logo drawn at page_top - 25mm, ~10mm tall visually, then 1.5cm gap).
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=25*mm, rightMargin=25*mm, topMargin=28*mm, bottomMargin=15*mm)
     el = []
 
     # Italic labels (left column), regular values (right column) — NO borders
@@ -1395,12 +1456,10 @@ def generate_msds_pdf_view(request):
     LW = TW * 0.40
     VW = TW * 0.60
 
-    # Logo is drawn on every page via _msds_header_footer — no inline logo needed
-    el.append(Spacer(1, 2*mm))
-
+    # Logo is drawn on every page via _msds_header_footer — no inline spacer needed
     el.append(Paragraph('<b>SAFETY DATA SHEET</b>', title_s))
     el.append(Paragraph(f'<b>{data.get("product_name", "")}</b>', sub_s))
-    el.append(Spacer(1, 3*mm))
+    el.append(Spacer(1, 2*mm))
 
     # Company + Contact — no borders, just text
     addr = Paragraph(

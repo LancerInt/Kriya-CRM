@@ -78,15 +78,13 @@ export default function ProductsPage() {
     { key: "name", label: "Product", render: (row) => (
       <div className="flex items-center gap-2">
         {row.name ? (
-          <>
-            <span className="font-medium text-gray-900">{row.name}</span>
-            {row.concentration && <span className="text-xs text-gray-400 ml-1">({row.concentration})</span>}
-          </>
+          <span className="font-medium text-gray-900">{row.name}</span>
         ) : (
           <span className="italic text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-xs font-medium">Needs review — set product name</span>
         )}
       </div>
     )},
+    { key: "concentration", label: "Concentration", render: (row) => row.concentration || "\u2014" },
     { key: "hsn_code", label: "HSN Code", render: (row) => row.hsn_code || "\u2014" },
     { key: "category", label: "Category" },
     { key: "base_price", label: "Base Price", render: (row) => row.base_price ? `$${Number(row.base_price).toLocaleString()}` : "\u2014" },

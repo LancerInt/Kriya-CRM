@@ -141,6 +141,7 @@ class EmailDraft(TimeStampedModel):
     sent_at = models.DateTimeField(null=True, blank=True)
     last_saved_at = models.DateTimeField(null=True, blank=True)
     draft_version = models.IntegerField(default=1)
+    editor_data = models.JSONField(default=dict, blank=True, help_text='Stores COA/MSDS/document editor state so it persists across draft saves')
 
     class Meta:
         db_table = 'email_drafts'

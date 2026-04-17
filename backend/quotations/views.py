@@ -315,6 +315,37 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 quotation=q, product_name='', description='',
                 quantity=0, unit='KG', unit_price=0, total_price=0,
             )
+        # ── Link to QuoteRequest for the source communication ──
+        # Ensures the quotation appears on the correct Inquiry card, not on an
+        # older one for the same client. If no QuoteRequest exists for this
+        # communication, create one so the Inquiries page picks it up.
+        if communication_id:
+            from communications.models import QuoteRequest
+            qr = QuoteRequest.objects.filter(
+                source_communication_id=communication_id,
+            ).first()
+            if qr:
+                if not qr.linked_quotation_id:
+                    qr.linked_quotation = q
+                    qr.status = 'converted'
+                    qr.save(update_fields=['linked_quotation', 'status'])
+            else:
+                # Create a QuoteRequest so this quotation shows on the Inquiries page
+                QuoteRequest.objects.create(
+                    source_communication_id=communication_id,
+                    source_channel='email',
+                    client=client,
+                    client_name=client.company_name,
+                    sender_name=comm.contact_name if comm else '',
+                    sender_email=comm.external_email if comm else '',
+                    extracted_product=line['product_name'] if line else '',
+                    extracted_quantity=line['quantity'] if line else None,
+                    extracted_unit=line['unit'] if line else '',
+                    ai_confidence=1.0,
+                    status='converted',
+                    linked_quotation=q,
+                )
+
         notify(
             title=f'Quotation created: {q.quotation_number}',
             message=f'{request.user.full_name} created a quotation for {client.company_name}.',

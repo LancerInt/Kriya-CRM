@@ -106,6 +106,7 @@ export default function CommunicationDetailPage() {
   const [showDocLibPicker, setShowDocLibPicker] = useState(false);
   const [showCOAEditor, setShowCOAEditor] = useState(false);
   const [showMSDSEditor, setShowMSDSEditor] = useState(false);
+  const [editorData, setEditorData] = useState({});
 
   const loadThread = () => {
     api.get(`/communications/${id}/thread/`)
@@ -192,6 +193,7 @@ export default function CommunicationDetailPage() {
       if (draft.cc) setReplyCc(draft.cc);
       setReplyDraftId(draft.id);
       setSavedAttachments(draft.attachments || []);
+      setEditorData(draft.editor_data || {});
       setLastSavedAt(draft.last_saved_at);
     } else {
       const subj = (target.subject || currentComm.subject || "");
@@ -307,6 +309,7 @@ export default function CommunicationDetailPage() {
         fd.append("subject", replySubject);
         fd.append("body", replyBody);
         fd.append("cc", replyCc);
+        fd.append("editor_data", JSON.stringify(editorData));
         attachments.forEach(f => fd.append("attachments", f));
         const res = await api.post(`/communications/drafts/${replyDraftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
         setSavedAttachments(res.data.attachments || []);
@@ -315,15 +318,16 @@ export default function CommunicationDetailPage() {
         toast.success("Draft saved");
       } else {
         // Create new draft tied to the message we're responding to
-        const payload = { communication: targetMsg.id, client: comm.client || null, subject: replySubject, body: replyBody, to_email: toEmail, cc: replyCc };
+        const payload = { communication: targetMsg.id, client: comm.client || null, subject: replySubject, body: replyBody, to_email: toEmail, cc: replyCc, editor_data: editorData };
         const res = await api.post("/communications/drafts/", payload);
         setReplyDraftId(res.data.id);
         // Now save attachments if any
-        if (attachments.length > 0) {
+        if (attachments.length > 0 || Object.keys(editorData).length > 0) {
           const fd = new FormData();
           fd.append("subject", replySubject);
           fd.append("body", replyBody);
           fd.append("cc", replyCc);
+          fd.append("editor_data", JSON.stringify(editorData));
           attachments.forEach(f => fd.append("attachments", f));
           const res2 = await api.post(`/communications/drafts/${res.data.id}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
           setSavedAttachments(res2.data.attachments || []);
@@ -660,18 +664,23 @@ export default function CommunicationDetailPage() {
                   <div className="space-y-1">
                     {savedAttachments.map((att) => (
                       <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs hover:bg-green-100 transition-colors">
-                        <a
-                          href={att.file}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`Open ${att.filename}`}
+                        <div
+                          onClick={() => {
+                            const isPdf = (att.filename || "").toLowerCase().endsWith(".pdf");
+                            if (isPdf) {
+                              setPdfView({ url: att.file, title: att.filename });
+                            } else {
+                              window.open(att.file, "_blank");
+                            }
+                          }}
+                          title={`View ${att.filename}`}
                           className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:underline"
                         >
                           <span className="text-green-500">📄</span>
                           <span className="font-medium truncate">{att.filename}</span>
                           <span className="text-gray-400 shrink-0">{(att.file_size / 1024).toFixed(1)} KB</span>
                           <span className="text-green-600 text-[10px] shrink-0">Saved</span>
-                        </a>
+                        </div>
                         <button onClick={() => handleRemoveSavedAtt(att.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0">&times;</button>
                       </div>
                     ))}
@@ -682,7 +691,15 @@ export default function CommunicationDetailPage() {
                   <div className="space-y-1">
                     {attachments.map((f, i) => (
                       <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
-                        <div className="flex items-center gap-2">
+                        <div
+                          onClick={() => {
+                            const isPdf = (f.name || "").toLowerCase().endsWith(".pdf");
+                            if (isPdf) {
+                              setPdfView({ url: URL.createObjectURL(f), title: f.name });
+                            }
+                          }}
+                          className={`flex items-center gap-2 ${(f.name || "").toLowerCase().endsWith(".pdf") ? "cursor-pointer hover:underline" : ""}`}
+                        >
                           <span className="text-gray-500">📄</span>
                           <span className="font-medium">{f.name}</span>
                           <span className="text-gray-400">{(f.size / 1024).toFixed(1)} KB</span>
@@ -1056,10 +1073,23 @@ export default function CommunicationDetailPage() {
         open={showCOAEditor}
         onClose={() => setShowCOAEditor(false)}
         productName=""
+        initialData={editorData.coa || null}
+        onStateChange={(state) => setEditorData(prev => ({ ...prev, coa: state }))}
         onGenerate={async (formData) => {
           try {
-            const res = await api.post("/communications/generate-coa-pdf/", formData, { responseType: "blob" });
-            const filename = `COA_${(formData.product_name || "Product").replace(/\s/g, "_")}.pdf`;
+            const isFormData = formData instanceof FormData;
+            const res = await api.post("/communications/generate-coa-pdf/", formData, {
+              responseType: "blob",
+              ...(isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}),
+            });
+            // Extract product name for filename
+            let pName = "Product";
+            if (isFormData) {
+              try { pName = JSON.parse(formData.get("payload")).product_name || pName; } catch {}
+            } else {
+              pName = formData.product_name || pName;
+            }
+            const filename = `COA_${pName.replace(/\s/g, "_")}.pdf`;
             const file = new File([res.data], filename, { type: "application/pdf" });
             setAttachments(prev => [...prev, file]);
             toast.success(`${filename} created and added to attachments`);
@@ -1071,6 +1101,8 @@ export default function CommunicationDetailPage() {
         open={showMSDSEditor}
         onClose={() => setShowMSDSEditor(false)}
         productName=""
+        initialData={editorData.msds || null}
+        onStateChange={(state) => setEditorData(prev => ({ ...prev, msds: state }))}
         onGenerate={async (formData) => {
           try {
             const res = await api.post("/communications/generate-msds-pdf/", formData, { responseType: "blob" });

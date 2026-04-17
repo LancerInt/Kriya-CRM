@@ -17,6 +17,47 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _find_thread_communication_ids(communication):
+    """Find all Communication IDs in the same email thread as the given communication.
+    Uses email_message_id / email_in_reply_to chains AND subject matching
+    for the same client + sender."""
+    from .models import Communication
+    from django.db.models import Q
+
+    if not communication.comm_type == 'email':
+        return []
+
+    message_ids = set()
+    if communication.email_message_id:
+        message_ids.add(communication.email_message_id)
+    if communication.email_in_reply_to:
+        message_ids.add(communication.email_in_reply_to)
+
+    # Strip Re:/Fwd: prefixes for subject matching
+    base_subject = communication.subject or ''
+    for prefix in ['Re: ', 'RE: ', 'Fwd: ', 'FWD: ', 'Fw: ', 're: ']:
+        while base_subject.startswith(prefix):
+            base_subject = base_subject[len(prefix):]
+
+    if not message_ids and not base_subject:
+        return []
+
+    filters = Q()
+    if message_ids:
+        filters |= Q(email_message_id__in=message_ids)
+        filters |= Q(email_in_reply_to__in=message_ids)
+        if communication.email_message_id:
+            filters |= Q(email_in_reply_to=communication.email_message_id)
+    if base_subject and communication.client_id:
+        filters |= Q(client=communication.client, subject__icontains=base_subject)
+
+    related = Communication.objects.filter(
+        filters, is_deleted=False, comm_type='email',
+    ).exclude(id=communication.id).values_list('id', flat=True)
+
+    return list(related)
+
+
 def process_communication_for_quote(communication, force=False):
     """
     Main entry point — process an incoming communication for auto-quote generation.
@@ -41,6 +82,21 @@ def process_communication_for_quote(communication, force=False):
     # Skip outbound messages
     if communication.direction != 'inbound':
         return None
+
+    # Skip if a QuoteRequest already exists in the same email thread
+    # (prevents duplicate inquiry cards for follow-up emails in the same thread)
+    if communication.comm_type == 'email':
+        from .models import Communication
+        from django.db.models import Q
+        thread_comm_ids = _find_thread_communication_ids(communication)
+        if thread_comm_ids:
+            existing_qr = QuoteRequest.objects.filter(
+                source_communication_id__in=thread_comm_ids,
+                is_deleted=False,
+            ).first()
+            if existing_qr:
+                logger.info(f'Skipping comm {communication.id} — QuoteRequest {existing_qr.id} already exists in same thread')
+                return None
 
     # Get message text
     text = _get_message_text(communication)

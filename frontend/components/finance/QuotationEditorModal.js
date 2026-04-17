@@ -1,7 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
+import toast from "react-hot-toast";
+
+// Unicode subscript / superscript character maps
+const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ' };
+const SUB_MAP = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','a':'ₐ','e':'ₑ','h':'ₕ','i':'ᵢ','j':'ⱼ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','o':'ₒ','p':'ₚ','r':'ᵣ','s':'ₛ','t':'ₜ','u':'ᵤ','v':'ᵥ','x':'ₓ' };
+const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] || c).join('');
 
 /**
  * Editable Quotation — Kriya Biosys Quotation template.
@@ -10,8 +16,59 @@ import api from "@/lib/axios";
 export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtForm, qtItems, setQtItems, onSave, onSend, onPreview, sending, sendLabel }) {
   const initialized = useRef(null);
   const tableRef = useRef(null);
+  const editorRef = useRef(null);
   const [products, setProducts] = useState([]);
   const [clientPriceList, setClientPriceList] = useState([]);
+  const [scriptMode, setScriptMode] = useState(null); // null | 'sub' | 'sup'
+
+  // ── Subscript / Superscript toolbar handler ──
+  const handleScriptClick = useCallback((mode) => {
+    const active = document.activeElement;
+    if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && editorRef.current?.contains(active)) {
+      const start = active.selectionStart;
+      const end = active.selectionEnd;
+      if (start !== end) {
+        const map = mode === 'sub' ? SUB_MAP : SUP_MAP;
+        const converted = toUnicode(active.value.substring(start, end), map);
+        const newValue = active.value.substring(0, start) + converted + active.value.substring(end);
+        const setter = active.tagName === 'TEXTAREA'
+          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(active, newValue);
+        active.dispatchEvent(new Event("input", { bubbles: true }));
+        requestAnimationFrame(() => { active.focus(); active.selectionStart = start; active.selectionEnd = start + converted.length; });
+        return;
+      }
+    }
+    setScriptMode((prev) => prev === mode ? null : mode);
+  }, []);
+
+  // Intercept keystrokes to convert characters in real-time when scriptMode is active
+  useEffect(() => {
+    if (!scriptMode || !editorRef.current) return;
+    const map = scriptMode === 'sub' ? SUB_MAP : SUP_MAP;
+    const handler = (e) => {
+      const el = e.target;
+      if (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return;
+      if (el.type === 'number' || el.type === 'date') return;
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      const mapped = map[e.key.toLowerCase()];
+      if (mapped) {
+        e.preventDefault();
+        const start = el.selectionStart;
+        const newValue = el.value.substring(0, start) + mapped + el.value.substring(el.selectionEnd);
+        const setter = el.tagName === 'TEXTAREA'
+          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(el, newValue);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + mapped.length; });
+      }
+    };
+    const container = editorRef.current;
+    container.addEventListener("keydown", handler, true);
+    return () => container.removeEventListener("keydown", handler, true);
+  }, [scriptMode]);
 
   // Auto-resize all textareas in the items table whenever items change
   // (e.g. after save-with-items returns and replaces qtItems). Without this,
@@ -184,9 +241,35 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
-      <div className="bg-white" style={{ fontFamily: bkFont, fontSize: "14px", lineHeight: "1.4" }}>
+      <div ref={editorRef} className="bg-white" style={{ fontFamily: bkFont, fontSize: "14px", lineHeight: "1.4" }}>
 
         <style>{`@font-face { font-family: 'Montserrat'; src: url('/fonts/Montserrat-Bold.ttf') format('truetype'); font-weight: bold; } @font-face { font-family: 'Montserrat'; src: url('/fonts/Montserrat-Regular.ttf') format('truetype'); font-weight: normal; }`}</style>
+
+        {/* ── SUBSCRIPT / SUPERSCRIPT TOOLBAR ── */}
+        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+          <span className="text-xs text-gray-500 mr-1">Format:</span>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); handleScriptClick('sup'); }}
+            className={`px-3 py-1 text-xs font-semibold rounded border transition-colors ${scriptMode === 'sup' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-indigo-50 hover:border-indigo-300'}`}
+            title="Superscript — select text & click, or toggle to type in superscript"
+          >
+            X<sup className="text-[8px]">2</sup>
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); handleScriptClick('sub'); }}
+            className={`px-3 py-1 text-xs font-semibold rounded border transition-colors ${scriptMode === 'sub' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-indigo-50 hover:border-indigo-300'}`}
+            title="Subscript — select text & click, or toggle to type in subscript"
+          >
+            X<sub className="text-[8px]">2</sub>
+          </button>
+          {scriptMode && (
+            <span className="text-[10px] text-indigo-600 font-medium ml-1 animate-pulse">
+              {scriptMode === 'sup' ? 'Superscript' : 'Subscript'} mode ON — click again to turn off
+            </span>
+          )}
+        </div>
 
         {/* ── HEADER ── */}
         <div className="flex items-start justify-between mb-3">
