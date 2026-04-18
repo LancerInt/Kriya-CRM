@@ -181,7 +181,7 @@ def process_communication_for_pi(communication):
         client_address=client.address or '',
         client_pincode=client.postal_code or '',
         client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
-        client_phone=client.phone_number or '',
+        client_phone=client.phone_number or (client.contacts.filter(is_primary=True, is_deleted=False).first().phone if client.contacts.filter(is_primary=True, is_deleted=False).exists() else ''),
         country_of_origin='India',
         country_of_final_destination=client.country or '',
         currency=client.preferred_currency or 'USD',

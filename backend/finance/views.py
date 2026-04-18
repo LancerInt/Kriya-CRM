@@ -719,7 +719,7 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 client_address=client.address or '',
                 client_pincode=client.postal_code or '',
                 client_city_state_country=f'{client.city}, {client.state}, {client.country}'.strip(', '),
-                client_phone=client.phone_number or '',
+                client_phone=client.phone_number or (client.contacts.filter(is_primary=True, is_deleted=False).first().phone if client.contacts.filter(is_primary=True, is_deleted=False).exists() else ''),
                 country_of_origin='India',
                 country_of_final_destination=(line or {}).get('destination_country') or client.country or '',
                 port_of_discharge=(line or {}).get('destination_port') or '',
