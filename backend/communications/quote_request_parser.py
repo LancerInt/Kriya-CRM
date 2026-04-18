@@ -25,7 +25,6 @@ QUOTE_INTENT_PATTERNS = [
     r'\binquir(y|e)\b',
     r'\binterested\s+in\b',
     r'\bwant\s+to\s+(buy|order|purchase)\b',
-    r'\bpurchase\s+order\b',
     r'\bMOQ\b',
     r'\b\d+\s*(MT|KG|LTR|ton|kg|litre|liter)\b',
 ]

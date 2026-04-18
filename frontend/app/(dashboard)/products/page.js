@@ -1,6 +1,36 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSelector } from "react-redux";
+
+function CustomSelect({ value, onChange, options, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = options.find(o => o.value === value);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-left bg-white hover:border-indigo-400 focus:ring-2 focus:ring-indigo-500 outline-none flex items-center justify-between transition-colors">
+        <span className={selected ? "text-gray-900" : "text-gray-400"}>{selected ? selected.label : placeholder || "Select..."}</span>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+          {options.map(o => (
+            <div key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`px-3 py-2 text-sm cursor-pointer transition-colors ${o.value === value ? "bg-indigo-50 text-indigo-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import DataTable from "@/components/ui/DataTable";
@@ -120,72 +150,84 @@ export default function ProductsPage() {
       <DataTable columns={columns} data={products} loading={loading} emptyTitle="No products" emptyDescription="Add your first product" />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? "Edit Product" : "Add Product"} size="lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className={inputClass} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">HSN Code</label>
-              <input value={form.hsn_code} onChange={(e) => setForm({ ...form, hsn_code: e.target.value })} placeholder="e.g. 31010000" className={inputClass} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Soil Conditioner" className={inputClass} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Active Ingredient</label>
-              <input value={form.active_ingredient} onChange={(e) => setForm({ ...form, active_ingredient: e.target.value })} className={inputClass} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Concentration</label>
-              <input value={form.concentration} onChange={(e) => setForm({ ...form, concentration: e.target.value })} placeholder="e.g. 90%" className={inputClass} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Base Price</label>
-              <input type="number" step="0.01" value={form.base_price} onChange={(e) => setForm({ ...form, base_price: e.target.value })} className={inputClass} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
-              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputClass}>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="INR">INR</option>
-                <option value="GBP">GBP</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-              <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inputClass}>
-                <option value="MT">MT (Metric Ton)</option>
-                <option value="KG">KG</option>
-                <option value="GAL">Gallons</option>
-                <option value="L">Liters</option>
-                <option value="PCS">Pieces</option>
-                <option value="BAGS">Bags</option>
-                <option value="DRUMS">Drums</option>
-              </select>
-            </div>
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Product Name — full width, prominent */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} className={inputClass} />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Enter product name" className={inputClass + " text-base font-medium"} />
           </div>
+
+          {/* Key Details Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">HSN Code</label>
+              <input value={form.hsn_code} onChange={(e) => setForm({ ...form, hsn_code: e.target.value })} placeholder="31010000" className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
+              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Soil Conditioner" className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Active Ingredient</label>
+              <input value={form.active_ingredient} onChange={(e) => setForm({ ...form, active_ingredient: e.target.value })} placeholder="Azadirachtin" className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Concentration</label>
+              <input value={form.concentration} onChange={(e) => setForm({ ...form, concentration: e.target.value })} placeholder="90%" className={inputClass} />
+            </div>
+          </div>
+
+          {/* Pricing Row */}
+          <div className="bg-gray-50 rounded-lg p-4 -mx-1">
+            <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Pricing</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Base Price</label>
+                <input type="number" step="0.01" value={form.base_price} onChange={(e) => setForm({ ...form, base_price: e.target.value })} placeholder="0.00" className={inputClass + " bg-white"} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Currency</label>
+                <CustomSelect value={form.currency} onChange={(v) => setForm({ ...form, currency: v })} options={[
+                  { value: "USD", label: "USD - US Dollar" },
+                  { value: "EUR", label: "EUR - Euro" },
+                  { value: "INR", label: "INR - Indian Rupee" },
+                  { value: "GBP", label: "GBP - British Pound" },
+                ]} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Unit</label>
+                <CustomSelect value={form.unit} onChange={(v) => setForm({ ...form, unit: v })} options={[
+                  { value: "MT", label: "MT - Metric Ton" },
+                  { value: "KG", label: "KG - Kilogram" },
+                  { value: "L", label: "L - Liters" },
+                  { value: "GAL", label: "GAL - Gallons" },
+                  { value: "PCS", label: "PCS - Pieces" },
+                  { value: "BAGS", label: "BAGS - Bags" },
+                  { value: "DRUMS", label: "DRUMS - Drums" },
+                ]} />
+              </div>
+            </div>
+          </div>
+
+          {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Client Brand Names</label>
-            <input value={form.client_brand_names} onChange={(e) => setForm({ ...form, client_brand_names: e.target.value })} placeholder="e.g. aza, azarate, azadin, neem guard" className={inputClass} />
+            <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
+            <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Product description (optional)" className={inputClass} />
+          </div>
+
+          {/* Client Brand Names */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Client Brand Names</label>
+            <input value={form.client_brand_names} onChange={(e) => setForm({ ...form, client_brand_names: e.target.value })} placeholder="aza, azarate, azadin, neem guard" className={inputClass} />
             <p className="text-xs text-gray-400 mt-1">Comma-separated alternate names clients use for this product</p>
           </div>
-          <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-2 border-t border-gray-100">
+            <button type="submit" disabled={submitting} className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
               {submitting ? "Saving..." : editing ? "Update Product" : "Add Product"}
             </button>
-            <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2.5 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors">Cancel</button>
           </div>
         </form>
       </Modal>

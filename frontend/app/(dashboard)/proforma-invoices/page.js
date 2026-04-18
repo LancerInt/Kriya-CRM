@@ -186,8 +186,9 @@ export default function ProformaInvoicesPage() {
     // Use latest_version (computed by the serializer across the whole chain)
     // so the button always increments past the highest existing version,
     // even if the user clicked Revise on an older row in the chain.
-    const latestV = piData.latest_version || piData.version || 1;
-    if (!confirm(`Create a new version after V${latestV}?\n\nThe previous version will be kept intact and the new V${latestV + 1} will open in the editor.`)) return;
+    // Count only sent versions for display
+    const sentCount = (piData._allVersions || [piData]).filter(v => v.status === "sent").length || 1;
+    if (!confirm(`Create a new version after V${sentCount}?\n\nThe previous version will be kept intact and the new V${sentCount + 1} will open in the editor.`)) return;
     try {
       const res = await api.post(`/finance/pi/${piData.id}/revise/`);
       toast.success(`Revision V${res.data.version} created`);
@@ -253,7 +254,7 @@ export default function ProformaInvoicesPage() {
     <div>
       <PageHeader
         title="Proforma Invoices"
-        subtitle={`${piList.length} total · ${draftPIs.length} draft · ${sentPIs.length} sent`}
+        subtitle={`${sentPIs.length} sent${draftPIs.length > 0 ? ` · ${draftPIs.length} draft` : ''}`}
         action={
           <button onClick={() => setShowClientPicker(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
             + Create PI
@@ -429,7 +430,7 @@ export default function ProformaInvoicesPage() {
               <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-end gap-2">
                 {piData.status === "sent" ? (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleRevise(piData); }}
+                    onClick={(e) => { e.stopPropagation(); handleRevise({ ...piData, _allVersions: versions }); }}
                     className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"
                     title="Client asked for changes — create a new version"
                   >

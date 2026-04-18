@@ -131,27 +131,35 @@ def sync_emails(email_account_id=None, days_back=None):
                 except Exception as e:
                     logger.error(f'Draft generation failed for {comm.id}: {e}')
 
-            # Auto-detect PI request first (takes priority over quote request)
-            pi_created = False
+            # Auto-detect PO / Purchase Order FIRST — takes highest priority.
+            # Creates a Sales Order from the most recent sent PI for this client.
+            po_created = False
+            if direction == 'inbound' and client:
+                try:
+                    from communications.auto_po_service import process_communication_for_po
+                    po_result = process_communication_for_po(comm)
+                    if po_result:
+                        po_created = True
+                except Exception as e:
+                    logger.error(f'PO detection failed for {comm.id}: {e}')
+
+            # Auto-detect PI request — runs independently
             if direction == 'inbound' and client:
                 try:
                     from communications.auto_pi_service import process_communication_for_pi
-                    pi_result = process_communication_for_pi(comm)
-                    if pi_result:
-                        pi_created = True
+                    process_communication_for_pi(comm)
                 except Exception as e:
                     logger.error(f'PI request detection failed for {comm.id}: {e}')
 
-            # Auto-detect quote request from inbound messages (skip if PI was detected)
-            if direction == 'inbound' and not pi_created:
+            # Auto-detect quote request — runs independently
+            if direction == 'inbound':
                 try:
                     from communications.auto_quote_service import process_communication_for_quote
                     process_communication_for_quote(comm)
                 except Exception as e:
                     logger.error(f'Quote request detection failed for {comm.id}: {e}')
 
-            # Auto-detect sample request — independent from quote/PI, runs on
-            # any inbound email mentioning sample/trial keywords.
+            # Auto-detect sample request — independent, runs on any inbound email
             if direction == 'inbound' and client:
                 try:
                     _auto_create_sample_request(comm)

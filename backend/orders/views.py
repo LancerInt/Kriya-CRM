@@ -36,6 +36,22 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             actor=self.request.user, client=order.client,
         )
 
+    @action(detail=True, methods=['post'], url_path='add-item')
+    def add_item(self, request, pk=None):
+        """Add a line item to an order."""
+        from .models import OrderItem
+        order = self.get_object()
+        item = OrderItem.objects.create(
+            order=order,
+            product_name=request.data.get('product_name', ''),
+            client_product_name=request.data.get('client_product_name', ''),
+            description=request.data.get('description', ''),
+            quantity=request.data.get('quantity', 1),
+            unit=request.data.get('unit', 'KG'),
+            unit_price=request.data.get('unit_price', 0),
+        )
+        return Response(OrderItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
     # ── Status Transition ──
     @action(detail=True, methods=['post'], url_path='transition')
     def transition(self, request, pk=None):
