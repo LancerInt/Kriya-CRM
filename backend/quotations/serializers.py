@@ -33,14 +33,27 @@ class QuotationSerializer(serializers.ModelSerializer):
     client_email = serializers.CharField(source='client.email', read_only=True, default='')
     client_primary_contact = serializers.SerializerMethodField()
 
+    client_contact_phone = serializers.SerializerMethodField()
+
     def get_client_primary_contact(self, obj):
-        """Return the primary contact name for this client."""
+        """Return the executive name assigned to this client."""
         try:
+            if obj.client.primary_executive:
+                return obj.client.primary_executive.full_name or obj.client.primary_executive.username
+            return ''
+        except Exception:
+            return ''
+
+    def get_client_contact_phone(self, obj):
+        """Return phone — client phone or primary contact phone."""
+        try:
+            if obj.client.phone_number:
+                return obj.client.phone_number
             contact = obj.client.contacts.filter(is_primary=True, is_deleted=False).first()
-            if contact:
-                return contact.name
+            if contact and contact.phone:
+                return contact.phone
             contact = obj.client.contacts.filter(is_deleted=False).first()
-            return contact.name if contact else ''
+            return contact.phone if contact else ''
         except Exception:
             return ''
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
@@ -102,7 +115,7 @@ class QuotationSerializer(serializers.ModelSerializer):
         fields = ['id', 'quotation_number', 'client', 'client_name',
                   'client_address', 'client_city', 'client_state',
                   'client_postal_code', 'client_country', 'client_phone',
-                  'client_email', 'client_primary_contact',
+                  'client_email', 'client_primary_contact', 'client_contact_phone',
                   'inquiry', 'version',
                   'parent', 'status', 'currency', 'delivery_terms', 'payment_terms',
                   'payment_terms_detail', 'freight_terms',

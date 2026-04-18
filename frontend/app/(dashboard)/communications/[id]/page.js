@@ -539,22 +539,24 @@ export default function CommunicationDetailPage() {
         if (!wantsQuote && !wantsPI && !wantsSample) return null;
 
         const quickCreateQuote = async () => {
+          if (!comm.client) { toast.error("No client linked to this email. Link a client first from Accounts."); return; }
           try {
             const res = await api.post("/quotations/quotations/create-blank/", {
               client_id: comm.client,
               communication_id: lastInbound.id,
             });
             toast.success(`Quotation ${res.data.quotation_number} saved to Quotations tab`);
-          } catch { toast.error("Failed to create quotation"); }
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to create quotation")); }
         };
         const quickCreatePi = async () => {
+          if (!comm.client) { toast.error("No client linked to this email. Link a client first from Accounts."); return; }
           try {
             const res = await api.post("/finance/pi/create-standalone/", {
               client_id: comm.client,
               communication_id: lastInbound.id,
             });
             toast.success(`PI ${res.data.invoice_number} saved to Proforma Invoices tab`);
-          } catch { toast.error("Failed to create PI"); }
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to create PI")); }
         };
         const quickCreateSample = async () => {
           try {
@@ -789,9 +791,8 @@ export default function CommunicationDetailPage() {
                 const lastInbound = [...thread].reverse().find(m => m.direction === "inbound") || comm;
 
                 const openQuoteEditor = async () => {
+                  if (!comm.client) { toast.error("No client linked to this email. Link a client first from Accounts."); return; }
                   try {
-                    // Pass the source communication so the backend AI-extracts
-                    // product/quantity/price and pre-fills the line item.
                     const res = await api.post("/quotations/quotations/create-blank/", {
                       client_id: comm.client,
                       communication_id: lastInbound.id,
@@ -802,7 +803,7 @@ export default function CommunicationDetailPage() {
                     setAttachQtItems(qt.items || []);
                     setAttachMode("quote");
                     toast.success(`Quotation ${qt.quotation_number} created — edit and attach`);
-                  } catch { toast.error("Failed to create quotation"); }
+                  } catch (err) { toast.error(getErrorMessage(err, "Failed to create quotation")); }
                 };
 
                 const openPiEditor = async () => {
