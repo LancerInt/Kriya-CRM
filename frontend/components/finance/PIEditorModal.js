@@ -57,6 +57,55 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
     }
   }, [open, pi]);
 
+  // ── Subscript / Superscript toolbar handler ──
+  const handleScriptClick = useCallback((mode) => {
+    const active = document.activeElement;
+    if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && editorRef.current?.contains(active)) {
+      const start = active.selectionStart;
+      const end = active.selectionEnd;
+      if (start !== end) {
+        const map = mode === 'sub' ? SUB_MAP : SUP_MAP;
+        const converted = toUnicode(active.value.substring(start, end), map);
+        const newValue = active.value.substring(0, start) + converted + active.value.substring(end);
+        const setter = active.tagName === 'TEXTAREA'
+          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(active, newValue);
+        active.dispatchEvent(new Event("input", { bubbles: true }));
+        requestAnimationFrame(() => { active.focus(); active.selectionStart = start; active.selectionEnd = start + converted.length; });
+        return;
+      }
+    }
+    setScriptMode((prev) => prev === mode ? null : mode);
+  }, []);
+
+  // Intercept keystrokes to convert characters in real-time when scriptMode is active
+  useEffect(() => {
+    if (!scriptMode || !editorRef.current) return;
+    const map = scriptMode === 'sub' ? SUB_MAP : SUP_MAP;
+    const handler = (e) => {
+      const el = e.target;
+      if (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return;
+      if (el.type === 'number' || el.type === 'date') return;
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      const mapped = map[e.key.toLowerCase()];
+      if (mapped) {
+        e.preventDefault();
+        const start = el.selectionStart;
+        const newValue = el.value.substring(0, start) + mapped + el.value.substring(el.selectionEnd);
+        const setter = el.tagName === 'TEXTAREA'
+          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(el, newValue);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + mapped.length; });
+      }
+    };
+    const container = editorRef.current;
+    container.addEventListener("keydown", handler, true);
+    return () => container.removeEventListener("keydown", handler, true);
+  }, [scriptMode]);
+
   if (!open || !pi) return null;
 
   const ic = "border-0 outline-none bg-transparent text-xs w-full focus:bg-yellow-50 hover:bg-yellow-50/50 px-1";
@@ -124,62 +173,6 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
       requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
     }
   };
-
-  // ── Subscript / Superscript toolbar handler ──
-  const handleScriptClick = useCallback((mode) => {
-    // 1. If there is a selection in the currently focused input/textarea, convert it
-    const active = document.activeElement;
-    if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && editorRef.current?.contains(active)) {
-      const start = active.selectionStart;
-      const end = active.selectionEnd;
-      if (start !== end) {
-        const map = mode === 'sub' ? SUB_MAP : SUP_MAP;
-        const before = active.value.substring(0, start);
-        const selected = active.value.substring(start, end);
-        const after = active.value.substring(end);
-        const converted = toUnicode(selected, map);
-        const newValue = before + converted + after;
-        // Trigger React onChange via native setter
-        const setter = active.tagName === 'TEXTAREA'
-          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
-          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        setter.call(active, newValue);
-        active.dispatchEvent(new Event("input", { bubbles: true }));
-        requestAnimationFrame(() => { active.focus(); active.selectionStart = start; active.selectionEnd = start + converted.length; });
-        return;
-      }
-    }
-    // 2. No selection — toggle typing mode
-    setScriptMode((prev) => prev === mode ? null : mode);
-  }, []);
-
-  // Intercept keystrokes to convert characters in real-time when scriptMode is active
-  useEffect(() => {
-    if (!scriptMode || !editorRef.current) return;
-    const map = scriptMode === 'sub' ? SUB_MAP : SUP_MAP;
-    const handler = (e) => {
-      const el = e.target;
-      if (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return;
-      if (el.type === 'number' || el.type === 'date') return;
-      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
-      const mapped = map[e.key.toLowerCase()];
-      if (mapped) {
-        e.preventDefault();
-        const start = el.selectionStart;
-        const end = el.selectionEnd;
-        const newValue = el.value.substring(0, start) + mapped + el.value.substring(end);
-        const setter = el.tagName === 'TEXTAREA'
-          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
-          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        setter.call(el, newValue);
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + mapped.length; });
-      }
-    };
-    const container = editorRef.current;
-    container.addEventListener("keydown", handler, true);
-    return () => container.removeEventListener("keydown", handler, true);
-  }, [scriptMode]);
 
   // ── Additional totals (UI placeholders bound to piForm) ──
   const freight = parseFloat(piForm._freight) || 0;

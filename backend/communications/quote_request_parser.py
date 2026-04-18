@@ -37,7 +37,7 @@ PRODUCT_PATTERNS = [
     r'(potassium\s*humate)', r'(fish\s*amino)', r'(plant\s*growth)',
 ]
 
-QUANTITY_PATTERN = r'(\d+[\.,]?\d*)\s*(MT|KG|KGS|LTR|LTRS|ton|tons|kg|kgs|litre|litres|liter|liters|FCL|container|containers)\b'
+QUANTITY_PATTERN = r'(\d+[\.,]?\d*)\s*(MT|KG|KGS|LTR|LTRS|GAL|ton|tons|kg|kgs|litre|litres|liter|liters|gallon|gallons|FCL|container|containers)\b'
 COUNTRY_PATTERN = r'\b(India|China|Brazil|Mexico|Argentina|USA|UK|Germany|France|Spain|Italy|Turkey|Egypt|South\s*Africa|Nigeria|Kenya|Australia|Japan|Korea|Vietnam|Thailand|Indonesia|Malaysia|Philippines|Colombia|Chile|Peru|Ecuador|Canada)\b'
 PORT_PATTERN = r'\bport\s*(of)?\s*:?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
 DELIVERY_TERMS_PATTERN = r'\b(FOB|CIF|CFR|EXW|FCA|DAP|DDP)\b'

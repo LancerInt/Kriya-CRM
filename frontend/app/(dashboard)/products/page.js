@@ -164,6 +164,7 @@ export default function ProductsPage() {
               <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inputClass}>
                 <option value="MT">MT (Metric Ton)</option>
                 <option value="KG">KG</option>
+                <option value="GAL">Gallons</option>
                 <option value="L">Liters</option>
                 <option value="PCS">Pieces</option>
                 <option value="BAGS">Bags</option>

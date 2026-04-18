@@ -34,6 +34,7 @@ export default function ProformaInvoicesPage() {
   const [selectedPI, setSelectedPI] = useState(null);
   const [showReview, setShowReview] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [expandedPiHistory, setExpandedPiHistory] = useState(null);
 
   const loadPIs = async () => {
     try {
@@ -328,9 +329,9 @@ export default function ProformaInvoicesPage() {
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <StatusBadge status={piData.status} />
                     <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{g.root.invoice_number}</span>
-                    {versions.length > 1 && (
+                    {versions.filter(v => v.status === "sent").length > 1 && (
                       <span className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded">
-                        {versions.length} versions
+                        {versions.filter(v => v.status === "sent").length} versions
                       </span>
                     )}
                     {piData.order_number && (
@@ -354,37 +355,68 @@ export default function ProformaInvoicesPage() {
                     </p>
                   )}
 
-                  {/* Version chips — clickable, color-coded by status,
-                      with edited/sent attribution like the inquiries page. */}
-                  <div className="mt-2 flex flex-wrap items-stretch gap-1.5">
-                    {versions.map((v) => {
-                      const sent = v.status === "sent";
-                      const cls = sent
-                        ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-                        : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
-                      return (
+                  {/* Latest version chip + Version History for sent versions */}
+                  {(() => {
+                    const sentVersions = versions.filter(v => v.status === "sent");
+                    const latestDraft = versions.find(v => v.status === "draft");
+                    const latest = sentVersions.length > 0 ? sentVersions[sentVersions.length - 1] : latestDraft;
+                    if (!latest) return null;
+                    const isSent = latest.status === "sent";
+                    const sentNum = isSent ? sentVersions.indexOf(latest) + 1 : sentVersions.length;
+                    const cls = isSent
+                      ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                      : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+                    return (
+                      <div className="mt-2 flex items-center gap-2">
                         <button
-                          key={v.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (sent) _viewPiPdf(v.id);
-                            else _openPIEditor(v.id);
-                          }}
-                          title={sent ? `${v.invoice_number} · sent — view PDF` : `${v.invoice_number} · draft — open editor`}
+                          onClick={(e) => { e.stopPropagation(); isSent ? _viewPiPdf(latest.id) : _openPIEditor(latest.id); }}
+                          title={isSent ? `${latest.invoice_number} · sent — view PDF` : `${latest.invoice_number} · draft`}
                           className={`text-left text-[10px] font-medium px-2 py-1 rounded border transition-colors ${cls}`}
                         >
-                          <div className="font-semibold">PI V{v.version || 1} · {v.invoice_number}</div>
-                          {(v.created_by_name || v.sent_by_name) && (
+                          <div className="font-semibold">PI V{sentNum || 1} · {latest.invoice_number} {isSent ? "· Sent" : "· Draft"}</div>
+                          {(latest.created_by_name || latest.sent_by_name) && (
                             <div className="font-normal opacity-80 leading-tight mt-0.5">
-                              {v.created_by_name && <>Edited: {v.created_by_name}</>}
-                              {v.created_by_name && v.sent_by_name && " · "}
-                              {v.sent_by_name && <>Sent: {v.sent_by_name}</>}
+                              {latest.created_by_name && <>Edited: {latest.created_by_name}</>}
+                              {latest.created_by_name && latest.sent_by_name && " · "}
+                              {latest.sent_by_name && <>Sent: {latest.sent_by_name}</>}
                             </div>
                           )}
                         </button>
-                      );
-                    })}
-                  </div>
+                        {sentVersions.length > 1 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setExpandedPiHistory(prev => prev === g.root.id ? null : g.root.id); }}
+                            className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium"
+                          >
+                            {expandedPiHistory === g.root.id ? "▾ Hide History" : `▸ Version History (${sentVersions.length})`}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {(() => {
+                    const sentVersions = versions.filter(v => v.status === "sent");
+                    if (expandedPiHistory !== g.root.id || sentVersions.length <= 1) return null;
+                    return (
+                      <div className="mt-2 ml-7 p-2 bg-gray-50 rounded-lg border border-gray-200 space-y-1">
+                        <p className="text-[10px] font-semibold text-gray-500 mb-1">Version History</p>
+                        {sentVersions.map((v, idx) => (
+                          <div key={v.id} className="flex items-center justify-between text-[10px] py-1 border-b border-gray-100 last:border-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); _viewPiPdf(v.id); }}
+                              className="font-medium text-green-700 hover:underline"
+                            >
+                              PI V{idx + 1} · {v.invoice_number}
+                            </button>
+                            <div className="text-gray-500 flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-700">Sent</span>
+                              {v.created_by_name && <span>by {v.created_by_name}</span>}
+                              {v.created_at && <span>{format(new Date(v.created_at), "dd/MM/yy HH:mm")}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   </div>
                 </div>
                 <div className="text-right text-xs text-gray-400 flex-shrink-0">
@@ -401,7 +433,7 @@ export default function ProformaInvoicesPage() {
                     className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"
                     title="Client asked for changes — create a new version"
                   >
-                    Revise (V{(piData.latest_version || piData.version || 1) + 1})
+                    Revise (V{(versions.filter(v => v.status === "sent").length || 1) + 1})
                   </button>
                 ) : (
                   <button

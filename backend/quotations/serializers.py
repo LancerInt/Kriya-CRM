@@ -30,6 +30,19 @@ class QuotationSerializer(serializers.ModelSerializer):
     client_postal_code = serializers.CharField(source='client.postal_code', read_only=True, default='')
     client_country = serializers.CharField(source='client.country', read_only=True, default='')
     client_phone = serializers.CharField(source='client.phone_number', read_only=True, default='')
+    client_email = serializers.CharField(source='client.email', read_only=True, default='')
+    client_primary_contact = serializers.SerializerMethodField()
+
+    def get_client_primary_contact(self, obj):
+        """Return the primary contact name for this client."""
+        try:
+            contact = obj.client.contacts.filter(is_primary=True, is_deleted=False).first()
+            if contact:
+                return contact.name
+            contact = obj.client.contacts.filter(is_deleted=False).first()
+            return contact.name if contact else ''
+        except Exception:
+            return ''
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default='')
     parent_number = serializers.CharField(source='parent.quotation_number', read_only=True, default='')
@@ -89,6 +102,7 @@ class QuotationSerializer(serializers.ModelSerializer):
         fields = ['id', 'quotation_number', 'client', 'client_name',
                   'client_address', 'client_city', 'client_state',
                   'client_postal_code', 'client_country', 'client_phone',
+                  'client_email', 'client_primary_contact',
                   'inquiry', 'version',
                   'parent', 'status', 'currency', 'delivery_terms', 'payment_terms',
                   'payment_terms_detail', 'freight_terms',

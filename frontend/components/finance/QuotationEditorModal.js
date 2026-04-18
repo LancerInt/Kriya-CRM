@@ -138,12 +138,26 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
     }
 
     // Consignee from client (only if not already in display_overrides)
-    if (qt.client_address && d._consignee_line1 === undefined && qtForm._consignee_line1 === undefined) d._consignee_line1 = qt.client_address;
-    if ((qt.client_city || qt.client_state || qt.client_postal_code) && qtForm._consignee_line2 === undefined) {
-      d._consignee_line2 = [qt.client_postal_code, qt.client_city, qt.client_state].filter(Boolean).join(', ');
+    // Line 1: Attend — primary contact name
+    if (d._consignee_line1 === undefined && qtForm._consignee_line1 === undefined) {
+      d._consignee_line1 = qt.client_primary_contact ? `Attend : ${qt.client_primary_contact}` : '';
     }
-    if (qt.client_country && qtForm._consignee_line3 === undefined) d._consignee_line3 = qt.client_country;
-    if (qt.client_phone && qtForm._consignee_phone === undefined) d._consignee_phone = "Phone: " + qt.client_phone;
+    // Line 2: Address
+    if (d._consignee_line2 === undefined && qtForm._consignee_line2 === undefined) {
+      d._consignee_line2 = qt.client_address || '';
+    }
+    // Line 3: City, State, Pincode
+    if (d._consignee_line3 === undefined && qtForm._consignee_line3 === undefined) {
+      d._consignee_line3 = [qt.client_city, qt.client_state, qt.client_postal_code].filter(Boolean).join(', ');
+    }
+    // Line 4: Country
+    if (d._consignee_line4 === undefined && qtForm._consignee_line4 === undefined) {
+      d._consignee_line4 = qt.client_country || '';
+    }
+    // Phone
+    if (d._consignee_phone === undefined && qtForm._consignee_phone === undefined) {
+      d._consignee_phone = qt.client_phone ? `Phone: ${qt.client_phone}` : '';
+    }
 
     // All editable label/text defaults
     const defs = {

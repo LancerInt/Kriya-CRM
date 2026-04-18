@@ -347,6 +347,9 @@ export default function QuoteRequestsPage() {
                 // Find the latest quotation and PI (prefer sent, then latest by date)
                 const latestQ = [...allQ].reverse().find(v => v.status === "sent" || v.status === "approved" || v.status === "accepted") || allQ[allQ.length - 1];
                 const latestPI = [...allPI].reverse().find(v => v.status === "sent") || (allPI.length > 0 ? allPI[allPI.length - 1] : null);
+                const sentQ = allQ.filter(v => v.status === "sent" || v.status === "approved" || v.status === "accepted");
+                const sentPI = allPI.filter(v => v.status === "sent");
+                const totalSentVersions = sentQ.length + sentPI.length;
                 const totalVersions = allQ.length + allPI.length;
 
                 const renderChip = (v, type) => {
@@ -357,7 +360,12 @@ export default function QuoteRequestsPage() {
                     : v.status === "rejected"
                     ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
                     : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
-                  const label = isQuote ? `Quote V${v.version} · ${v.quotation_number}` : `PI V${v.version} · ${v.invoice_number}`;
+                  // Version number = count of sent versions up to this one (drafts don't count)
+                  const sentVersionNum = isQuote
+                    ? sentQ.filter(s => new Date(s.created_at) <= new Date(v.created_at)).length
+                    : sentPI.filter(s => new Date(s.created_at) <= new Date(v.created_at)).length;
+                  const displayVersion = sent ? sentVersionNum : `${sentVersionNum || sentQ.length} (Draft)`;
+                  const label = isQuote ? `Quote V${displayVersion} · ${v.quotation_number}` : `PI V${displayVersion} · ${v.invoice_number}`;
                   return (
                     <button
                       key={`${type}-${v.id}`}
@@ -385,21 +393,21 @@ export default function QuoteRequestsPage() {
                     <div className="mt-2 flex items-center gap-2">
                       {latestQ && renderChip(latestQ, "quote")}
                       {latestPI && renderChip(latestPI, "pi")}
-                      {totalVersions > 1 && (
+                      {totalSentVersions > 1 && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setExpandedHistory(prev => prev === qr.id ? null : qr.id); }}
                           className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-0.5"
                         >
-                          {expandedHistory === qr.id ? "▾ Hide History" : `▸ Version History (${totalVersions})`}
+                          {expandedHistory === qr.id ? "▾ Hide History" : `▸ Version History (${totalSentVersions})`}
                         </button>
                       )}
                     </div>
                     {expandedHistory === qr.id && (
                       <div className="mt-2 ml-7 p-2 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
                         <p className="text-[10px] font-semibold text-gray-500 mb-1">Version History</p>
-                        {allQ.map((v, idx) => {
-                          const sent = v.status === "sent" || v.status === "approved" || v.status === "accepted";
-                          const prev = idx > 0 ? allQ[idx - 1] : null;
+                        {sentQ.map((v, idx) => {
+                          const sent = true;
+                          const prev = idx > 0 ? sentQ[idx - 1] : null;
                           // Compute changes from previous version
                           const changes = [];
                           if (prev && v.items && prev.items) {
@@ -422,7 +430,7 @@ export default function QuoteRequestsPage() {
                                   onClick={(e) => { e.stopPropagation(); openVersionInDraft(qr, v); }}
                                   className={`font-semibold hover:underline ${sent ? "text-green-700" : v.status === "rejected" ? "text-red-700" : "text-amber-700"}`}
                                 >
-                                  Quote V{v.version} · {v.quotation_number}
+                                  Quote V{idx + 1} · {v.quotation_number}
                                 </button>
                                 <div className="text-gray-500 flex items-center gap-2">
                                   <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${sent ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
@@ -454,8 +462,8 @@ export default function QuoteRequestsPage() {
                             </div>
                           );
                         })}
-                        {allPI.map((v) => {
-                          const sent = v.status === "sent";
+                        {sentPI.map((v, piIdx) => {
+                          const sent = true;
                           return (
                             <div key={`pih-${v.id}`} className="text-[10px] py-1.5 border-b border-gray-100 last:border-0">
                               <div className="flex items-center justify-between">
@@ -463,7 +471,7 @@ export default function QuoteRequestsPage() {
                                   onClick={(e) => { e.stopPropagation(); sent ? _viewPiPdf(v.id) : router.push(`/proforma-invoices?open=${v.id}`); }}
                                   className={`font-semibold hover:underline ${sent ? "text-green-700" : "text-amber-700"}`}
                                 >
-                                  PI V{v.version} · {v.invoice_number}
+                                  PI V{piIdx + 1} · {v.invoice_number}
                                 </button>
                                 <div className="text-gray-500 flex items-center gap-2">
                                   <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${sent ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
@@ -489,7 +497,7 @@ export default function QuoteRequestsPage() {
                     className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"
                     title="Client asked for changes — create a new version"
                   >
-                    Revise (V{(qr.linked_quotation_version || 1) + 1})
+                    Revise (V{((qr.linked_quotation_versions || []).filter(v => v.status === "sent" || v.status === "approved" || v.status === "accepted").length || 1) + 1})
                   </button>
                 ) : (
                   <button
