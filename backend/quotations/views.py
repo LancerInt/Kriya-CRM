@@ -926,15 +926,23 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             pdf_file = BytesIO(pdf_bytes)
             pdf_file.name = f'Quotation_{q.quotation_number.replace("/", "-")}.pdf'
 
-            from communications.services import EmailService
+            from communications.services import EmailService, get_thread_headers
+            # Find source communication for threading
+            from communications.models import QuoteRequest
+            _qr = QuoteRequest.objects.filter(linked_quotation=q).select_related('source_communication').first()
+            _src_comm = _qr.source_communication if _qr else None
+            in_reply_to, references, orig_subj = get_thread_headers(q.client, _src_comm)
+            qt_subject = f'Re: {orig_subj}' if orig_subj and not orig_subj.startswith('Re:') else (orig_subj or f'Quotation {q.quotation_number} - Kriya Biosys')
             try:
                 EmailService.send_email(
                     email_account=email_account,
                     to=contact_email,
-                    subject=f'Quotation {q.quotation_number} - Kriya Biosys',
+                    subject=qt_subject,
                     body_html=body_html,
                     attachments=[pdf_file],
                     cc=cc_string or None,
+                    in_reply_to=in_reply_to,
+                    references=references,
                 )
             except Exception as e:
                 return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

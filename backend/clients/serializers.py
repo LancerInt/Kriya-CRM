@@ -71,7 +71,7 @@ class ClientCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Client
-        fields = ['id', 'company_name', 'country', 'address', 'city', 'state', 'postal_code',
+        fields = ['id', 'company_name', 'tax_number', 'country', 'address', 'city', 'state', 'postal_code',
                   'business_type', 'website', 'delivery_terms', 'preferred_currency',
                   'credit_days', 'credit_limit', 'payment_mode', 'status', 'tier',
                   'primary_executive', 'shadow_executive', 'notes', 'contacts', 'ports',

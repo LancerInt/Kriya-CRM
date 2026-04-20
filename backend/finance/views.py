@@ -725,6 +725,9 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 port_of_discharge=(line or {}).get('destination_port') or '',
                 currency=(line or {}).get('currency') or client.preferred_currency or 'USD',
                 bank_details=DEFAULT_BANK,
+                display_overrides={
+                    '_attend': f"Attend: {client.contacts.filter(is_primary=True, is_deleted=False).first().name}" if client.contacts.filter(is_primary=True, is_deleted=False).exists() else '',
+                },
             )
 
         if line:

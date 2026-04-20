@@ -138,6 +138,39 @@ class ContactMatcher:
         return None, None
 
 
+def get_thread_headers(client, source_communication=None):
+    """Find In-Reply-To and References headers to continue an existing email
+    thread with the given client. Looks for the most recent outbound email
+    (quotation/PI reply) to this client.
+    Returns (in_reply_to, references, original_subject) or (None, None, None)."""
+    from .models import Communication
+    try:
+        # Prefer the source communication's thread if available
+        if source_communication and source_communication.email_message_id:
+            return (
+                source_communication.email_message_id,
+                source_communication.email_message_id,
+                source_communication.subject,
+            )
+        # Fall back to most recent outbound email to this client
+        last_outbound = Communication.objects.filter(
+            client=client,
+            direction='outbound',
+            comm_type='email',
+            is_deleted=False,
+            email_message_id__gt='',
+        ).order_by('-created_at').first()
+        if last_outbound and last_outbound.email_message_id:
+            return (
+                last_outbound.email_message_id,
+                last_outbound.email_message_id,
+                last_outbound.subject,
+            )
+    except Exception:
+        pass
+    return None, None, None
+
+
 class EmailService:
     @staticmethod
     def _decode_header(raw):
@@ -155,7 +188,7 @@ class EmailService:
         return decoded
 
     @staticmethod
-    def send_email(email_account, to, subject, body_html, cc=None, bcc=None, attachments=None):
+    def send_email(email_account, to, subject, body_html, cc=None, bcc=None, attachments=None, in_reply_to=None, references=None):
         """Send email via SMTP. Returns Message-ID on success.
 
         MIME structure:
@@ -180,6 +213,10 @@ class EmailService:
         msg['Subject'] = subject
         if cc:
             msg['Cc'] = cc
+        if in_reply_to:
+            msg['In-Reply-To'] = in_reply_to
+        if references:
+            msg['References'] = references
 
         # HTML body — no related multipart wrapper, no inline images
         msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))

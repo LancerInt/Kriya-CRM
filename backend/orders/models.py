@@ -11,7 +11,7 @@ class Order(TimeStampedModel):
         PIF_SENT = 'pif_sent', 'PIF Sent'
         DOCS_PREPARING = 'docs_preparing', 'Documents Preparing'
         DOCS_APPROVED = 'docs_approved', 'Documents Approved'
-        FACTORY_READY = 'factory_ready', 'Factory Ready'
+        FACTORY_READY = 'factory_ready', 'Under Filling/Packing'
         CONTAINER_BOOKED = 'container_booked', 'Container Booked'
         INSPECTION = 'inspection', 'Under Inspection'
         INSPECTION_PASSED = 'inspection_passed', 'Inspection Passed'

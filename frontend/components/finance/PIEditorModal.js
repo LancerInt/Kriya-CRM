@@ -194,7 +194,8 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
     };
     return `${currency} ${convert(Math.floor(num))} Only`;
   };
-  const autoAmountWords = grandTotal > 0 ? numberToWords(grandTotal, piForm.currency || "USD") : "";
+  const finalGrandTotal = grandTotal + (parseFloat(piForm._roundoff) || 0);
+  const autoAmountWords = finalGrandTotal > 0 ? numberToWords(finalGrandTotal, piForm.currency || "USD") : "";
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
@@ -258,7 +259,7 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Salem - 636004, Tamilnadu</td>
-              <td className="border border-gray-400 p-1"><input value={piForm.client_pincode || ""} onChange={(e) => setPiForm({ ...piForm, client_pincode: e.target.value })} placeholder="City, Pincode" className={ic} /></td>
+              <td className="border border-gray-400 p-1"><input value={piForm.client_pincode || ""} onChange={(e) => setPiForm({ ...piForm, client_pincode: e.target.value })} placeholder="Pincode" className={ic} /></td>
               <td className="border border-gray-400 p-1 font-bold bg-gray-200">Date</td>
             </tr>
             <tr>
@@ -378,9 +379,23 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
                   <input type="number" step="0.01" value={piForm._discount || ""} onChange={(e) => setPiForm({ ...piForm, _discount: e.target.value })} placeholder="0.00" className={icr + " w-24"} />
                 </td>
               </tr>
+              <tr className="print:hidden">
+                <td className="text-right p-1 border border-gray-300">
+                  <button type="button" onClick={() => {
+                    const rounded = Math.round(grandTotal);
+                    const diff = rounded - grandTotal;
+                    setPiForm(prev => ({ ...prev, _roundoff: diff.toFixed(2) }));
+                  }} className="text-[9px] text-indigo-600 hover:text-indigo-800 font-medium">
+                    Round Off
+                  </button>
+                </td>
+                <td className="text-right p-1 border border-gray-300 text-[10px]">
+                  {parseFloat(piForm._roundoff) ? `${parseFloat(piForm._roundoff) > 0 ? "+" : ""}${parseFloat(piForm._roundoff).toFixed(2)}` : ""}
+                </td>
+              </tr>
               <tr style={{ backgroundColor: "#f0fdf4" }}>
                 <td className="text-right font-bold p-1 border border-gray-300" style={{ color: "#558b2f" }}>Grand Total</td>
-                <td className="text-right font-bold p-1 border border-gray-300" style={{ color: "#558b2f" }}>${grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                <td className="text-right font-bold p-1 border border-gray-300" style={{ color: "#558b2f" }}>${(grandTotal + (parseFloat(piForm._roundoff) || 0)).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
               </tr>
             </tbody>
           </table>

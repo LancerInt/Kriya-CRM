@@ -436,8 +436,13 @@ def send_li_email(li, user):
     pdf_file = BytesIO(pdf_bytes)
     pdf_file.name = f'LI_{li.invoice_number.replace("/", "-")}.pdf'
 
+    from communications.services import get_thread_headers
+    in_reply_to, references, orig_subj = get_thread_headers(li.client, getattr(li, 'source_communication', None))
+    if orig_subj:
+        subject = f'Re: {orig_subj}' if not orig_subj.startswith('Re:') else orig_subj
+
     EmailService.send_email(email_account=email_account, to=contact_email, subject=subject, body_html=body_html,
-                            attachments=[pdf_file], cc=cc_string or None)
+                            attachments=[pdf_file], cc=cc_string or None, in_reply_to=in_reply_to, references=references)
 
     li.status = 'sent'
     li.save(update_fields=['status'])

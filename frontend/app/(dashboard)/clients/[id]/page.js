@@ -289,6 +289,45 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
               )}
             </div>
             <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="ml-1">{client.address || "\u2014"}</span></div>
+            <div><span className="text-gray-500">State:</span>
+              <input
+                defaultValue={client.state || ""}
+                placeholder="Enter state"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-32 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.state || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { state: val }); onClientUpdate(); toast.success("State updated"); } catch { toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
+            <div><span className="text-gray-500">Pincode:</span>
+              <input
+                defaultValue={client.postal_code || ""}
+                placeholder="Enter pincode"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-32 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.postal_code || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { postal_code: val }); onClientUpdate(); toast.success("Pincode updated"); } catch { toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
+            <div className="sm:col-span-2"><span className="text-gray-500">TaxID/CNPJ/GSTIN:</span>
+              <input
+                defaultValue={client.tax_number || ""}
+                placeholder="Enter TaxID / CNPJ / GSTIN"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-64 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.tax_number || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { tax_number: val }); onClientUpdate(); toast.success("TaxID updated"); } catch (err) { console.error("Tax update error:", err.response?.data || err); toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
             {client.website && (
               <div className="sm:col-span-2"><span className="text-gray-500">Website:</span> <a href={client.website} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600 hover:underline">{client.website}</a></div>
             )}

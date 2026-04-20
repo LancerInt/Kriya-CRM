@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def _email_client_status(shipment, title, message):
-    """Send status update email to client's primary contact."""
+    """Send status update email to client's primary contact, continuing
+    in the same email thread as the original quotation/PI conversation."""
     contact = shipment.client.contacts.filter(is_deleted=False).order_by('-is_primary').first()
     if not contact or not contact.email:
         return
@@ -23,6 +24,15 @@ def _email_client_status(shipment, title, message):
     email_account = EmailAccount.objects.filter(is_active=True).first()
     if not email_account:
         return
+
+    # Continue in the same email thread as the original conversation
+    from communications.services import get_thread_headers
+    in_reply_to, references, original_subject = get_thread_headers(shipment.client)
+
+    if original_subject:
+        subject = f'Re: {original_subject}' if not original_subject.startswith('Re:') else original_subject
+    else:
+        subject = f'Shipment Update: {shipment.shipment_number} - {title}'
 
     from communications.services import EmailService
     body_html = f"""
@@ -41,8 +51,10 @@ def _email_client_status(shipment, title, message):
     """
     EmailService.send_email(
         email_account=email_account, to=contact.email,
-        subject=f'Shipment Update: {shipment.shipment_number} - {title}',
+        subject=subject,
         body_html=body_html,
+        in_reply_to=in_reply_to,
+        references=references,
     )
     Communication.objects.create(
         client=shipment.client, contact=contact,
@@ -152,7 +164,7 @@ def on_shipment_status_change(sender, instance, created, **kwargs):
 
     # Status display messages for client emails
     STATUS_MESSAGES = {
-        'factory_ready': ('Production Ready', 'Your order is ready at the factory and will be packed for export shortly.'),
+        'factory_ready': ('Under Filling/Packing', 'Your order is under filling and packing process.'),
         'container_booked': ('Container Booked', 'A container/vessel has been booked for your shipment.'),
         'packed': ('Shipment Packed', 'Your order has been packed and is ready for inspection.'),
         'inspection': ('Under Inspection', 'Your shipment is currently under quality inspection.'),
@@ -197,7 +209,7 @@ def on_shipment_status_change(sender, instance, created, **kwargs):
         )
 
     # Auto-email client at key stages
-    if current in ('dispatched', 'inspection_passed', 'in_transit', 'delivered'):
+    if current in ('dispatched', 'arrived'):
         try:
             _email_client_status(instance, title, message)
         except Exception as e:

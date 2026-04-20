@@ -13,7 +13,7 @@ export default function RootLayout({ children }) {
       <body className="bg-gray-50 text-gray-900 antialiased">
         <ReduxProvider>
           {children}
-          <Toaster position="top-right" />
+          <Toaster position="top-center" />
         </ReduxProvider>
       </body>
     </html>

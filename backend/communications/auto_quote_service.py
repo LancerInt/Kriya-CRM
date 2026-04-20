@@ -19,8 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _find_thread_communication_ids(communication):
     """Find all Communication IDs in the same email thread as the given communication.
-    Uses email_message_id / email_in_reply_to chains AND subject matching
-    for the same client + sender."""
+    Uses ONLY email_message_id / email_in_reply_to chains — no subject matching."""
     from .models import Communication
     from django.db.models import Q
 
@@ -33,23 +32,15 @@ def _find_thread_communication_ids(communication):
     if communication.email_in_reply_to:
         message_ids.add(communication.email_in_reply_to)
 
-    # Strip Re:/Fwd: prefixes for subject matching
-    base_subject = communication.subject or ''
-    for prefix in ['Re: ', 'RE: ', 'Fwd: ', 'FWD: ', 'Fw: ', 're: ']:
-        while base_subject.startswith(prefix):
-            base_subject = base_subject[len(prefix):]
-
-    if not message_ids and not base_subject:
+    if not message_ids:
         return []
 
-    filters = Q()
-    if message_ids:
-        filters |= Q(email_message_id__in=message_ids)
-        filters |= Q(email_in_reply_to__in=message_ids)
-        if communication.email_message_id:
-            filters |= Q(email_in_reply_to=communication.email_message_id)
-    if base_subject and communication.client_id:
-        filters |= Q(client=communication.client, subject__icontains=base_subject)
+    filters = (
+        Q(email_message_id__in=message_ids) |
+        Q(email_in_reply_to__in=message_ids)
+    )
+    if communication.email_message_id:
+        filters |= Q(email_in_reply_to=communication.email_message_id)
 
     related = Communication.objects.filter(
         filters, is_deleted=False, comm_type='email',

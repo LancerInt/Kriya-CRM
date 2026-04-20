@@ -540,11 +540,19 @@ def send_pi_email(pi, user):
     pdf_file = BytesIO(pdf_bytes)
     pdf_file.name = f'PI_{pi.invoice_number.replace("/", "-")}.pdf'
 
+    # Continue in the same email thread as the original conversation
+    from communications.services import get_thread_headers
+    in_reply_to, references, orig_subj = get_thread_headers(pi.client, pi.source_communication)
+    if orig_subj:
+        subject = f'Re: {orig_subj}' if not orig_subj.startswith('Re:') else orig_subj
+
     EmailService.send_email(
         email_account=email_account, to=contact_email,
         subject=subject, body_html=body_html,
         attachments=[pdf_file],
         cc=cc_string or None,
+        in_reply_to=in_reply_to,
+        references=references,
     )
 
     # Update status

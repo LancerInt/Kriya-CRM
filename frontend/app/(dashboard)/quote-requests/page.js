@@ -51,6 +51,12 @@ export default function QuoteRequestsPage() {
   const [showReview, setShowReview] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [expandedHistory, setExpandedHistory] = useState(null); // qr.id of expanded version history
+  const [showCreateQuote, setShowCreateQuote] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [createClient, setCreateClient] = useState("");
+  const [createClientSearch, setCreateClientSearch] = useState("");
+  const [showCreateClientDD, setShowCreateClientDD] = useState(false);
+  const [creatingQuote, setCreatingQuote] = useState(false);
 
   // Quotation editor state
   const [showQtModal, setShowQtModal] = useState(false);
@@ -284,7 +290,14 @@ export default function QuoteRequestsPage() {
 
   return (
     <div>
-      <PageHeader title="Inquiries" subtitle={`${requests.filter(r => r.status === "new").length} new inquiries`} />
+      <PageHeader title="Inquiries" subtitle={`${requests.filter(r => r.status === "new").length} new inquiries`} action={
+        <button onClick={() => {
+          if (clients.length === 0) api.get("/clients/").then(r => setClients((r.data.results || r.data).filter(c => !c.company_name?.includes("(Auto-created)")))).catch(() => {});
+          setCreateClient(""); setCreateClientSearch(""); setShowCreateQuote(true);
+        }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+          + Create Quote
+        </button>
+      } />
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
@@ -617,6 +630,53 @@ export default function QuoteRequestsPage() {
         onSend={handleAttachQt} sending={qtSending} sendLabel="Attach to Email"
       />
       <PdfViewer url={pdfView?.url} title={pdfView?.title} onClose={() => { if (pdfView?.url) URL.revokeObjectURL(pdfView.url); setPdfView(null); }} />
+
+      {/* Create Quote Modal */}
+      <Modal open={showCreateQuote} onClose={() => setShowCreateQuote(false)} title="Create Quote" size="sm">
+        <div className="space-y-4">
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
+            <input
+              value={createClientSearch || (createClient ? clients.find(c => c.id === createClient)?.company_name || "" : "")}
+              onChange={(e) => { setCreateClientSearch(e.target.value); if (!e.target.value) setCreateClient(""); setShowCreateClientDD(true); }}
+              onFocus={() => setShowCreateClientDD(true)}
+              onBlur={() => setTimeout(() => setShowCreateClientDD(false), 200)}
+              placeholder="Search client..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+            />
+            {showCreateClientDD && (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                {clients.filter(c => !createClientSearch || c.company_name?.toLowerCase().includes(createClientSearch.toLowerCase())).map(c => (
+                  <div key={c.id} onMouseDown={() => { setCreateClient(c.id); setCreateClientSearch(""); setShowCreateClientDD(false); }}
+                    className={`px-3 py-2 text-sm cursor-pointer transition-colors ${c.id === createClient ? "bg-indigo-50 text-indigo-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
+                    {c.company_name}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              disabled={!createClient || creatingQuote}
+              onClick={async () => {
+                setCreatingQuote(true);
+                try {
+                  const res = await api.post("/quotations/quotations/create-blank/", { client_id: createClient });
+                  toast.success(`Quotation ${res.data.quotation_number} created`);
+                  setShowCreateQuote(false);
+                  loadRequests();
+                  _openQuotationEditor(res.data.id);
+                } catch (err) { toast.error(getErrorMessage(err, "Failed to create quote")); }
+                finally { setCreatingQuote(false); }
+              }}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {creatingQuote ? "Creating..." : "Create & Edit"}
+            </button>
+            <button onClick={() => setShowCreateQuote(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

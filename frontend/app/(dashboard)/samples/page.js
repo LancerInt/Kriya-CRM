@@ -152,7 +152,7 @@ export default function SamplesPage() {
   };
 
   const columns = [
-    { key: "product_name", label: "Product", render: (row) => <span className="font-medium">{row.product_name || "\u2014"}</span> },
+    { key: "product_name", label: "Product", render: (row) => <span className="font-medium">{row.client_product_name || row.product_name || "\u2014"}</span> },
     { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
     { key: "quantity", label: "Quantity", render: (row) => row.quantity || "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },

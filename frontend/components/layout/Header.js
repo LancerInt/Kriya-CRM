@@ -46,6 +46,26 @@ export default function Header({ onMenuClick }) {
     api.get("/communications/quote-requests/count/").then(r => setInquiryCount(r.data.count || 0)).catch(() => {});
     api.get("/finance/pi/count/").then(r => setPiCount(r.data.count || 0)).catch(() => {});
   };
+  // Show recent unread notifications as toast popups on app load
+  const shownNotifRef = useRef(false);
+  useEffect(() => {
+    if (shownNotifRef.current) return;
+    shownNotifRef.current = true;
+    api.get("/notifications/?is_read=false&ordering=-created_at&limit=5").then(r => {
+      const notifs = (r.data.results || r.data || []).slice(0, 5);
+      // Show each with a small delay so they stack nicely
+      notifs.forEach((n, i) => {
+        setTimeout(() => {
+          toast(n.title || n.message || "New notification", {
+            icon: n.notification_type === "email" ? "📧" : n.notification_type === "task" ? "📋" : "🔔",
+            duration: 5000,
+            style: { fontSize: "13px" },
+          });
+        }, i * 800);
+      });
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetchUnread();
     fetchHeaderCounts();

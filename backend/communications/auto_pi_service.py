@@ -186,6 +186,9 @@ def process_communication_for_pi(communication):
         country_of_final_destination=client.country or '',
         currency=client.preferred_currency or 'USD',
         bank_details=DEFAULT_BANK,
+        display_overrides={
+            '_attend': f"Attend: {client.contacts.filter(is_primary=True, is_deleted=False).first().name}" if client.contacts.filter(is_primary=True, is_deleted=False).exists() else '',
+        },
     )
 
     _fill_pi_items(pi, check_text)

@@ -36,11 +36,13 @@ class QuotationSerializer(serializers.ModelSerializer):
     client_contact_phone = serializers.SerializerMethodField()
 
     def get_client_primary_contact(self, obj):
-        """Return the executive name assigned to this client."""
+        """Return the primary contact name for this client."""
         try:
-            if obj.client.primary_executive:
-                return obj.client.primary_executive.full_name or obj.client.primary_executive.username
-            return ''
+            contact = obj.client.contacts.filter(is_primary=True, is_deleted=False).first()
+            if contact:
+                return contact.name
+            contact = obj.client.contacts.filter(is_deleted=False).first()
+            return contact.name if contact else ''
         except Exception:
             return ''
 

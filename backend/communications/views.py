@@ -111,21 +111,16 @@ class CommunicationViewSet(viewsets.ModelViewSet):
             if comm.email_in_reply_to:
                 message_ids.add(comm.email_in_reply_to)
 
-            # Also match by subject thread (Re: / Fwd:)
-            base_subject = comm.subject or ''
-            for prefix in ['Re: ', 'RE: ', 'Fwd: ', 'FWD: ', 'Fw: ']:
-                if base_subject.startswith(prefix):
-                    base_subject = base_subject[len(prefix):]
-
-            # Fetch related emails by message-id chain + subject match
+            # Thread ONLY by email message-id / in-reply-to chain.
+            # No subject matching — different emails with the same subject
+            # are separate threads unless they have reply headers linking them.
             related = Communication.objects.filter(
                 is_deleted=False,
                 comm_type='email',
             ).filter(
                 Q(email_message_id__in=message_ids) |
                 Q(email_in_reply_to__in=message_ids) |
-                Q(email_in_reply_to=comm.email_message_id) |
-                (Q(client=comm.client, external_email=comm.external_email, subject__icontains=base_subject) if base_subject and comm.client else Q())
+                Q(email_in_reply_to=comm.email_message_id)
             ).exclude(id=comm.id).order_by('created_at')
 
             for msg in related:
