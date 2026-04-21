@@ -181,7 +181,7 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Mohan Nagar, Narasothipatti,</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.client_address || ""} onChange={(e) => setCiForm({ ...ciForm, client_address: e.target.value })} placeholder="City, State" className={ic} /></td>
+              <td className="border border-gray-400 p-1"><input value={ciForm.client_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, client_city_state_country: e.target.value })} placeholder="City, State" className={ic} /></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Salem - 636004, Tamilnadu</td>
@@ -274,7 +274,20 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
 
           {/* Bank Details (right) */}
           <div style={{ width: "45%" }}>
-            <div className="font-bold text-[10px] mb-1">Bank Details</div>
+            <div className="flex items-center gap-1 mb-1">
+              <span className="font-bold text-[10px]">Bank Details</span>
+              {[
+                { label: "ICICI INR", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611905057914", type: "CA Account" },
+                { label: "ICICI USD", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611906000027", type: "CA Account" },
+                { label: "DBS INR", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832210073820", type: "CA Account" },
+                { label: "DBS USD", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0811", swift: "DBSSINBB", ac: "832250073848", type: "CA Account" },
+              ].map(b => (
+                <button key={b.label} type="button" onClick={() => setCiForm(prev => ({ ...prev, _bank_name: b.name, _bank_branch: b.branch, _bank_beneficiary: b.beneficiary, _bank_ifsc: b.ifsc, _bank_swift: b.swift, _bank_ac: b.ac, _bank_ac_type: b.type }))}
+                  className="px-1.5 py-0.5 text-[8px] font-medium rounded border border-gray-300 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors">
+                  {b.label}
+                </button>
+              ))}
+            </div>
             <table className="w-full border-collapse border border-gray-400 text-[10px]">
               <tbody>
                 <tr><td className="border border-gray-400 p-0 font-bold w-[40%]"><span className="px-1">Bank Name</span></td><td className="border border-gray-400 p-0"><input value={ciForm._bank_name || ""} onChange={(e) => setCiForm({ ...ciForm, _bank_name: e.target.value })} placeholder="ICICI Bank Ltd" className={ic} /></td></tr>

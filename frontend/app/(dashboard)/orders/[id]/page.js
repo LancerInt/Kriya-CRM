@@ -319,9 +319,25 @@ export default function OrderDetailPage() {
       const existing = await api.get(`/finance/ci/`, { params: { order: id } });
       const ciList = existing.data.results || existing.data;
       if (ciList.length > 0) {
-        setCi(ciList[0]);
-        setCiForm(ciList[0]);
-        setCiItems(ciList[0].items || []);
+        const ciData = ciList[0];
+        // Always re-populate Notify fields from fresh client data
+        if (order?.client) {
+          try {
+            const clientRes = await api.get(`/clients/${order.client}/`);
+            const cl = clientRes.data;
+            const primaryContact = cl.contacts?.find(c => c.is_primary) || cl.contacts?.[0];
+            if (primaryContact) ciData.notify_company_name = primaryContact.name;
+            if (cl.address) ciData.notify_address = cl.address;
+            ciData.client_city_state_country = [cl.city, cl.state].filter(Boolean).join(', ');
+            if (cl.tax_number) ciData.client_tax_number = cl.tax_number;
+            if (cl.postal_code) ciData.client_pincode = cl.postal_code;
+            if (primaryContact?.phone) ciData.notify_phone = primaryContact.phone;
+            if (cl.company_name) ciData.client_company_name = cl.company_name;
+          } catch {}
+        }
+        setCi(ciData);
+        setCiForm(ciData);
+        setCiItems(ciData.items || []);
       } else {
         const res = await api.post(`/finance/ci/create-from-order/`, { order_id: id });
         setCi(res.data);

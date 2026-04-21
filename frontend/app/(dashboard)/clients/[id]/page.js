@@ -183,8 +183,34 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                 <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Standard</span>
               )}
             </div>
-            <div><span className="text-gray-500">Country:</span> <span className="ml-1">{client.country || "\u2014"}</span></div>
-            <div><span className="text-gray-500">City:</span> <span className="ml-1">{client.city || "\u2014"}</span></div>
+            <div><span className="text-gray-500">Country:</span>
+              <input
+                key={client.id + "-country"}
+                defaultValue={client.country || ""}
+                placeholder="Enter country"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-32 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.country || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { country: val }); onClientUpdate(); toast.success("Country updated"); } catch { toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
+            <div><span className="text-gray-500">City:</span>
+              <input
+                key={client.id + "-city"}
+                defaultValue={client.city || ""}
+                placeholder="Enter city"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-32 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.city || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { city: val }); onClientUpdate(); toast.success("City updated"); } catch { toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
             <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
             <div><span className="text-gray-500">Currency:</span> <span className="ml-1">{client.preferred_currency}</span></div>
             <div>
@@ -288,7 +314,20 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                 <span className="ml-1">{client.shadow_executive_name || "\u2014"}</span>
               )}
             </div>
-            <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="ml-1">{client.address || "\u2014"}</span></div>
+            <div className="sm:col-span-2"><span className="text-gray-500">Address:</span>
+              <input
+                key={client.id + "-address"}
+                defaultValue={client.address || ""}
+                placeholder="Enter address"
+                className="ml-1 border-0 border-b border-transparent hover:border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-sm px-1 py-0.5 w-80 transition-colors"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim();
+                  if (val !== (client.address || "")) {
+                    try { await api.patch(`/clients/${client.id}/`, { address: val }); onClientUpdate(); toast.success("Address updated"); } catch { toast.error("Failed to update"); }
+                  }
+                }}
+              />
+            </div>
             <div><span className="text-gray-500">State:</span>
               <input
                 defaultValue={client.state || ""}

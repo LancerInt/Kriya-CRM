@@ -504,7 +504,7 @@ export default function QuoteRequestsPage() {
               })()}
 
               <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-end">
-                {qr.linked_quotation_status === "sent" ? (
+                {(qr.linked_quotation_versions || []).some(v => v.status === "sent" || v.status === "approved" || v.status === "accepted") ? (
                   <button
                     onClick={(e) => { e.stopPropagation(); handleReviseQuote(qr); }}
                     className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium hover:bg-purple-700"

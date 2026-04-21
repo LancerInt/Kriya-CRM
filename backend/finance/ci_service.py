@@ -242,12 +242,12 @@ def generate_ci_pdf(ci):
 
     rows = [
         [Paragraph('Exporter', s8b), Paragraph('Notify', s8b), '', rc],
-        [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.notify_company_name or ci.client_company_name, s8b), '', ''],
-        [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(ci.notify_address or ci.client_address or '', s7), '', ''],
-        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(f'{ci.client_pincode}', s7), '', ''],
-        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(f'{ci.client_city_state_country}', s7), '', ''],
-        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(f'{ci.client_tax_number}', s7), '', ''],
-        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(f'Tel: {ci.notify_phone or ci.client_phone}', s7), '', ''],
+        [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.notify_company_name or '', s8b), '', ''],
+        [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(ci.notify_address or '', s7), '', ''],
+        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(ci.client_address or '', s7), '', ''],
+        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(ci.client_pincode or '', s7), '', ''],
+        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(ci.client_tax_number or '', s7), '', ''],
+        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(ci.notify_phone or '', s7), '', ''],
         [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', s7), '', '', ''],
         [Paragraph(f'IEC : {EXPORTER["iec"]}', s7), '', '', ''],
     ]
@@ -277,7 +277,7 @@ def generate_ci_pdf(ci):
     # ═══ CONSIGNEE (To the Order) — width matches exporter+notify columns ═══
     consignee_rows = [
         [Paragraph('<b>Consignee</b>', s8b)],
-        [Paragraph(f'To the Order {ci.client_city_state_country or ci.country_of_final_destination or ""}', s7)],
+        [Paragraph(ci.client_company_name or '', s7)],
     ]
     cn = Table(consignee_rows, colWidths=[PW])
     cn.setStyle(TableStyle([
@@ -295,12 +295,26 @@ def generate_ci_pdf(ci):
 
     # ═══ SHIPMENT DETAILS (left) + BANK DETAILS (right) — unified grid like reference ═══
     _rh = 7*mm
-    # Parse bank details
+    # Parse bank details — prefer display_overrides (from editor), fall back to bank_details text
+    ov = ci.display_overrides if isinstance(ci.display_overrides, dict) else {}
+    ov_bank = {
+        'Bank name': ov.get('_bank_name', ''),
+        'Branch name': ov.get('_bank_branch', ''),
+        'Beneficiary': ov.get('_bank_beneficiary', ''),
+        'IFSC Code': ov.get('_bank_ifsc', ''),
+        'Swift Code': ov.get('_bank_swift', ''),
+        'A/C No': ov.get('_bank_ac', ''),
+        'A/C Type': ov.get('_bank_ac_type', ''),
+    }
+    # Fall back to parsing bank_details text if overrides are empty
     bk_data = {}
-    for line in (ci.bank_details or '').strip().split('\n'):
-        if ':' in line:
-            k, v = line.split(':', 1)
-            bk_data[k.strip()] = v.strip()
+    if any(v for v in ov_bank.values()):
+        bk_data = ov_bank
+    else:
+        for line in (ci.bank_details or '').strip().split('\n'):
+            if ':' in line:
+                k, v = line.split(':', 1)
+                bk_data[k.strip()] = v.strip()
 
     # 4 columns: ShipLabel(38) | ShipValue(55) | BankLabel(25) | BankValue(rest) = 180mm
     _sw = PW - 10*mm  # 180mm after sidebar
@@ -312,7 +326,6 @@ def generate_ci_pdf(ci):
         for k in [key, key.lower(), key.replace(' ', ''), key.title()]:
             if k in bk_data:
                 return bk_data[k]
-        # Fuzzy match
         for k, v in bk_data.items():
             if key.lower().replace(' ', '') in k.lower().replace(' ', ''):
                 return v
