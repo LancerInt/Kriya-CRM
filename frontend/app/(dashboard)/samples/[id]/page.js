@@ -9,6 +9,8 @@ import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import COAEditorModal from "@/components/finance/COAEditorModal";
+import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 
 function fmtDate(d) {
   if (!d) return "";
@@ -83,6 +85,9 @@ export default function SampleDetailPage() {
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [courierDetails, setCourierDetails] = useState("");
+  const [sampleDocs, setSampleDocs] = useState([]);
+  const [showCOAEditor, setShowCOAEditor] = useState(false);
+  const [showMSDSEditor, setShowMSDSEditor] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({
     rating: "5",
@@ -118,6 +123,7 @@ export default function SampleDetailPage() {
       setTrackingNumber(s.data.tracking_number || "");
       setCourierDetails(s.data.courier_details || "");
       setItemsLocal(s.data.items || []);
+      setSampleDocs(s.data.documents || []);
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to load sample"));
       router.push("/samples");
@@ -642,6 +648,56 @@ export default function SampleDetailPage() {
         </div>
       </div>
 
+      {/* Documents (COA, MSDS) */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Documents</h3>
+          {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
+            <label className="px-3 py-1.5 text-xs font-medium rounded-lg text-gray-700 bg-gray-100 hover:bg-gray-200 cursor-pointer">
+              Upload
+              <input type="file" className="hidden" accept=".pdf,.doc,.docx,.jpg,.png" onChange={async (e) => {
+                const f = e.target.files[0];
+                if (!f) return;
+                const fd = new FormData();
+                fd.append("file", f);
+                fd.append("name", f.name);
+                fd.append("doc_type", "other");
+                try {
+                  await api.post(`/samples/${id}/documents/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+                  toast.success("Document uploaded");
+                  loadSample();
+                } catch { toast.error("Upload failed"); }
+                e.target.value = "";
+              }} />
+            </label>
+          )}
+        </div>
+        {sampleDocs.length > 0 ? (
+          <div className="space-y-2">
+            {sampleDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-sm">
+                <a href={doc.file} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:underline text-indigo-600">
+                  <span>{doc.doc_type === "coa" ? "📋" : doc.doc_type === "msds" ? "📄" : "📎"}</span>
+                  <span className="font-medium">{doc.name}</span>
+                  <span className="text-xs text-gray-400 px-1.5 py-0.5 bg-gray-200 rounded">{doc.doc_type.toUpperCase()}</span>
+                </a>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  {doc.uploaded_by_name && <span>{doc.uploaded_by_name}</span>}
+                  {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
+                    <button onClick={async () => {
+                      if (!confirm("Delete this document?")) return;
+                      try { await api.delete(`/samples/${id}/documents/${doc.id}/`); toast.success("Deleted"); loadSample(); } catch { toast.error("Failed to delete"); }
+                    }} className="text-red-400 hover:text-red-600">Delete</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No documents yet. Create COA or MSDS to attach.</p>
+        )}
+      </div>
+
       {/* Feedback (if recorded) */}
       {sample.feedback && (
         <div className="mt-6 bg-white rounded-xl border border-gray-200 p-6">
@@ -742,6 +798,32 @@ export default function SampleDetailPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
+          {/* Generate COA / MSDS — attached to dispatch email and saved as sample documents */}
+          <div className="border-t border-gray-200 pt-3">
+            <p className="text-xs text-gray-500 mb-2">Generate documents to attach with dispatch email:</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setShowDispatchModal(false); setShowCOAEditor(true); }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 flex items-center gap-1">
+                📋 Create COA
+              </button>
+              <button type="button" onClick={() => { setShowDispatchModal(false); setShowMSDSEditor(true); }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 flex items-center gap-1">
+                📄 Create MSDS
+              </button>
+            </div>
+            {sampleDocs.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {sampleDocs.map(d => (
+                  <div key={d.id} className="flex items-center gap-2 text-xs text-green-700 bg-green-50 px-2 py-1 rounded">
+                    <span>{d.doc_type === "coa" ? "📋" : d.doc_type === "msds" ? "📄" : "📎"}</span>
+                    <span>{d.name}</span>
+                    <span className="text-green-500">Ready to attach</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2 justify-end pt-2">
             <button
               onClick={() => setShowDispatchModal(false)}
@@ -761,19 +843,26 @@ export default function SampleDetailPage() {
             </button>
             {sample.source_communication && (
               <button
-                onClick={() => advance(
-                  "dispatched",
-                  { tracking_number: trackingNumber, courier_details: courierDetails },
-                  () => {
-                    const params = new URLSearchParams();
-                    params.set("openDraftFor", sample.source_communication);
-                    params.set("dispatchSampleId", sample.id);
-                    router.push(`/clients/${sample.client}?${params.toString()}`);
+                onClick={async () => {
+                  // Save tracking info first without changing status
+                  try {
+                    await api.patch(`/samples/${sample.id}/`, {
+                      tracking_number: trackingNumber,
+                      courier_details: courierDetails,
+                    });
+                  } catch {}
+                  setShowDispatchModal(false);
+                  // Navigate to client page with draft + document attachments
+                  const params = new URLSearchParams();
+                  params.set("openDraftFor", sample.source_communication);
+                  params.set("dispatchSampleId", sample.id);
+                  if (sampleDocs.length > 0) {
+                    params.set("attachDocs", sampleDocs.map(d => d.file).join(","));
                   }
-                )}
-                disabled={advancing}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
-                title="Mark as dispatched and immediately notify the client with tracking info"
+                  router.push(`/clients/${sample.client}?${params.toString()}`);
+                }}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 whitespace-nowrap flex items-center gap-1"
+                title="Save tracking details and compose dispatch email with COA/MSDS attached. Status changes only when email is sent."
               >
                 💬 Dispatch & Notify Client
               </button>
@@ -781,6 +870,56 @@ export default function SampleDetailPage() {
           </div>
         </div>
       </Modal>
+
+      {/* COA Editor */}
+      <COAEditorModal
+        open={showCOAEditor}
+        onClose={() => setShowCOAEditor(false)}
+        productName={sample?.product_name || ""}
+        clientName={sample?.client_name || ""}
+        onGenerate={async (formData) => {
+          try {
+            const isFormData = formData instanceof FormData;
+            const res = await api.post("/communications/generate-coa-pdf/", formData, {
+              responseType: "blob",
+              ...(isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}),
+            });
+            // Save as sample document
+            const pName = sample?.product_name || "Product";
+            const filename = `COA_${pName.replace(/\s/g, "_")}.pdf`;
+            const fd = new FormData();
+            fd.append("file", new File([res.data], filename, { type: "application/pdf" }), filename);
+            fd.append("name", filename);
+            fd.append("doc_type", "coa");
+            await api.post(`/samples/${id}/documents/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("COA generated and saved");
+            setShowCOAEditor(false);
+            loadSample();
+          } catch { toast.error("Failed to generate COA"); }
+        }}
+      />
+
+      {/* MSDS Editor */}
+      <MSDSEditorModal
+        open={showMSDSEditor}
+        onClose={() => setShowMSDSEditor(false)}
+        productName={sample?.product_name || ""}
+        onGenerate={async (formData) => {
+          try {
+            const res = await api.post("/communications/generate-msds-pdf/", formData, { responseType: "blob" });
+            const pName = sample?.product_name || "Product";
+            const filename = `MSDS_${pName.replace(/\s/g, "_")}.pdf`;
+            const fd = new FormData();
+            fd.append("file", new File([res.data], filename, { type: "application/pdf" }), filename);
+            fd.append("name", filename);
+            fd.append("doc_type", "msds");
+            await api.post(`/samples/${id}/documents/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("MSDS generated and saved");
+            setShowMSDSEditor(false);
+            loadSample();
+          } catch { toast.error("Failed to generate MSDS"); }
+        }}
+      />
 
       {/* Feedback Modal */}
       <Modal
@@ -790,20 +929,6 @@ export default function SampleDetailPage() {
         size="sm"
       >
         <form onSubmit={submitFeedback} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Rating</label>
-            <select
-              value={feedbackForm.rating}
-              onChange={(e) => setFeedbackForm({ ...feedbackForm, rating: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-            >
-              <option value="5">5 - Excellent</option>
-              <option value="4">4 - Good</option>
-              <option value="3">3 - Average</option>
-              <option value="2">2 - Below Average</option>
-              <option value="1">1 - Poor</option>
-            </select>
-          </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Comments</label>
             <textarea

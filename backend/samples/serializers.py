@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import Sample, SampleFeedback, SampleItem
+from .models import Sample, SampleFeedback, SampleItem, SampleDocument
+
+
+class SampleDocumentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default='')
+    class Meta:
+        model = SampleDocument
+        fields = ['id', 'doc_type', 'name', 'file', 'uploaded_by', 'uploaded_by_name', 'created_at']
+        read_only_fields = ['id', 'uploaded_by']
 
 
 class SampleFeedbackSerializer(serializers.ModelSerializer):
@@ -16,6 +24,7 @@ class SampleItemSerializer(serializers.ModelSerializer):
 
 class SampleSerializer(serializers.ModelSerializer):
     feedback = SampleFeedbackSerializer(read_only=True)
+    documents = SampleDocumentSerializer(many=True, read_only=True)
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     items = SampleItemSerializer(many=True, required=False)
 
@@ -25,7 +34,7 @@ class SampleSerializer(serializers.ModelSerializer):
                   'quantity', 'replied_at', 'prepared_at', 'dispatch_date', 'dispatch_notified_at',
                   'delivered_at', 'courier_details', 'tracking_number', 'status',
                   'notes', 'source_communication', 'created_by', 'feedback',
-                  'items', 'created_at', 'updated_at']
+                  'items', 'documents', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_by']
 
     def create(self, validated_data):

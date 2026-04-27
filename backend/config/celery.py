@@ -70,4 +70,15 @@ app.conf.beat_schedule = {
         'task': 'tasks.check_task_due_reminders',
         'schedule': crontab(hour=8, minute=30),
     },
+    # CRO reminder — runs every 30 min; per-order 4h cool-down enforced inside
+    'check-cro-reminders-every-30-minutes': {
+        'task': 'orders.check_cro_reminders',
+        'schedule': crontab(minute='*/30'),
+    },
+    # Delivery acknowledgment reminder — runs every minute; per-order
+    # one-shot fire enforced inside (delivery_reminder_sent_at).
+    'check-delivery-reminders-every-minute': {
+        'task': 'orders.check_delivery_reminders',
+        'schedule': crontab(minute='*'),
+    },
 }

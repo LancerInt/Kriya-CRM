@@ -11,6 +11,23 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='unread-count')
     def unread_count(self, request):
+        # Piggyback periodic order reminders here so they still fire when
+        # Celery Beat isn't running in dev. Throttled to once per minute via
+        # the cache so the count endpoint stays cheap.
+        try:
+            from django.core.cache import cache
+            if cache.add('order-reminder-tick', '1', timeout=60):
+                from orders.tasks import check_delivery_reminders, check_cro_reminders
+                try:
+                    check_delivery_reminders()
+                except Exception:
+                    pass
+                try:
+                    check_cro_reminders()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         count = self.get_queryset().filter(is_read=False).count()
         return Response({'count': count})
 

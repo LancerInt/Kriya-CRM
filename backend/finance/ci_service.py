@@ -244,9 +244,9 @@ def generate_ci_pdf(ci):
         [Paragraph('Exporter', s8b), Paragraph('Notify', s8b), '', rc],
         [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.notify_company_name or '', s8b), '', ''],
         [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(ci.notify_address or '', s7), '', ''],
-        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(ci.client_address or '', s7), '', ''],
-        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(ci.client_pincode or '', s7), '', ''],
-        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(ci.client_tax_number or '', s7), '', ''],
+        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(ci.client_city_state_country or '', s7), '', ''],
+        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(ci.client_tax_number or '', s7), '', ''],
+        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(ci.client_pincode or '', s7), '', ''],
         [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(ci.notify_phone or '', s7), '', ''],
         [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', s7), '', '', ''],
         [Paragraph(f'IEC : {EXPORTER["iec"]}', s7), '', '', ''],
@@ -357,12 +357,10 @@ def generate_ci_pdf(ci):
          Paragraph('<b>A/C No.</b>', lb), Paragraph(bkv("A/C No"), vl)],
         [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(sv(ci.buyer_order_no), vl),
          Paragraph('<b>A/C Type</b>', lb), Paragraph(bkv("A/C Type"), vl)],
-        [Paragraph('<b>Exchange Rate per USD</b>', lb), Paragraph(f': Rs.{ci.exchange_rate}' if ci.exchange_rate else '', vl),
-         '', ''],
         [Paragraph('<b>Batch No.</b>', lb), Paragraph(sv(ci.batch_no) if hasattr(ci, 'batch_no') else '', vl),
          '', ''],
     ]
-    st = Table(grid, colWidths=sc, rowHeights=[_rh]*10)
+    st = Table(grid, colWidths=sc, rowHeights=[_rh]*len(grid))
     st.setStyle(TableStyle([
         ('FONTSIZE', (0,0), (-1,-1), 7),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -398,35 +396,43 @@ def generate_ci_pdf(ci):
     el.append(pd_title)
     el.append(Spacer(1, 1*mm))
 
-    # Product Name(30) | Packages(30) | Product Details(38) | Qty(16) | Price/Kg(22) | USD(27) | INR(27) = 190mm
-    CW = [30*mm, 30*mm, 38*mm, 16*mm, 22*mm, 27*mm, 27*mm]
+    # Product Details(22) | No.&Kind of Packages(48) | Description of Goods(42) | Qty(18) | Price/Ltr(25) | Amount(35) = 190mm
+    CW = [22*mm, 48*mm, 42*mm, 18*mm, 25*mm, 35*mm]
 
-    hs = ParagraphStyle('hs', fontSize=7, fontName=_bf, textColor=W, leading=9)
+    hs = ParagraphStyle('hs', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=1)
     hsr = ParagraphStyle('hsr', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=2)
     hsc = ParagraphStyle('hsc', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=1)
     hdr = [
-        Paragraph('Product Name', hs),
+        Paragraph('Product<br/>Details', hs),
         Paragraph('No. & Kind of<br/>Packages', hs),
-        Paragraph('Product Details', hs),
+        Paragraph('Description<br/>of Goods', hs),
         Paragraph('Quantity', hsc),
-        Paragraph('Price/Kg', hsr),
-        Paragraph('Amount in<br/>USD', hsr),
-        Paragraph('Amount in<br/>INR', hsr),
+        Paragraph('Price/Ltr', hsr),
+        Paragraph('Amount', hsr),
     ]
 
-    _bs = ParagraphStyle('bs', fontSize=7, leading=9, fontName=_br)
+    _bs = ParagraphStyle('bs', fontSize=6.5, leading=8, fontName=_br)
+    _bsc = ParagraphStyle('bsc', fontSize=6.5, leading=8, fontName=_br)
+    _bsb = ParagraphStyle('bsb', fontSize=6.5, leading=8, fontName=_bf)
     data = [hdr]
     xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
+
+    def _ci_wrap(text, style=None):
+        import re as _re
+        s = text or ''
+        s = _re.sub(r' {2,}', lambda m: '&nbsp;' * len(m.group(0)), s)
+        s = s.replace('\r\n', '\n').replace('\n', '<br/>')
+        s = s.replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
+        return Paragraph(s, style or _bs)
+
     for item in ci.items.all():
-        inr_val = float(item.total_price) * xrate if xrate else 0
         data.append([
-            Paragraph(item.product_name or '', _bs),
-            Paragraph(item.packages_description or '', _bs),
-            Paragraph(item.description_of_goods or '', _bs),
-            f'{item.quantity:,.0f}',
-            f'{item.unit_price:,.2f}',
-            f'${item.total_price:,.2f}',
-            f'Rs.{inr_val:,.2f}' if xrate else 'Rs.0.00',
+            _ci_wrap(item.product_name, _bsb),
+            _ci_wrap(item.packages_description, _bsc),
+            _ci_wrap(item.description_of_goods, _bsc),
+            Paragraph(f'{item.quantity:,.0f} {item.unit}', _bsc),
+            Paragraph(f'$ {item.unit_price:,.2f}', ParagraphStyle('pr', fontSize=7, leading=9, fontName=_br, alignment=2)),
+            Paragraph(f'$ {item.total_price:,.2f}', ParagraphStyle('au', fontSize=7, leading=9, fontName=_br, alignment=2)),
         ])
 
     it = Table(data, colWidths=CW)
@@ -434,9 +440,7 @@ def generate_ci_pdf(ci):
         # Header styling
         ('BACKGROUND', (0,0), (-1,0), G),
         ('TEXTCOLOR', (0,0), (-1,0), W),
-        # Body styling — regular weight, clean
-        ('FONT', (0,1), (-1,-1), _br),
-        ('FONTSIZE', (0,1), (-1,-1), 8),
+        # Body styling — handled by Paragraph styles, not table-level overrides
         # Alignment: left for text cols, center for Qty, right for numbers
         ('ALIGN', (0,1), (2,-1), 'LEFT'),
         ('ALIGN', (3,1), (3,-1), 'CENTER'),
@@ -445,10 +449,10 @@ def generate_ci_pdf(ci):
         # Compact padding with extra gap between columns
         ('TOPPADDING', (0,0), (-1,0), 4),
         ('BOTTOMPADDING', (0,0), (-1,0), 4),
-        ('TOPPADDING', (0,1), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,1), (-1,-1), 3),
-        ('LEFTPADDING', (0,0), (-1,-1), 5),
-        ('RIGHTPADDING', (0,0), (-1,-1), 5),
+        ('TOPPADDING', (0,1), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,1), (-1,-1), 2),
+        ('LEFTPADDING', (0,1), (-1,-1), 2),
+        ('RIGHTPADDING', (0,1), (-1,-1), 2),
     ]))
     el.append(it)
 
@@ -459,30 +463,31 @@ def generate_ci_pdf(ci):
     total_inr = total_usd * xrate
     frt = float(ci.freight or 0)
     ins = float(ci.insurance or 0)
-    disc_usd = float(ci.display_overrides.get('_ci_discount_usd', 0) if isinstance(ci.display_overrides, dict) else 0) or 0
-    disc_inr = float(ci.display_overrides.get('_ci_discount', 0) if isinstance(ci.display_overrides, dict) else 0) or 0
+    ov = ci.display_overrides if isinstance(ci.display_overrides, dict) else {}
+    disc_mode = ov.get('_ci_discount_mode', 'usd')
+    disc_input = float(ov.get('_ci_discount_usd', 0) or 0)
+    disc_usd = (total_usd * disc_input / 100) if disc_mode == 'percent' else disc_input
+    disc_inr = disc_usd * xrate if xrate else 0
     sub_usd = total_usd + frt + ins
     sub_inr = sub_usd * xrate
     igst_r = float(ci.igst_rate or 0)
     igst_a = sub_inr * igst_r / 100
     grand_inr = sub_inr + igst_a - disc_inr
 
-    # Use same CW columns: spacer fills first 4 cols, then label(Price/Kg) + USD + INR
-    # CW = [30, 30, 38, 16, 22, 27, 27] = 190mm
-    # We want: empty(30+30+38) | label(16+22=38) | USD(27) | INR(27)
-    _spacer = CW[0] + CW[1] + CW[2]  # 98mm
-    _label = CW[3] + CW[4]  # 38mm
-    _usd = CW[5]  # 27mm
-    _inr = CW[6]  # 27mm
-    tcw = [_spacer, _label, _usd, _inr]
+    # Totals: spacer | label | amount
+    TW = sum(CW)  # 190mm
+    _amt = 40*mm
+    _label = 30*mm
+    _spacer = TW - _amt - _label
+    tcw = [_spacer, _label, _amt]
 
-    totals_data = [
-        ['', 'Discount', f'${disc_usd:,.2f}', f'Rs.{disc_inr:,.2f}'],
-        ['', 'Sub Total', f'${sub_usd:,.2f}', f'Rs.{sub_inr:,.2f}' if xrate else '-'],
-    ]
-    if igst_r:
-        totals_data.append(['', f'GST {igst_r}%', '', f'Rs.{igst_a:,.2f}' if xrate else '-'])
-    totals_data.append(['', Paragraph('<b>Grand Total</b>', ts_g), '', Paragraph(f'<b>Rs.{grand_inr:,.2f}</b>', ts_g) if xrate else Paragraph('-', ts_g)])
+    # Grand total in USD (primary currency)
+    grand_usd = sub_usd - disc_usd
+
+    totals_data = []
+    if disc_usd:
+        totals_data.append(['', f'Discount{f" ({disc_input}%)" if disc_mode == "percent" else ""}', f'$ {disc_usd:,.2f}'])
+    totals_data.append(['', Paragraph('<b>Grand Total</b>', ts_g), Paragraph(f'<b>$ {grand_usd:,.2f}</b>', ts_g)])
 
     tot = Table(totals_data, colWidths=tcw)
     tot.setStyle(TableStyle([
@@ -508,7 +513,11 @@ def generate_ci_pdf(ci):
     # ═══ Amount Chargeable strip ═══
     TW = sum(CW)
     ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1)
-    ac = Table([[Paragraph(f'Amount In Words : {ci.amount_in_words or ""}', ac_style)]], colWidths=[TW])
+    # Auto-generate amount in words if not manually set
+    _aiw = ci.amount_in_words
+    if not _aiw and grand_usd > 0:
+        _aiw = f'USD {_number_to_words(round(grand_usd), "").strip()} Dollars Only'
+    ac = Table([[Paragraph(f'Amount Chargeable : {_aiw or ""}', ac_style)]], colWidths=[TW])
     ac.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#dce9d0')),
         ('TOPPADDING', (0,0), (-1,-1), 4),
@@ -641,7 +650,7 @@ def send_ci_email(ci, user):
 
 
 def _number_to_words(num, currency='USD'):
-    """Convert number to words (simplified)."""
+    """Convert number to words with Indian numbering (Lakh, Crore)."""
     try:
         ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
                 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
@@ -649,17 +658,21 @@ def _number_to_words(num, currency='USD'):
         tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
 
         def _convert(n):
+            n = int(n)
             if n < 20:
-                return ones[int(n)]
+                return ones[n]
             if n < 100:
-                return tens[int(n) // 10] + (' ' + ones[int(n) % 10] if int(n) % 10 else '')
+                return tens[n // 10] + (' ' + ones[n % 10] if n % 10 else '')
             if n < 1000:
-                return ones[int(n) // 100] + ' Hundred' + (' and ' + _convert(int(n) % 100) if int(n) % 100 else '')
-            if n < 1000000:
-                return _convert(int(n) // 1000) + ' Thousand' + (' ' + _convert(int(n) % 1000) if int(n) % 1000 else '')
-            return str(int(n))
+                return ones[n // 100] + ' Hundred' + (' ' + _convert(n % 100) if n % 100 else '')
+            if n < 100000:
+                return _convert(n // 1000) + ' Thousand' + (' ' + _convert(n % 1000) if n % 1000 else '')
+            if n < 10000000:
+                return _convert(n // 100000) + ' Lakh' + (' ' + _convert(n % 100000) if n % 100000 else '')
+            return _convert(n // 10000000) + ' Crore' + (' ' + _convert(n % 10000000) if n % 10000000 else '')
 
         whole = int(num)
-        return f'{currency} {_convert(whole)} Only'
+        prefix = f'{currency} ' if currency else ''
+        return f'{prefix}{_convert(whole)} Only'
     except Exception:
         return f'{currency} {num:,.2f}'

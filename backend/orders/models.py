@@ -11,7 +11,7 @@ class Order(TimeStampedModel):
         PIF_SENT = 'pif_sent', 'PIF Sent'
         DOCS_PREPARING = 'docs_preparing', 'Documents Preparing'
         DOCS_APPROVED = 'docs_approved', 'Documents Approved'
-        FACTORY_READY = 'factory_ready', 'Under Filling/Packing'
+        FACTORY_READY = 'factory_ready', 'Product Readiness'
         CONTAINER_BOOKED = 'container_booked', 'Container Booked'
         INSPECTION = 'inspection', 'Under Inspection'
         INSPECTION_PASSED = 'inspection_passed', 'Inspection Passed'
@@ -43,6 +43,16 @@ class Order(TimeStampedModel):
     po_document = models.FileField(upload_to='purchase_orders/%Y/%m/', blank=True, null=True)
     po_number = models.CharField(max_length=100, blank=True)
     po_received_date = models.DateField(null=True, blank=True)
+
+    # Product-readiness checklist — items must all be checked before Documents Preparing.
+    # Shape: [{ 'label': 'Product', 'checked': False, 'required': True }, ...]
+    readiness_checklist = models.JSONField(default=list, blank=True)
+
+    # CRO (Container Release Order) reminder tracking — nudged every 4h after Container Booked
+    last_cro_reminder_at = models.DateTimeField(null=True, blank=True)
+
+    # Delivery acknowledgment reminder — fired once before estimated delivery
+    delivery_reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
     # Status timestamps (auto-populated by workflow engine)
     confirmed_at = models.DateTimeField(null=True, blank=True)
@@ -108,12 +118,29 @@ class OrderDocument(TimeStampedModel):
     """Documents attached to an order (PI, PO, invoice, packing list, etc.)"""
     class DocType(models.TextChoices):
         PI = 'pi', 'Proforma Invoice'
+        PIF = 'pif', 'Packing Instructions Form'
         PO = 'po', 'Purchase Order'
         COMMERCIAL_INVOICE = 'commercial_invoice', 'Commercial Invoice'
         PACKING_LIST = 'packing_list', 'Packing List'
         BL = 'bl', 'Bill of Lading'
         COA = 'coa', 'Certificate of Analysis'
         INSURANCE = 'insurance', 'Insurance Certificate'
+        NOTE_ATTACHMENT = 'note_attachment', 'Note Attachment'
+        # Docs Preparing checklist doc types
+        CLIENT_INVOICE = 'client_invoice', 'Client Invoice'
+        CLIENT_PACKING_LIST = 'client_packing_list', 'Client Packing List'
+        LOGISTIC_INVOICE = 'logistic_invoice', 'Logistic Invoice'
+        LOGISTIC_PACKING_LIST = 'logistic_packing_list', 'Logistic Packing List'
+        MSDS = 'msds', 'Material Safety Data Sheet'
+        DBK_DECLARATION = 'dbk_declaration', 'DBK Declaration'
+        EXAMINATION_REPORT = 'examination_report', 'Examination Report'
+        EXPORT_DECLARATION = 'export_declaration', 'Export Declaration Form'
+        FACTORY_STUFFING = 'factory_stuffing', 'Factory Stuffing'
+        NON_DG_DECLARATION = 'non_dg_declaration', 'Non-DG Declaration'
+        CRO = 'cro', 'Container Release Order'
+        SHIPPING_BILL = 'shipping_bill', 'Shipping Bill'
+        SCHEDULE_LIST = 'schedule_list', 'Schedule List'
+        COO = 'coo', 'Certificate of Origin'
         OTHER = 'other', 'Other'
 
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_documents')
@@ -164,3 +191,13 @@ class EmailLog(TimeStampedModel):
     class Meta:
         db_table = 'email_logs'
         ordering = ['-created_at']
+
+
+class OrderFeedback(TimeStampedModel):
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='feedback')
+    comments = models.TextField(blank=True)
+    issues = models.TextField(blank=True)
+    bulk_order_interest = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'order_feedback'

@@ -72,7 +72,7 @@ const labelMap = {
   pif_sent: "PIF Sent",
   docs_preparing: "Docs Preparing",
   docs_approved: "Docs Approved",
-  factory_ready: "Under Filling/Packing",
+  factory_ready: "Product Readiness",
   container_booked: "Container Booked",
   inspection_passed: "Inspection Passed",
   in_transit: "In Transit",

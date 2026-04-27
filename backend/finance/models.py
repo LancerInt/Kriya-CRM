@@ -421,3 +421,117 @@ class LogisticsInvoiceItem(models.Model):
     def save(self, *args, **kwargs):
         self.amount_usd = self.quantity * self.unit_price
         super().save(*args, **kwargs)
+
+
+class ComplianceDocument(TimeStampedModel):
+    """Covers the four export-compliance docs generated at Docs Preparing:
+    DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing Annexure.
+    Each doc keeps its editable placeholders inside the `fields` JSON dict.
+    Legal body text is baked into the PDF renderer — only placeholders vary.
+    """
+    class DocType(models.TextChoices):
+        DBK_DECLARATION = 'dbk_declaration', 'DBK Declaration'
+        EXAMINATION_REPORT = 'examination_report', 'Examination Report'
+        EXPORT_DECLARATION = 'export_declaration', 'Export Declaration Form'
+        FACTORY_STUFFING = 'factory_stuffing', 'Factory Stuffing Annexure'
+        NON_DG_DECLARATION = 'non_dg_declaration', 'Non-DG Declaration Letter'
+
+    doc_type = models.CharField(max_length=40, choices=DocType.choices)
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, related_name='compliance_docs')
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='compliance_docs')
+    fields = models.JSONField(default=dict, blank=True)
+    pdf_file = models.FileField(upload_to='compliance/%Y/%m/', blank=True, null=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_compliance_docs')
+
+    class Meta:
+        db_table = 'compliance_documents'
+        ordering = ['-created_at']
+        unique_together = [('order', 'doc_type')]
+
+    def __str__(self):
+        return f'{self.get_doc_type_display()} — {self.order.order_number}'
+
+
+class PackingList(TimeStampedModel):
+    """Client or Logistic Packing List — shares most fields; diverges via list_type."""
+    class ListType(models.TextChoices):
+        CLIENT = 'client', 'Client Packing List'
+        LOGISTIC = 'logistic', 'Logistic Packing List'
+
+    list_type = models.CharField(max_length=20, choices=ListType.choices)
+    invoice_number = models.CharField(max_length=50, db_index=True)
+    date = models.DateField(null=True, blank=True)
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, related_name='packing_lists')
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='packing_lists')
+
+    # Exporter is the static Kriya block; stored so it can be tweaked per doc if needed.
+    exporter_details = models.JSONField(default=dict, blank=True)
+    # Consignee (client) block — full address. For logistic it's only a one-line ("To the Order - Brazil").
+    consignee_details = models.JSONField(default=dict, blank=True)
+    consignee_to = models.CharField(max_length=255, blank=True, default='')
+    # Notify (logistic only)
+    notify_details = models.JSONField(default=dict, blank=True)
+
+    shipment_details = models.JSONField(default=dict, blank=True)
+    # items: [{product_name, no_kind_packages, description_goods, quantity}]
+    items = models.JSONField(default=list, blank=True)
+    container_details = models.CharField(max_length=255, blank=True, default='')
+    weight_summary = models.JSONField(default=dict, blank=True)
+    # loading_details (logistic only): list of lines ["TN 04 BE 0087 - DFSU 7112053 - 01 to 20 IBCs", ...]
+    loading_details = models.JSONField(default=list, blank=True)
+    declaration = models.TextField(blank=True, default='')
+    grand_total = models.CharField(max_length=100, blank=True, default='')
+
+    pdf_file = models.FileField(upload_to='packing_lists/%Y/%m/', blank=True, null=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_packing_lists')
+
+    class Meta:
+        db_table = 'packing_lists'
+        ordering = ['-created_at']
+        unique_together = [('order', 'list_type')]
+
+    def __str__(self):
+        return f'{self.invoice_number} ({self.get_list_type_display()})'
+
+
+class PackingInstructionForm(TimeStampedModel):
+    """Packing Instructions Form (PIF) — one per order line (per product line)."""
+    pif_number = models.CharField(max_length=50, unique=True, db_index=True)
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, related_name='pifs')
+    order_item = models.ForeignKey('orders.OrderItem', on_delete=models.CASCADE, related_name='pifs')
+    client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='pifs')
+
+    po_no = models.CharField(max_length=100, blank=True, default='')
+    pif_date = models.DateField(null=True, blank=True)
+
+    # Product details (left block)
+    product_name = models.CharField(max_length=255, blank=True, default='')
+    product_description = models.CharField(max_length=500, blank=True, default='')
+    packing_description = models.CharField(max_length=500, blank=True, default='')
+    quantity = models.CharField(max_length=100, blank=True, default='')
+
+    # Notes block (right of product details)
+    notes = models.TextField(blank=True, default='')
+
+    # Container details — two sub-blocks (JSON)
+    # { 'type': '', 'bottle_colour': '', 'cap_colour': '', 'cap_type': '', 'measuring_cups': '' }
+    container_left = models.JSONField(default=dict, blank=True)
+    # { 'colour': '', 'box_thickness': '', 'carton_box_label': '', 'batch_sticker': '', 'batch_no': '' }
+    container_right = models.JSONField(default=dict, blank=True)
+
+    # Dynamic repeating packing sections
+    # [ { 'label': '100 ml', 'quantity_left': {...}, 'accessories_right': {...} }, ... ]
+    packing_sections = models.JSONField(default=list, blank=True)
+
+    # Footer paragraph (editable)
+    footer_note = models.TextField(blank=True, default='')
+
+    pdf_file = models.FileField(upload_to='pif/%Y/%m/', blank=True, null=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_pifs')
+
+    class Meta:
+        db_table = 'packing_instruction_forms'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.pif_number} - {self.product_name}'

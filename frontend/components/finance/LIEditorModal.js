@@ -7,7 +7,7 @@ const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'
 const SUB_MAP = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','a':'ₐ','e':'ₑ','h':'ₕ','i':'ᵢ','j':'ⱼ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','o':'ₒ','p':'ₚ','r':'ᵣ','s':'ₛ','t':'ₜ','u':'ᵤ','v':'ᵥ','x':'ₓ' };
 const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] || c).join('');
 
-export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, liItems, setLiItems, onSave, onSend, onPreview, sending }) {
+export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, liItems, setLiItems, onSave, onGeneratePdf, generating }) {
   const editorRef = useRef(null);
   const [scriptMode, setScriptMode] = useState(null);
 
@@ -103,7 +103,12 @@ export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, li
       igst_amount: igstAmount,
       grand_total_inr: grandTotalInr,
     }));
-    setTimeout(() => onSave(), 50);
+    return new Promise((resolve) => {
+      setTimeout(async () => {
+        try { await onSave?.(); } catch {}
+        resolve();
+      }, 50);
+    });
   };
 
   const G = "#4F7F2A";
@@ -364,11 +369,12 @@ export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, li
         <p className="text-center text-xs font-bold text-gray-600 border-t border-gray-300 pt-2">" Go Organic ! Save Planet ! "</p>
 
         {/* ACTION BUTTONS */}
-        <div className="flex gap-3 mt-4 pt-3 border-t border-gray-200">
-          <button onClick={handleSaveWithTotals} className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700">Save</button>
-          <button onClick={onPreview} className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">Preview PDF</button>
-          <button onClick={onSend} disabled={sending} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">{sending ? "Sending..." : "Send Email"}</button>
-          <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Close</button>
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+          <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
+          <button onClick={async () => { await handleSaveWithTotals(); await onGeneratePdf?.(); }} disabled={generating} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {generating ? "Generating..." : "Save & Generate PDF"}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>
       </div>
     </Modal>

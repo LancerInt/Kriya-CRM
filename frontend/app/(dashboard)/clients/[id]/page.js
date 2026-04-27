@@ -775,10 +775,17 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       }
       if (!comm) return false;
       if (comm.draft_id) {
-        await openDraft(comm.draft_id);
-        return true;
+        // Check if draft is still active (not already sent)
+        try {
+          const dr = await api.get(`/communications/drafts/${comm.draft_id}/`);
+          if (dr.data?.status === 'draft') {
+            await openDraft(comm.draft_id);
+            return true;
+          }
+        } catch {}
+        // Draft was already sent — create a new one
       }
-      // No draft exists yet — create one on the fly
+      // No active draft — create one on the fly
       try {
         const r = await api.post(`/communications/${commIdToOpen}/generate-draft/`);
         if (r.data?.id) {
@@ -890,6 +897,22 @@ function CommunicationsTab({ clientId, activeTab, client }) {
               subject: prev.subject || `Sample Dispatched: ${productLabel}`,
               body: dispatchHtml,
             }));
+
+            // Attach COA/MSDS documents from sample
+            const docs = sr.data.documents || [];
+            if (docs.length > 0) {
+              const docFiles = [];
+              for (const doc of docs) {
+                try {
+                  const fileRes = await fetch(doc.file);
+                  const blob = await fileRes.blob();
+                  docFiles.push(new File([blob], doc.name, { type: "application/pdf" }));
+                } catch {}
+              }
+              if (docFiles.length > 0) {
+                setDraftAttachments(prev => [...prev, ...docFiles]);
+              }
+            }
           } catch {
             // Best-effort; silent fail keeps the original AI draft body intact
           }
@@ -984,7 +1007,26 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         fd.append("body", draftForm.body);
         fd.append("cc", draftForm.cc || "");
         draftAttachments.forEach(file => fd.append("attachments", file));
-        await api.post(`/communications/drafts/${draftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        try {
+          await api.post(`/communications/drafts/${draftId}/save-draft/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        } catch {
+          // If save-draft fails (e.g. draft already sent), create a fresh draft with attachments
+          const created = await api.post("/communications/drafts/", {
+            communication: draft.communication,
+            client: draft.client || clientId,
+            subject: draftForm.subject,
+            body: draftForm.body,
+            to_email: draft.to_email,
+            cc: draftForm.cc || "",
+          });
+          draftId = created.data.id;
+          const fd2 = new FormData();
+          fd2.append("subject", draftForm.subject);
+          fd2.append("body", draftForm.body);
+          fd2.append("cc", draftForm.cc || "");
+          draftAttachments.forEach(file => fd2.append("attachments", file));
+          await api.post(`/communications/drafts/${draftId}/save-draft/`, fd2, { headers: { "Content-Type": "multipart/form-data" } });
+        }
       }
 
       // Close modal immediately
@@ -1396,7 +1438,15 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                 <div className="mt-2 space-y-1">
                   {draftAttachments.map((file, i) => (
                     <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-xs">
-                      <div className="flex items-center gap-2">
+                      <div
+                        onClick={() => {
+                          if (file.type === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf")) {
+                            const url = URL.createObjectURL(file);
+                            window.open(url, "_blank");
+                          }
+                        }}
+                        className={`flex items-center gap-2 ${file.name?.toLowerCase().endsWith(".pdf") ? "cursor-pointer hover:underline text-indigo-600" : ""}`}
+                      >
                         <span className="text-gray-500">📄</span>
                         <span className="font-medium">{file.name}</span>
                         <span className="text-gray-400">{(file.size / 1024).toFixed(1)} KB</span>

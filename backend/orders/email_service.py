@@ -8,20 +8,20 @@ logger = logging.getLogger(__name__)
 
 STATUS_EMAIL_TEMPLATES = {
     'inspection_passed': {
-        'subject': 'Inspection Passed - {order_number}',
-        'body': 'Your order {order_number} has passed quality inspection and will be dispatched shortly.',
+        'subject': 'Inspection Passed',
+        'body': 'Your order has passed quality inspection and will be dispatched shortly.',
     },
     'dispatched': {
-        'subject': 'Shipment Dispatched - {order_number}',
-        'body': 'Your order {order_number} has been dispatched. Container: {container}, B/L: {bl_number}. ETA: {eta}.',
+        'subject': 'Shipment Dispatched',
+        'body': 'Your order has been dispatched. Container: {container}, B/L: {bl_number}. ETA: {eta}.',
     },
     'in_transit': {
-        'subject': 'Shipment In Transit - {order_number}',
-        'body': 'Your order {order_number} is now in transit. ETA: {eta}.',
+        'subject': 'Shipment In Transit',
+        'body': 'Your order is now in transit. ETA: {eta}.',
     },
     'delivered': {
-        'subject': 'Order Delivered - {order_number}',
-        'body': 'Your order {order_number} has been successfully delivered. Thank you for your business.',
+        'subject': 'Order Delivered',
+        'body': 'Your order has been successfully delivered. Thank you for your business.',
     },
 }
 
@@ -53,23 +53,20 @@ def send_order_status_email(order, status):
     bl_number = shipment.bl_number if shipment else 'TBD'
     eta = str(shipment.estimated_arrival) if shipment and shipment.estimated_arrival else 'TBD'
 
-    # Build email
-    subject = template['subject'].format(order_number=order.order_number)
+    # Build email — order number is intentionally NOT exposed to the client.
+    subject = template['subject']
     body_text = template['body'].format(
-        order_number=order.order_number,
         container=container, bl_number=bl_number, eta=eta,
     )
 
     body_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;">
-        <h2 style="color:#1e3a5f;">Order Update: {order.order_number}</h2>
+        <h2 style="color:#1e3a5f;">Order Update</h2>
         <p>Dear {contact.name},</p>
         <p>{body_text}</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <tr><td style="padding:8px;color:#666;width:140px;">Order No.</td><td style="padding:8px;font-weight:bold;">{order.order_number}</td></tr>
-            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Status</td><td style="padding:8px;">{order.get_status_display()}</td></tr>
-            <tr><td style="padding:8px;color:#666;">Client</td><td style="padding:8px;">{order.client.company_name}</td></tr>
-            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Total</td><td style="padding:8px;">{order.currency} {order.total:,.2f}</td></tr>
+            <tr><td style="padding:8px;color:#666;width:140px;">Status</td><td style="padding:8px;">{order.get_status_display()}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Client</td><td style="padding:8px;">{order.client.company_name}</td></tr>
         </table>
         <p>Best regards,<br/>Kriya Biosys Private Limited</p>
     </div>

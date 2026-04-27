@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
  * the Kriya Biosys standard MSDS template. All values are editable, labels
  * are static. Generates a professional PDF for email attachment.
  */
-export default function MSDSEditorModal({ open, onClose, onGenerate, productName, initialData, onStateChange }) {
+export default function MSDSEditorModal({ open, onClose, onGenerate, productName, initialData, onStateChange, docsMode, generating }) {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [form, setForm] = useState({
     // Section 1
@@ -281,27 +281,39 @@ export default function MSDSEditorModal({ open, onClose, onGenerate, productName
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
-        <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
-        <div className="flex gap-2">
-          <button
-            onClick={async () => {
-              if (!form.product_name.trim()) { alert("Please enter the Product Name"); return; }
-              try {
-                const res = await api.post("/communications/generate-msds-pdf/", form, { responseType: "blob" });
-                setPdfPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })));
-              } catch { toast.error("Failed to generate preview"); }
-            }}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
-          >
-            Preview PDF
-          </button>
+      {docsMode ? (
+        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+          <button onClick={() => toast.success("Saved")} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
           <button onClick={() => { if (!form.product_name.trim()) { alert("Please enter Product Name"); return; } onGenerate?.(form); }}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-            Generate & Attach to Email
+            disabled={generating}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {generating ? "Generating..." : "Save & Generate PDF"}
           </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (!form.product_name.trim()) { alert("Please enter the Product Name"); return; }
+                try {
+                  const res = await api.post("/communications/generate-msds-pdf/", form, { responseType: "blob" });
+                  setPdfPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })));
+                } catch { toast.error("Failed to generate preview"); }
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+            >
+              Preview PDF
+            </button>
+            <button onClick={() => { if (!form.product_name.trim()) { alert("Please enter Product Name"); return; } onGenerate?.(form); }}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+              Generate & Attach to Email
+            </button>
+          </div>
+        </div>
+      )}
 
       {pdfPreviewUrl && (
         <div className="fixed inset-0 z-[99999] bg-black/70 flex items-center justify-center p-4" onClick={() => { URL.revokeObjectURL(pdfPreviewUrl); setPdfPreviewUrl(null); }}>

@@ -2,8 +2,8 @@ from common.models import SoftDeleteViewMixin
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Sample, SampleFeedback
-from .serializers import SampleSerializer, SampleFeedbackSerializer
+from .models import Sample, SampleFeedback, SampleDocument
+from .serializers import SampleSerializer, SampleFeedbackSerializer, SampleDocumentSerializer
 from notifications.helpers import notify
 
 
@@ -339,3 +339,36 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             actor=request.user, client=sample.client,
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='documents')
+    def documents(self, request, pk=None):
+        """List or upload documents for a sample."""
+        sample = self.get_object()
+        if request.method == 'GET':
+            docs = SampleDocument.objects.filter(sample=sample).order_by('-created_at')
+            return Response(SampleDocumentSerializer(docs, many=True).data)
+        # POST — upload
+        f = request.FILES.get('file')
+        if not f:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        doc = SampleDocument.objects.create(
+            sample=sample,
+            doc_type=request.data.get('doc_type', 'other'),
+            name=request.data.get('name', f.name),
+            file=f,
+            uploaded_by=request.user,
+        )
+        return Response(SampleDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], url_path='documents/(?P<doc_id>[^/.]+)')
+    def delete_document(self, request, pk=None, doc_id=None):
+        """Delete a sample document (admin/manager only)."""
+        if request.user.role not in ('admin', 'manager'):
+            return Response({'error': 'Only admin and manager can delete documents'}, status=status.HTTP_403_FORBIDDEN)
+        sample = self.get_object()
+        try:
+            doc = SampleDocument.objects.get(id=doc_id, sample=sample)
+            doc.delete()
+            return Response({'status': 'deleted'})
+        except SampleDocument.DoesNotExist:
+            return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)

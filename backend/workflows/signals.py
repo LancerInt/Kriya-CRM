@@ -32,7 +32,7 @@ def _email_client_status(shipment, title, message):
     if original_subject:
         subject = f'Re: {original_subject}' if not original_subject.startswith('Re:') else original_subject
     else:
-        subject = f'Shipment Update: {shipment.shipment_number} - {title}'
+        subject = f'Shipment Update: {title}'
 
     from communications.services import EmailService
     body_html = f"""
@@ -41,10 +41,9 @@ def _email_client_status(shipment, title, message):
         <p>Dear {contact.name},</p>
         <p>{message}</p>
         <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <tr><td style="padding:8px;color:#666;width:140px;">Shipment No.</td><td style="padding:8px;font-weight:bold;">{shipment.shipment_number}</td></tr>
-            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">Container</td><td style="padding:8px;">{shipment.container_number or 'TBD'}</td></tr>
-            <tr><td style="padding:8px;color:#666;">B/L Number</td><td style="padding:8px;">{shipment.bl_number or 'TBD'}</td></tr>
-            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">ETA</td><td style="padding:8px;">{shipment.estimated_arrival or 'TBD'}</td></tr>
+            <tr><td style="padding:8px;color:#666;width:140px;">Container</td><td style="padding:8px;">{shipment.container_number or 'TBD'}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;color:#666;">B/L Number</td><td style="padding:8px;">{shipment.bl_number or 'TBD'}</td></tr>
+            <tr><td style="padding:8px;color:#666;">ETA</td><td style="padding:8px;">{shipment.estimated_arrival or 'TBD'}</td></tr>
         </table>
         <p>Best regards,<br/>Kriya Biosys Private Limited</p>
     </div>
@@ -59,11 +58,11 @@ def _email_client_status(shipment, title, message):
     Communication.objects.create(
         client=shipment.client, contact=contact,
         comm_type='email', direction='outbound',
-        subject=f'Shipment Update: {shipment.shipment_number} - {title}',
+        subject=subject,
         body=body_html, status='sent', email_account=email_account,
         external_email=contact.email,
     )
-    logger.info(f'Status email sent to {contact.email} for {shipment.shipment_number}')
+    logger.info(f'Status email sent to {contact.email} for shipment {shipment.id}')
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +163,7 @@ def on_shipment_status_change(sender, instance, created, **kwargs):
 
     # Status display messages for client emails
     STATUS_MESSAGES = {
-        'factory_ready': ('Under Filling/Packing', 'Your order is under filling and packing process.'),
+        'factory_ready': ('Product Readiness', 'Your product is ready for dispatch.'),
         'container_booked': ('Container Booked', 'A container/vessel has been booked for your shipment.'),
         'packed': ('Shipment Packed', 'Your order has been packed and is ready for inspection.'),
         'inspection': ('Under Inspection', 'Your shipment is currently under quality inspection.'),

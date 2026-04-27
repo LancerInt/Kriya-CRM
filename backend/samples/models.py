@@ -63,6 +63,27 @@ class SampleItem(models.Model):
         return f'{self.product_name or "(no product)"} — {self.quantity or "(no qty)"}'
 
 
+class SampleDocument(TimeStampedModel):
+    """Documents attached to a sample (COA, MSDS, etc.)"""
+    class DocType(models.TextChoices):
+        COA = 'coa', 'Certificate of Analysis'
+        MSDS = 'msds', 'Material Safety Data Sheet'
+        OTHER = 'other', 'Other'
+
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE, related_name='documents')
+    doc_type = models.CharField(max_length=20, choices=DocType.choices)
+    name = models.CharField(max_length=255)
+    file = models.FileField(upload_to='sample_documents/%Y/%m/')
+    uploaded_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        db_table = 'sample_documents'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_doc_type_display()} - {self.name}'
+
+
 class SampleFeedback(TimeStampedModel):
     sample = models.OneToOneField(Sample, on_delete=models.CASCADE, related_name='feedback')
     rating = models.IntegerField(null=True, blank=True)

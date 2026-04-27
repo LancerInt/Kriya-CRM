@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import api from "@/lib/axios";
@@ -14,6 +14,11 @@ import PIEditorModal from "@/components/finance/PIEditorModal";
 import CIEditorModal from "@/components/finance/CIEditorModal";
 import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import LIEditorModal from "@/components/finance/LIEditorModal";
+import { PIFListModal } from "@/components/finance/PIFEditorModal";
+import PackingListEditorModal from "@/components/finance/PackingListEditorModal";
+import COAEditorModal from "@/components/finance/COAEditorModal";
+import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
+import ComplianceDocEditorModal from "@/components/finance/ComplianceDocEditorModal";
 
 function fmtDate(d) { if (!d) return "\u2014"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
@@ -53,6 +58,7 @@ export default function OrderDetailPage() {
   const { id } = useParams();
   const currentUser = useSelector((state) => state.auth.user);
   const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
+  const canSeeExecutive = currentUser?.role === "admin" || currentUser?.role === "manager";
   const router = useRouter();
   const [order, setOrder] = useState(null);
   const [timeline, setTimeline] = useState([]);
@@ -60,6 +66,26 @@ export default function OrderDetailPage() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [orderFeedbackForm, setOrderFeedbackForm] = useState({ comments: "", issues: "", bulk_order_interest: false });
+  const [orderNotes, setOrderNotes] = useState([]);
+  const [newNote, setNewNote] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [noteAttachments, setNoteAttachments] = useState([]); // [{ file, kind, previewUrl }]
+  const [recording, setRecording] = useState(false);
+  const [recorder, setRecorder] = useState(null);
+  const [recordStart, setRecordStart] = useState(0);
+  const [recordElapsed, setRecordElapsed] = useState(0);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const videoRef = useRef(null);
+  const [noteExistingDocs, setNoteExistingDocs] = useState([]); // library Document refs [{id, name, filename, file}]
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [libraryDocs, setLibraryDocs] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [isDraggingNote, setIsDraggingNote] = useState(false);
   const [showPoModal, setShowPoModal] = useState(false);
   const [showPifModal, setShowPifModal] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
@@ -93,6 +119,34 @@ export default function OrderDetailPage() {
   const [liItems, setLiItems] = useState([]);
   const [liLoading, setLiLoading] = useState(false);
   const [liSending, setLiSending] = useState(false);
+  const [showPifListModal, setShowPifListModal] = useState(false);
+  const [pifReady, setPifReady] = useState(false);
+  const [pifCounts, setPifCounts] = useState({ done: 0, total: 0 });
+  const [newChecklistItem, setNewChecklistItem] = useState("");
+  const [savingChecklist, setSavingChecklist] = useState(false);
+  const [uploadChecklistFor, setUploadChecklistFor] = useState(null); // { doc_type, label }
+  const [checklistUploadFile, setChecklistUploadFile] = useState(null);
+  const [packingListType, setPackingListType] = useState(null); // "client" | "logistic" | null
+  const [showCoaEditor, setShowCoaEditor] = useState(false);
+  const [showMsdsEditor, setShowMsdsEditor] = useState(false);
+  const [complianceDocType, setComplianceDocType] = useState(null); // examination_report|dbk_declaration|export_declaration|factory_stuffing
+  const [showInspectionModal, setShowInspectionModal] = useState(false);
+  const [showCroPromptModal, setShowCroPromptModal] = useState(false);
+  const [showCroAdvanceModal, setShowCroAdvanceModal] = useState(null); // { target_status }
+  const [dispatchStep, setDispatchStep] = useState(null); // null | 'insurance' | 'delivery'
+  const [insuranceFile, setInsuranceFile] = useState(null);
+  const [insuranceUploading, setInsuranceUploading] = useState(false);
+  const [estDeliveryTime, setEstDeliveryTime] = useState("");
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const [showContainerBookedModal, setShowContainerBookedModal] = useState(false);
+  const [shipmentForm, setShipmentForm] = useState({
+    container_number: "", bl_number: "", vessel_name: "",
+    forwarder: "", cha: "", shipping_line: "",
+    port_of_loading: "", port_of_discharge: "",
+    container_booking_date: "", dispatch_date: "",
+    transit_days: "", estimated_arrival: "",
+  });
+  const [containerBookedSubmitting, setContainerBookedSubmitting] = useState(false);
   const [showQtModal, setShowQtModal] = useState(false);
   const [qt, setQt] = useState(null);
   const [qtForm, setQtForm] = useState({});
@@ -112,11 +166,202 @@ export default function OrderDetailPage() {
       if (o.data.id) {
         api.get(`/orders/${o.data.id}/documents/`).then(r => setOrderDocs(r.data || [])).catch(() => {});
       }
+      // Refresh PIF readiness whenever the order loads (gate for factory_ready button)
+      api.get(`/finance/pif/status-for-order/`, { params: { order_id: id } })
+        .then((r) => {
+          setPifReady(!!r.data.all_ready);
+          const done = (r.data.items || []).filter((it) => it.has_pdf).length;
+          setPifCounts({ done, total: r.data.count || 0 });
+        })
+        .catch(() => { setPifReady(false); setPifCounts({ done: 0, total: 0 }); });
     }).catch(() => toast.error("Failed to load order"))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { loadOrder(); }, [id]);
+
+  // Prompt to upload CRO whenever the user opens an order that's at Container
+  // Booked and has no CRO yet. Shown once per browser session per order id.
+  useEffect(() => {
+    if (!order) return;
+    if (order.status !== "container_booked") return;
+    const hasCro = orderDocs.some((d) => d.doc_type === "cro");
+    if (hasCro) return;
+    try {
+      const key = `cro-prompt-shown:${id}`;
+      if (typeof window !== "undefined" && !window.sessionStorage.getItem(key)) {
+        setShowCroPromptModal(true);
+        window.sessionStorage.setItem(key, "1");
+      }
+    } catch {}
+  }, [order?.status, orderDocs, id]);
+
+  // ── Product Readiness checklist helpers ──
+  const DEFAULT_CHECKLIST = [
+    { label: "Product", checked: false, required: true },
+    { label: "Bottle", checked: false, required: true },
+  ];
+  const checklist = (order?.readiness_checklist && order.readiness_checklist.length > 0)
+    ? order.readiness_checklist
+    : DEFAULT_CHECKLIST;
+  const checklistAllDone = checklist.length > 0 && checklist.every((it) => it.checked);
+  const checklistRequiredDone = checklist.filter((it) => it.required).every((it) => it.checked);
+
+  const saveChecklist = async (next) => {
+    setSavingChecklist(true);
+    // Optimistic update
+    setOrder((prev) => prev ? { ...prev, readiness_checklist: next } : prev);
+    try {
+      await api.patch(`/orders/${id}/`, { readiness_checklist: next });
+    } catch {
+      toast.error("Failed to save checklist");
+      loadOrder();
+    } finally {
+      setSavingChecklist(false);
+    }
+  };
+  const toggleChecklistItem = (idx) => {
+    const next = checklist.map((it, i) => i === idx ? { ...it, checked: !it.checked } : it);
+    saveChecklist(next);
+  };
+  const addChecklistItem = () => {
+    const label = newChecklistItem.trim();
+    if (!label) return;
+    if (checklist.some((it) => (it.label || "").toLowerCase() === label.toLowerCase())) {
+      toast.error("Item already in the list");
+      return;
+    }
+    const next = [...checklist, { label, checked: false, required: false }];
+    setNewChecklistItem("");
+    saveChecklist(next);
+  };
+  const removeChecklistItem = (idx) => {
+    if (checklist[idx]?.required) return;
+    const next = checklist.filter((_, i) => i !== idx);
+    saveChecklist(next);
+  };
+
+  // ── Docs-Preparing document checklist ──
+  const DOCS_APPROVAL_CHECKLIST = [
+    { doc_type: "client_invoice", label: "Client Invoice", action: "generate-ci" },
+    { doc_type: "client_packing_list", label: "Client Packing List", action: "generate-cpl" },
+    { doc_type: "logistic_invoice", label: "Logistic Invoice", action: "generate-li" },
+    { doc_type: "logistic_packing_list", label: "Logistic Packing List", action: "generate-lpl" },
+    { doc_type: "coa", label: "COA", action: "generate-coa" },
+    { doc_type: "msds", label: "MSDS", action: "generate-msds" },
+    { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk" },
+    { doc_type: "examination_report", label: "Examination Report", action: "generate-exam" },
+    { doc_type: "export_declaration", label: "Export Declaration Form", action: "generate-exportdecl" },
+    { doc_type: "factory_stuffing", label: "Factory Stuffing", action: "generate-factorystuffing" },
+    { doc_type: "non_dg_declaration", label: "Non-DG Declaration", action: "generate-nondg", optional: true },
+  ];
+  const hasDoc = (docType) => orderDocs.some((d) => d.doc_type === docType);
+  const requiredChecklistRows = DOCS_APPROVAL_CHECKLIST.filter((r) => !r.optional);
+  const docsApprovalReady = requiredChecklistRows.every((r) => hasDoc(r.doc_type));
+  const docsMissingCount = requiredChecklistRows.filter((r) => !hasDoc(r.doc_type)).length;
+
+  const openEditorForDocType = (docType) => {
+    switch (docType) {
+      case "client_invoice": handleGenerateCI(); return;
+      case "logistic_invoice": handleGenerateLI(); return;
+      case "client_packing_list": setPackingListType("client"); return;
+      case "logistic_packing_list": setPackingListType("logistic"); return;
+      case "coa": setShowCoaEditor(true); return;
+      case "msds": setShowMsdsEditor(true); return;
+      case "dbk_declaration":
+      case "examination_report":
+      case "export_declaration":
+      case "factory_stuffing":
+      case "non_dg_declaration": setComplianceDocType(docType); return;
+      case "pif": setShowPifListModal(true); return;
+      default: toast.error("This document type is not editable from here.");
+    }
+  };
+
+  const submitContainerBooked = async () => {
+    setContainerBookedSubmitting(true);
+    try {
+      const payload = { ...shipmentForm };
+      // Strip empty fields
+      Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+      await api.post(`/orders/${id}/container-booked/`, payload);
+      toast.success("Container Booked — shipment updated");
+      setShowContainerBookedModal(false);
+      setShipmentForm({
+        container_number: "", bl_number: "", vessel_name: "",
+        forwarder: "", cha: "", shipping_line: "",
+        port_of_loading: "", port_of_discharge: "",
+        container_booking_date: "", dispatch_date: "",
+        transit_days: "", estimated_arrival: "",
+      });
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to advance")); }
+    finally { setContainerBookedSubmitting(false); }
+  };
+
+  const submitInsuranceUpload = async (e) => {
+    e?.preventDefault?.();
+    if (!insuranceFile) return;
+    setInsuranceUploading(true);
+    const fd = new FormData();
+    fd.append("file", insuranceFile);
+    fd.append("doc_type", "insurance");
+    fd.append("name", `Insurance - ${insuranceFile.name}`);
+    try {
+      await api.post(`/orders/${id}/upload-document/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Insurance uploaded");
+      setInsuranceFile(null);
+      await loadOrder();
+      setDispatchStep("delivery");
+    } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
+    finally { setInsuranceUploading(false); }
+  };
+
+  const submitDispatch = async () => {
+    if (!estDeliveryTime.trim()) { toast.error("Estimated delivery time is required"); return; }
+    setDispatchSubmitting(true);
+    try {
+      const res = await api.post(`/orders/${id}/dispatch-mail-draft/`, { estimated_delivery_time: estDeliveryTime.trim() });
+      toast.success("Email draft ready — order will move to Dispatched once you send it");
+      setDispatchStep(null);
+      setEstDeliveryTime("");
+      const commId = res.data.communication_id;
+      if (commId) {
+        router.push(`/communications/${commId}`);
+      } else {
+        toast("No source email thread found — open the draft from Communications.", { icon: "ℹ️" });
+        loadOrder();
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Dispatch failed")); }
+    finally { setDispatchSubmitting(false); }
+  };
+
+  const viewOrderDoc = async (docType) => {
+    const doc = orderDocs.find((d) => d.doc_type === docType);
+    if (!doc || !doc.file) { toast.error("No file to preview yet"); return; }
+    try {
+      const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank");
+    } catch { toast.error("Failed to open document"); }
+  };
+
+  const handleChecklistUpload = async (e) => {
+    e.preventDefault();
+    if (!checklistUploadFile || !uploadChecklistFor) return;
+    const fd = new FormData();
+    fd.append("file", checklistUploadFile);
+    fd.append("doc_type", uploadChecklistFor.doc_type);
+    fd.append("name", `${uploadChecklistFor.label} - ${checklistUploadFile.name}`);
+    try {
+      await api.post(`/orders/${id}/upload-document/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`${uploadChecklistFor.label} uploaded`);
+      setUploadChecklistFor(null); setChecklistUploadFile(null);
+      loadOrder();
+    } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
+  };
 
   const handleTransition = async (newStatus) => {
     setTransitioning(true);
@@ -184,6 +429,185 @@ export default function OrderDetailPage() {
       loadOrder();
     } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
   };
+
+  const addNoteAttachment = (file, kind) => {
+    setNoteAttachments((prev) => [...prev, { file, kind, previewUrl: URL.createObjectURL(file) }]);
+  };
+
+  const pickNoteFile = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.onchange = () => {
+      const files = Array.from(input.files || []);
+      files.forEach((f) => {
+        const kind = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "voice" : "file";
+        addNoteAttachment(f, kind);
+      });
+    };
+    input.click();
+  };
+
+  const openCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      setCameraStream(stream);
+      setShowCamera(true);
+    } catch {
+      toast.error("Camera access denied");
+    }
+  };
+
+  const closeCamera = () => {
+    if (cameraStream) cameraStream.getTracks().forEach((t) => t.stop());
+    setCameraStream(null);
+    setShowCamera(false);
+  };
+
+  const capturePhoto = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
+      addNoteAttachment(file, "photo");
+      closeCamera();
+    }, "image/jpeg", 0.9);
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      const chunks = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        const ext = (mr.mimeType || "audio/webm").split("/")[1].split(";")[0];
+        const file = new File([blob], `voice-note-${Date.now()}.${ext}`, { type: blob.type });
+        addNoteAttachment(file, "voice");
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mr.start();
+      setRecorder(mr);
+      setRecording(true);
+      setRecordStart(Date.now());
+      setRecordElapsed(0);
+    } catch {
+      toast.error("Microphone access denied");
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    setRecording(false);
+    setRecorder(null);
+  };
+
+  const removeNoteAttachment = (idx) => {
+    setNoteAttachments((prev) => {
+      const removed = prev[idx];
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
+  const clearNoteAttachments = () => {
+    noteAttachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+    setNoteAttachments([]);
+    setNoteExistingDocs([]);
+  };
+
+  const addExistingDoc = (doc) => {
+    setNoteExistingDocs((prev) => prev.some((d) => d.id === doc.id) ? prev : [...prev, doc]);
+  };
+
+  const removeExistingDoc = (docId) => {
+    setNoteExistingDocs((prev) => prev.filter((d) => d.id !== docId));
+  };
+
+  const openLibraryPicker = async () => {
+    setShowDocPicker(true);
+    if (libraryDocs.length > 0) return;
+    setLibraryLoading(true);
+    try {
+      const res = await api.get("/documents/");
+      setLibraryDocs(res.data.results || res.data || []);
+    } catch { toast.error("Failed to load documents"); }
+    finally { setLibraryLoading(false); }
+  };
+
+  const handleNoteDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingNote(false);
+    const files = Array.from(e.dataTransfer?.files || []);
+    files.forEach((f) => {
+      const kind = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "voice" : "file";
+      addNoteAttachment(f, kind);
+    });
+  };
+
+  const handleNotePaste = (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    let added = false;
+    for (const item of items) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) {
+          const kind = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "voice" : "file";
+          const named = f.name && f.name !== "image.png"
+            ? f
+            : new File([f], `pasted-${Date.now()}.${(f.type.split("/")[1] || "bin")}`, { type: f.type });
+          addNoteAttachment(named, kind);
+          added = true;
+        }
+      }
+    }
+    if (added) e.preventDefault();
+  };
+
+  const submitNote = async () => {
+    if (!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0) return;
+    try {
+      if (noteAttachments.length > 0 || noteExistingDocs.length > 0) {
+        const fd = new FormData();
+        fd.append("event_type", "note");
+        fd.append("description", newNote.trim());
+        noteAttachments.forEach((a) => {
+          fd.append("attachments", a.file);
+          fd.append("attachment_kinds", a.kind);
+        });
+        noteExistingDocs.forEach((d) => fd.append("library_documents", d.id));
+        await api.post(`/orders/${id}/events/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      } else {
+        await api.post(`/orders/${id}/events/`, { event_type: "note", description: newNote.trim() });
+      }
+      setNewNote("");
+      clearNoteAttachments();
+      loadOrder();
+      toast.success("Note added");
+    } catch { toast.error("Failed to add note"); }
+  };
+
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => setRecordElapsed(Math.floor((Date.now() - recordStart) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [recording, recordStart]);
+
+  useEffect(() => {
+    if (showCamera && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+    }
+  }, [showCamera, cameraStream]);
+
+  useEffect(() => () => {
+    if (cameraStream) cameraStream.getTracks().forEach((t) => t.stop());
+  }, []);
 
   const handleDownloadPDF = async () => {
     try {
@@ -454,15 +878,12 @@ export default function OrderDetailPage() {
     <div>
       <PageHeader
         title={`Order ${order.order_number}`}
-        subtitle={`${order.client_name} \u00b7 ${order.currency} ${Number(order.total).toLocaleString()}`}
+        subtitle={`${order.client_name}${order.can_view_total ? ` \u00b7 ${order.currency} ${Number(order.total || 0).toLocaleString()}` : ""}${canSeeExecutive && order.client_primary_executive_name ? ` \u00b7 Executive: ${order.client_primary_executive_name}` : ""}`}
         action={
           <div className="flex gap-2">
-            <button onClick={handleGenerateQt} className="px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">Generate Quotation</button>
-            <button onClick={handleGeneratePI} className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">Generate PI</button>
-            <button onClick={handleGenerateCI} className="px-3 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700">Generate CI</button>
-            <button onClick={handleGenerateLI} className="px-3 py-2 bg-cyan-600 text-white text-sm font-medium rounded-lg hover:bg-cyan-700">Generate LI</button>
-            <button onClick={handleDownloadPDF} className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">PDF</button>
-            <button onClick={() => setShowDocModal(true)} className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">Upload Doc</button>
+            {order.status === "pif_sent" && (
+              <button onClick={() => setShowPifListModal(true)} className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">Generate PIF</button>
+            )}
             <button onClick={() => router.back()} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Back</button>
           </div>
         }
@@ -497,22 +918,264 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
+        {["factory_ready", "docs_preparing", "inspection", "inspection_passed"].includes(order.status) && (
+          <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="font-medium text-sm text-gray-800">Product Readiness Checklist</h4>
+                <p className="text-xs text-gray-500">Required items (Product, Bottle) unlock Documents Preparing. All items must be ticked before Container Booked.</p>
+              </div>
+              {savingChecklist && <span className="text-xs text-gray-400">Saving...</span>}
+            </div>
+            <div className="space-y-1.5">
+              {checklist.map((it, idx) => (
+                <label key={idx} className="flex items-center gap-2 px-2 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+                  <input type="checkbox" checked={!!it.checked} onChange={() => toggleChecklistItem(idx)} className="w-4 h-4 accent-indigo-600" />
+                  <span className={`text-sm flex-1 ${it.checked ? "text-gray-500 line-through" : "text-gray-800"}`}>{it.label}</span>
+                  {it.required ? (
+                    <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Required</span>
+                  ) : (
+                    <button type="button" onClick={(e) => { e.preventDefault(); removeChecklistItem(idx); }} className="text-xs text-red-500 hover:text-red-700">✕</button>
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-3">
+              <input
+                value={newChecklistItem}
+                onChange={(e) => setNewChecklistItem(e.target.value)}
+                placeholder="New checklist item..."
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChecklistItem(); } }}
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <button type="button" onClick={addChecklistItem} disabled={!newChecklistItem.trim()} className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">+ Items</button>
+            </div>
+          </div>
+        )}
+
+        {["docs_preparing", "inspection", "inspection_passed", "container_booked", "docs_approved", "dispatched", "in_transit"].includes(order.status) && (
+          <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="font-medium text-sm text-gray-800">Documents Checklist</h4>
+                <p className="text-xs text-gray-500">{order.status === "docs_preparing"
+                  ? `Attach all ${requiredChecklistRows.length} required documents before advancing to Under Inspection (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done). Non-DG Declaration is optional.`
+                  : `Keep editing through In Transit if anything needs to be updated (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} required done). Non-DG Declaration is optional.`}
+                </p>
+              </div>
+            </div>
+            {["container_booked", "docs_approved", "dispatched", "in_transit"].includes(order.status) && (() => {
+              const croPresent = hasDoc("cro");
+              return (
+                <div className={`flex items-center justify-between p-3 border rounded-lg mb-3 ${croPresent ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${croPresent ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{croPresent ? "✓" : "○"}</span>
+                    <span className={`text-sm font-medium ${croPresent ? "text-emerald-800" : "text-amber-900"}`}>CRO (Container Release Order)</span>
+                    <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {croPresent && (
+                      <button onClick={() => viewOrderDoc("cro")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                    )}
+                    <button onClick={() => { setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                      {croPresent ? "Replace" : "Upload"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {["dispatched", "in_transit"].includes(order.status) && (() => {
+              const TRANSIT_ROWS = [
+                { doc_type: "bl", label: "BL (Bill of Lading)" },
+                { doc_type: "shipping_bill", label: "Shipping Bill" },
+                { doc_type: "schedule_list", label: "Schedule List" },
+                { doc_type: "coo", label: "COO (Certificate of Origin)" },
+              ];
+              return (
+                <div className="mb-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50/40">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <h4 className="text-sm font-semibold text-indigo-900">Transit Documents</h4>
+                      <p className="text-[11px] text-indigo-700">All four are required to move to In Transit.</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {TRANSIT_ROWS.map((row) => {
+                      const present = hasDoc(row.doc_type);
+                      return (
+                        <div key={row.doc_type} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
+                            <span className={`text-sm ${present ? "text-emerald-800 font-medium" : "text-gray-800"}`}>{row.label}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {present && (
+                              <button onClick={() => viewOrderDoc(row.doc_type)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                            )}
+                            <button onClick={() => { setUploadChecklistFor({ doc_type: row.doc_type, label: row.label }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                              {present ? "Replace" : "Upload"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {["docs_approved", "dispatched", "in_transit"].includes(order.status) && (() => {
+              const insurancePresent = hasDoc("insurance");
+              return (
+                <div className={`flex items-center justify-between p-3 border rounded-lg mb-3 ${insurancePresent ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${insurancePresent ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{insurancePresent ? "✓" : "○"}</span>
+                    <span className={`text-sm font-medium ${insurancePresent ? "text-emerald-800" : "text-amber-900"}`}>Insurance</span>
+                    <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
+                    <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5">Required for Dispatch</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {insurancePresent && (
+                      <button onClick={() => viewOrderDoc("insurance")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                    )}
+                    <button onClick={() => { setUploadChecklistFor({ doc_type: "insurance", label: "Insurance" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                      {insurancePresent ? "Replace" : "Upload"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {DOCS_APPROVAL_CHECKLIST.map((row) => {
+                const present = hasDoc(row.doc_type);
+                return (
+                  <div key={row.doc_type} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
+                      <span className={`text-sm ${present ? "text-emerald-800 font-medium" : "text-gray-800"}`}>{row.label}</span>
+                      {row.optional && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {present && (
+                        <button onClick={() => viewOrderDoc(row.doc_type)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                      )}
+                      {row.action === "generate-ci" && (
+                        <button onClick={handleGenerateCI} className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-li" && (
+                        <button onClick={handleGenerateLI} className="px-2.5 py-1 text-xs bg-cyan-600 text-white rounded hover:bg-cyan-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-cpl" && (
+                        <button onClick={() => setPackingListType("client")} className="px-2.5 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-lpl" && (
+                        <button onClick={() => setPackingListType("logistic")} className="px-2.5 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-coa" && (
+                        <button onClick={() => setShowCoaEditor(true)} className="px-2.5 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-msds" && (
+                        <button onClick={() => setShowMsdsEditor(true)} className="px-2.5 py-1 text-xs bg-rose-600 text-white rounded hover:bg-rose-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-dbk" && (
+                        <button onClick={() => setComplianceDocType("dbk_declaration")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-exam" && (
+                        <button onClick={() => setComplianceDocType("examination_report")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-exportdecl" && (
+                        <button onClick={() => setComplianceDocType("export_declaration")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-factorystuffing" && (
+                        <button onClick={() => setComplianceDocType("factory_stuffing")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "generate-nondg" && (
+                        <button onClick={() => setComplianceDocType("non_dg_declaration")} className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700">{present ? "Edit" : "Generate"}</button>
+                      )}
+                      {row.action === "upload" && (
+                        <button onClick={() => { setUploadChecklistFor(row); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Replace" : "Upload"}</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {order.allowed_transitions?.length > 0 && (
           <div>
             <div className="flex flex-wrap gap-2 mb-3">
               {order.allowed_transitions.filter((t) => t.status !== "cancelled").map((t) => {
                 // Block PO Received if no PO document uploaded
                 const needsPO = t.status === "po_received" && !order.po_document;
-                const needsPIF = (t.status === "pif_sent" && !orderDocs.some(d => d.doc_type === "pif")) ||
-                  (t.status === "docs_preparing" && order.status === "pif_sent" && !orderDocs.some(d => d.doc_type === "pif"));
-                const blocked = needsPO || needsPIF;
+                const needsPIFGen = t.status === "factory_ready" && order.status === "pif_sent" && !pifReady;
+                const needsRequired = t.status === "docs_preparing" && order.status === "factory_ready" && !checklistRequiredDone;
+                const needsAllDocs = t.status === "inspection" && order.status === "docs_preparing" && !docsApprovalReady;
+                const TRANSIT_DT = ["bl", "shipping_bill", "schedule_list", "coo"];
+                const transitMissing = TRANSIT_DT.filter(dt => !orderDocs.some(d => d.doc_type === dt));
+                const needsTransitDocs = t.status === "in_transit" && order.status === "dispatched" && transitMissing.length > 0;
+                const needsChecklist = (t.status === "container_booked" && order.status === "inspection_passed" && !checklistAllDone) || needsRequired || needsAllDocs || needsTransitDocs;
+                const blocked = needsPO || needsPIFGen || needsChecklist;
+                const pifHint = needsPIFGen ? `Generate PIFs for every product first (${pifCounts.done}/${pifCounts.total} done)` : undefined;
+                const checklistHint = needsRequired
+                  ? "Tick the required items (Product and Bottle) before advancing to Documents Preparing."
+                  : needsAllDocs
+                    ? `Attach all ${requiredChecklistRows.length} required documents (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done) before advancing.`
+                    : needsTransitDocs
+                      ? `Upload the transit documents first (${4 - transitMissing.length}/4 done).`
+                      : needsChecklist
+                        ? "Tick every readiness checklist item before advancing to Container Booked."
+                        : undefined;
                 return (
                   <div key={t.status} className="flex items-center gap-1">
                     <button onClick={() => {
                       if (needsPO) { toast.error("Upload PO first"); setShowPoModal(true); return; }
-                      if (needsPIF) { toast.error("Upload PIF document first"); setShowPifModal(true); return; }
+                      if (needsPIFGen) { toast.error(pifHint); setShowPifListModal(true); return; }
+                      if (needsChecklist) { toast.error(checklistHint); return; }
+                      if (order.status === "inspection" && t.status === "inspection_passed") {
+                        setShowInspectionModal(true);
+                        return;
+                      }
+                      if (order.status === "inspection_passed" && t.status === "container_booked") {
+                        setShowContainerBookedModal(true);
+                        return;
+                      }
+                      if (order.status === "container_booked" && !orderDocs.some(d => d.doc_type === "cro")) {
+                        setShowCroAdvanceModal({ target_status: t.status });
+                        return;
+                      }
+                      if (order.status === "docs_approved" && t.status === "dispatched") {
+                        const hasInsurance = orderDocs.some(d => d.doc_type === "insurance");
+                        setDispatchStep(hasInsurance ? "delivery" : "insurance");
+                        return;
+                      }
+                      if (order.status === "dispatched" && t.status === "in_transit") {
+                        const TRANSIT_DT = ["bl", "shipping_bill", "schedule_list", "coo"];
+                        const TRANSIT_LABELS = { bl: "BL", shipping_bill: "Shipping Bill", schedule_list: "Schedule List", coo: "COO" };
+                        const missing = TRANSIT_DT.filter(dt => !orderDocs.some(d => d.doc_type === dt));
+                        if (missing.length > 0) {
+                          toast.error(`Missing: ${missing.map(m => TRANSIT_LABELS[m]).join(", ")}`);
+                          setUploadChecklistFor({ doc_type: missing[0], label: TRANSIT_LABELS[missing[0]] });
+                          setChecklistUploadFile(null);
+                          return;
+                        }
+                        (async () => {
+                          try {
+                            const res = await api.post(`/orders/${id}/transit-mail-draft/`);
+                            toast.success("Email draft ready — order will move to In Transit once you send it");
+                            const commId = res.data.communication_id;
+                            if (commId) router.push(`/communications/${commId}`);
+                            else { toast("No source thread — open the draft from Communications.", { icon: "ℹ️" }); loadOrder(); }
+                          } catch (err) { toast.error(getErrorMessage(err, "Failed to prepare transit email")); }
+                        })();
+                        return;
+                      }
                       handleTransition(t.status);
-                    }} disabled={transitioning}
+                    }} disabled={transitioning || blocked}
+                      title={pifHint || checklistHint}
                       className={`px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 ${blocked ? "bg-gray-300 text-gray-600 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
                       {transitioning ? "..." : `\u2192 ${t.label}`}
                     </button>
@@ -521,9 +1184,9 @@ export default function OrderDetailPage() {
                         📎 Upload PO
                       </button>
                     )}
-                    {needsPIF && (
-                      <button onClick={() => setShowPifModal(true)} className="px-3 py-2 text-xs bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200 flex items-center gap-1">
-                        📎 Upload PIF
+                    {needsPIFGen && (
+                      <button onClick={() => setShowPifListModal(true)} className="px-3 py-2 text-xs bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200 flex items-center gap-1">
+                        📄 Generate PIF ({pifCounts.done}/{pifCounts.total})
                       </button>
                     )}
                   </div>
@@ -539,9 +1202,21 @@ export default function OrderDetailPage() {
                 <button onClick={() => { if (confirm("Cancel this order?")) handleTransition("cancelled"); }}
                   className="px-4 py-2 text-red-600 border border-red-200 text-sm rounded-lg hover:bg-red-50">Cancel Order</button>
               )}
+              {order.status === "arrived" && !order._feedback && (
+                <button onClick={() => setShowFeedbackModal(true)}
+                  className="px-4 py-2 bg-fuchsia-600 text-white text-sm rounded-lg font-medium hover:bg-fuchsia-700">+ Add Feedback</button>
+              )}
             </div>
             <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks (optional)"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+        )}
+        {order.status === "arrived" && !order._feedback && (
+          <div className="mt-3">
+            <button onClick={() => setShowFeedbackModal(true)}
+              className="px-4 py-2 bg-fuchsia-600 text-white text-sm rounded-lg font-medium hover:bg-fuchsia-700">
+              → Add Feedback
+            </button>
           </div>
         )}
         {(!order.allowed_transitions || order.allowed_transitions.length === 0) && order.can_revert && order.revert_to && (
@@ -559,7 +1234,7 @@ export default function OrderDetailPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-0">
-          {[{ key: "details", label: "Details" }, { key: "history", label: "Status History" }, { key: "documents", label: "Documents" }].map((tab) => (
+          {[{ key: "details", label: "Details" }, { key: "history", label: "Status History" }, { key: "documents", label: "Documents" }, { key: "notes", label: "Notes" }].map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`px-4 py-3 text-sm font-medium border-b-2 ${activeTab === tab.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
               {tab.label}
@@ -585,9 +1260,9 @@ export default function OrderDetailPage() {
           {order.items?.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h3 className="font-semibold mb-4">Line Items</h3>
-              <table className="w-full text-sm"><thead><tr className="border-b"><th className="text-left py-2 text-gray-500">#</th><th className="text-left py-2 text-gray-500">Product</th><th className="text-right py-2 text-gray-500">Qty</th><th className="text-right py-2 text-gray-500">Total</th></tr></thead>
-              <tbody>{order.items.map((item, i) => (<tr key={item.id} className="border-b border-gray-100"><td className="py-2">{i+1}</td><td className="py-2">{item.product_name}</td><td className="py-2 text-right">{Number(item.quantity).toLocaleString()} {item.unit}</td><td className="py-2 text-right font-medium">{Number(item.total_price).toLocaleString()}</td></tr>))}</tbody></table>
-              <div className="text-right mt-2 pt-2 border-t font-bold">{order.currency} {Number(order.total).toLocaleString()}</div>
+              <table className="w-full text-sm"><thead><tr className="border-b"><th className="text-left py-2 text-gray-500">#</th><th className="text-left py-2 text-gray-500">Product</th><th className="text-right py-2 text-gray-500">Qty</th>{order.can_view_total && <th className="text-right py-2 text-gray-500">Total</th>}</tr></thead>
+              <tbody>{order.items.map((item, i) => (<tr key={item.id} className="border-b border-gray-100"><td className="py-2">{i+1}</td><td className="py-2">{item.product_name}</td><td className="py-2 text-right">{Number(item.quantity).toLocaleString()} {item.unit}</td>{order.can_view_total && <td className="py-2 text-right font-medium">{Number(item.total_price).toLocaleString()}</td>}</tr>))}</tbody></table>
+              {order.can_view_total && <div className="text-right mt-2 pt-2 border-t font-bold">{order.currency} {Number(order.total || 0).toLocaleString()}</div>}
             </div>
           )}
         </div>
@@ -736,6 +1411,9 @@ export default function OrderDetailPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-indigo-600 font-medium">View</span>
+                  {["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type) && (
+                    <button onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
+                  )}
                   <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                 </div>
               </div>
@@ -743,6 +1421,168 @@ export default function OrderDetailPage() {
           )}
         </div>
       )}
+
+      {activeTab === "notes" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h3 className="font-semibold mb-4">Notes</h3>
+          <div
+            className={`mb-4 p-3 rounded-lg border-2 border-dashed transition-colors ${isDraggingNote ? "border-indigo-400 bg-indigo-50" : "border-transparent"}`}
+            onDragOver={(e) => { e.preventDefault(); if (!isDraggingNote) setIsDraggingNote(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setIsDraggingNote(false); }}
+            onDrop={handleNoteDrop}
+          >
+            <div className="flex gap-2">
+              <input
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                onPaste={handleNotePaste}
+                placeholder="Add a note... (drag & drop or paste files here)"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitNote(); } }}
+              />
+              <button onClick={submitNote} disabled={!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40">Add</button>
+            </div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <button type="button" onClick={pickNoteFile} title="Attach file(s) from device" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📎 <span className="text-xs">File</span></button>
+              <button type="button" onClick={openCamera} title="Take photo with camera" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📷 <span className="text-xs">Photo</span></button>
+              {!recording ? (
+                <button type="button" onClick={startVoiceRecording} title="Record voice" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">🎤 <span className="text-xs">Voice</span></button>
+              ) : (
+                <button type="button" onClick={stopVoiceRecording} className="px-2.5 py-1.5 text-sm border border-red-400 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 animate-pulse">⏹ <span className="text-xs">Stop ({recordElapsed}s)</span></button>
+              )}
+              <button type="button" onClick={openLibraryPicker} title="Pick from Documents library" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📂 <span className="text-xs">From Docs</span></button>
+              <span className="text-xs text-gray-400 ml-1 hidden sm:inline">or drag & drop / paste files</span>
+            </div>
+            {(noteAttachments.length > 0 || noteExistingDocs.length > 0) && (
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {noteAttachments.map((att, idx) => (
+                  <div key={`new-${idx}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    {att.kind === "photo" || att.kind === "image" || att.file.type.startsWith("image/") ? (
+                      <img src={att.previewUrl} alt="preview" className="w-8 h-8 object-cover rounded" />
+                    ) : att.kind === "voice" || att.file.type.startsWith("audio/") ? (
+                      <span className="text-base">🎵</span>
+                    ) : (
+                      <span className="text-base">📄</span>
+                    )}
+                    <span className="text-xs text-indigo-800 max-w-[160px] truncate">{att.file.name}</span>
+                    <button type="button" onClick={() => removeNoteAttachment(idx)} className="text-xs text-red-600 hover:text-red-800">✕</button>
+                  </div>
+                ))}
+                {noteExistingDocs.map((d) => (
+                  <div key={`existing-${d.id}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <span className="text-base">📂</span>
+                    <span className="text-xs text-emerald-800 max-w-[160px] truncate">{d.name}</span>
+                    <button type="button" onClick={() => removeExistingDoc(d.id)} className="text-xs text-red-600 hover:text-red-800">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="space-y-3">
+            {events.filter(e => e.event_type === "note").length === 0 && (
+              <p className="text-sm text-gray-400">No notes yet.</p>
+            )}
+            {events.filter(e => e.event_type === "note").reverse().map((note) => {
+              const md = note.metadata || {};
+              const rawList = Array.isArray(md.attachments) && md.attachments.length > 0
+                ? md.attachments
+                : (md.attachment_url ? [{ url: md.attachment_url, name: md.attachment_name, kind: md.attachment_kind }] : []);
+              const atts = rawList.map((a) => {
+                const url = a.url ? (a.url.startsWith("http") ? a.url : `http://localhost:8000${a.url}`) : null;
+                const name = a.name || "";
+                const ext = (name.split(".").pop() || "").toLowerCase();
+                const isImage = a.kind === "photo" || a.kind === "image" || ["jpg","jpeg","png","gif","webp","svg"].includes(ext);
+                const isAudio = a.kind === "voice" || ["mp3","wav","ogg","webm","m4a"].includes(ext);
+                return { url, name, isImage, isAudio };
+              });
+              return (
+                <div key={note.id} className="p-3 bg-gray-50 rounded-lg">
+                  {editingNoteId === note.id ? (
+                    <div className="flex gap-2">
+                      <input value={editingNoteText} onChange={(e) => setEditingNoteText(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("saveNoteBtn")?.click(); if (e.key === "Escape") setEditingNoteId(null); }} />
+                      <button id="saveNoteBtn" onClick={async () => {
+                        try { await api.patch(`/orders/${id}/events/${note.id}/`, { description: editingNoteText }); setEditingNoteId(null); loadOrder(); toast.success("Note updated"); } catch { toast.error("Failed to update"); }
+                      }} className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">Save</button>
+                      <button onClick={() => setEditingNoteId(null)} className="px-2 py-1 border border-gray-300 text-xs rounded hover:bg-gray-50">Cancel</button>
+                    </div>
+                  ) : (
+                    note.description && <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.description}</p>
+                  )}
+                  {atts.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {atts.map((a, i) => a.url && (
+                        a.isImage ? (
+                          <a key={i} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} className="max-h-48 rounded border border-gray-200" /></a>
+                        ) : a.isAudio ? (
+                          <audio key={i} controls src={a.url} className="max-w-full" />
+                        ) : (
+                          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-indigo-700 hover:bg-indigo-50">📎 <span className="truncate max-w-[240px]">{a.name}</span></a>
+                        )
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
+                    <span className="font-medium text-gray-600">{note.triggered_by_name || "System"}</span>
+                    <span>·</span>
+                    <span>{note.created_at ? format(new Date(note.created_at), "MMM d, yyyy h:mm a") : ""}</span>
+                    {editingNoteId !== note.id && atts.length === 0 && (
+                      <button onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.description); }} className="text-indigo-500 hover:text-indigo-700 ml-1">Edit</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Client Feedback — only shown once the order reaches the Feedback stage (arrived/delivered) or already has feedback */}
+      {(order.status === "arrived" || order.status === "delivered" || order._feedback) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Client Feedback</h3>
+            {!order._feedback && (
+              <button onClick={() => setShowFeedbackModal(true)} className="px-3 py-1.5 text-xs font-medium rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
+                + Add Feedback
+              </button>
+            )}
+          </div>
+          {order._feedback ? (
+            <div className="space-y-3 text-sm">
+              {order._feedback.comments && <div><span className="text-gray-500">Comments:</span> <span className="ml-1">{order._feedback.comments}</span></div>}
+              {order._feedback.issues && <div><span className="text-gray-500">Issues:</span> <span className="ml-1">{order._feedback.issues}</span></div>}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400">No feedback recorded yet.</p>
+          )}
+        </div>
+      )}
+
+      <Modal open={showFeedbackModal} onClose={() => setShowFeedbackModal(false)} title="Add Client Feedback" size="sm">
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api.post(`/orders/${id}/add-feedback/`, orderFeedbackForm);
+            toast.success("Feedback recorded");
+            setShowFeedbackModal(false);
+            setOrderFeedbackForm({ comments: "", issues: "", bulk_order_interest: false });
+            loadOrder();
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to submit feedback")); }
+        }} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Comments</label>
+            <textarea value={orderFeedbackForm.comments} onChange={(e) => setOrderFeedbackForm({ ...orderFeedbackForm, comments: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Issues</label>
+            <textarea value={orderFeedbackForm.issues} onChange={(e) => setOrderFeedbackForm({ ...orderFeedbackForm, issues: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => setShowFeedbackModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Submit Feedback</button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Document Preview */}
       {previewDoc && previewUrl && (
@@ -828,6 +1668,95 @@ export default function OrderDetailPage() {
         </form>
       </Modal>
 
+      {/* Doc Picker Modal (pick from Documents library) */}
+      {showDocPicker && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowDocPicker(false)}>
+          <div className="bg-white rounded-xl overflow-hidden max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold">Select from Documents library</h3>
+                <p className="text-xs text-gray-500">Link existing files from the Documents section</p>
+              </div>
+              <button onClick={() => setShowDocPicker(false)} className="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+            </div>
+            <div className="px-3 pt-3">
+              <input
+                value={librarySearch}
+                onChange={(e) => setLibrarySearch(e.target.value)}
+                placeholder="Search documents..."
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {libraryLoading ? (
+                <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+              ) : (() => {
+                const q = librarySearch.trim().toLowerCase();
+                const filtered = !q ? libraryDocs : libraryDocs.filter((d) => (d.name || "").toLowerCase().includes(q) || (d.filename || "").toLowerCase().includes(q) || (d.folder_name || "").toLowerCase().includes(q));
+                if (filtered.length === 0) {
+                  return <p className="text-sm text-gray-400 text-center py-8">{q ? "No matches." : "No documents in the library yet."}</p>;
+                }
+                return filtered.map((doc) => {
+                  const picked = noteExistingDocs.some((d) => d.id === doc.id);
+                  const ext = ((doc.filename || doc.name || "").split(".").pop() || "").toLowerCase();
+                  const icon = ["jpg","jpeg","png","gif","webp","svg"].includes(ext) ? "🖼️"
+                    : ext === "pdf" ? "📄"
+                    : ["xls","xlsx","csv"].includes(ext) ? "📊"
+                    : ["doc","docx"].includes(ext) ? "📝"
+                    : ["mp3","wav","ogg","webm","m4a"].includes(ext) ? "🎵"
+                    : "📎";
+                  return (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => { if (picked) removeExistingDoc(doc.id); else addExistingDoc(doc); }}
+                      className={`w-full text-left flex items-center justify-between p-3 rounded-lg border transition-colors ${picked ? "border-emerald-400 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-xl">{icon}</span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{doc.name}</p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {doc.folder_name ? `📁 ${doc.folder_name} · ` : ""}
+                            {doc.filename}
+                            {doc.created_at ? ` · ${fmtDateTime(doc.created_at)}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`text-xs font-medium whitespace-nowrap ml-2 ${picked ? "text-emerald-700" : "text-indigo-600"}`}>{picked ? "✓ Selected" : "Select"}</span>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+            <div className="p-3 border-t border-gray-200 flex items-center justify-between">
+              <span className="text-xs text-gray-500">{noteExistingDocs.length} selected</span>
+              <button onClick={() => setShowDocPicker(false)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Modal */}
+      {showCamera && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={closeCamera}>
+          <div className="bg-white rounded-xl overflow-hidden max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="font-semibold">Take a photo</h3>
+              <button onClick={closeCamera} className="text-gray-500 hover:text-gray-700 text-xl leading-none">×</button>
+            </div>
+            <div className="bg-black">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-[60vh] object-contain" />
+            </div>
+            <div className="p-3 flex justify-center gap-3">
+              <button onClick={capturePhoto} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">📷 Capture</button>
+              <button onClick={closeCamera} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Doc Modal */}
       <Modal open={showDocModal} onClose={() => setShowDocModal(false)} title="Upload Document">
         <form onSubmit={handleUploadDoc} className="space-y-4">
@@ -880,6 +1809,293 @@ export default function OrderDetailPage() {
         onSend={handleSendPI} sending={piSending}
       />
 
+      {/* PIF List + Editor */}
+      <PIFListModal
+        open={showPifListModal}
+        orderId={id}
+        onClose={() => { setShowPifListModal(false); loadOrder(); }}
+      />
+
+      <PackingListEditorModal
+        open={!!packingListType}
+        orderId={id}
+        listType={packingListType}
+        onClose={() => { setPackingListType(null); loadOrder(); }}
+        onGenerated={loadOrder}
+      />
+
+      <COAEditorModal
+        open={showCoaEditor}
+        onClose={() => setShowCoaEditor(false)}
+        productName={order?.items?.[0]?.product_name || ""}
+        clientName={order?.client_name || ""}
+        docsMode
+        onGenerate={async (formData) => {
+          try {
+            const isFormData = formData instanceof FormData;
+            if (isFormData) {
+              const existing = JSON.parse(formData.get("payload"));
+              existing.order_id = id;
+              formData.set("payload", JSON.stringify(existing));
+              await api.post("/communications/generate-coa-pdf/", formData, { headers: { "Content-Type": "multipart/form-data" } });
+            } else {
+              await api.post("/communications/generate-coa-pdf/", { ...formData, order_id: id });
+            }
+            toast.success("COA generated & saved to Documents");
+            setShowCoaEditor(false);
+            loadOrder();
+          } catch { toast.error("Failed to generate COA"); }
+        }}
+      />
+
+      <MSDSEditorModal
+        open={showMsdsEditor}
+        onClose={() => setShowMsdsEditor(false)}
+        productName={order?.items?.[0]?.product_name || ""}
+        docsMode
+        onGenerate={async (formData) => {
+          try {
+            await api.post("/communications/generate-msds-pdf/", { ...formData, order_id: id });
+            toast.success("MSDS generated & saved to Documents");
+            setShowMsdsEditor(false);
+            loadOrder();
+          } catch { toast.error("Failed to generate MSDS"); }
+        }}
+      />
+
+      <ComplianceDocEditorModal
+        open={!!complianceDocType}
+        orderId={id}
+        docType={complianceDocType}
+        onClose={() => { setComplianceDocType(null); loadOrder(); }}
+        onGenerated={loadOrder}
+      />
+
+      {/* CRO arrival prompt — shown on landing at Container Booked */}
+      {showCroPromptModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowCroPromptModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Upload Container Release Order</h3>
+              <p className="text-sm text-gray-500 mt-1">This order just entered Container Booked. Please upload the CRO document when ready. You'll be reminded every 4 hours until it's attached.</p>
+            </div>
+            <div className="p-5 flex flex-col gap-2">
+              <button
+                onClick={() => { setShowCroPromptModal(false); setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }}
+                className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700"
+              >
+                Upload CRO now
+              </button>
+              <button
+                onClick={() => setShowCroPromptModal(false)}
+                className="w-full px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50"
+              >
+                Remind me later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CRO advance-warning popup — shown when trying to leave Container Booked without a CRO */}
+      {showCroAdvanceModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowCroAdvanceModal(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">CRO not attached</h3>
+              <p className="text-sm text-gray-500 mt-1">The Container Release Order (CRO) hasn't been uploaded for this order. Do you want to upload it now, or continue anyway?</p>
+            </div>
+            <div className="p-5 flex flex-col gap-2">
+              <button
+                onClick={() => { const tgt = showCroAdvanceModal; setShowCroAdvanceModal(null); setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }}
+                className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700"
+              >
+                Upload CRO first
+              </button>
+              <button
+                onClick={async () => { const tgt = showCroAdvanceModal; setShowCroAdvanceModal(null); await handleTransition(tgt.target_status); }}
+                className="w-full px-4 py-2.5 bg-amber-600 text-white font-medium rounded-lg hover:bg-amber-700"
+              >
+                Continue without CRO
+              </button>
+              <button
+                onClick={() => setShowCroAdvanceModal(null)}
+                className="w-full px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Container Booked — capture shipment shipping details */}
+      {showContainerBookedModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full my-4">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Container Booked — Shipment Details</h3>
+              <p className="text-sm text-gray-500 mt-1">Capture the shipping details for this order. These will be saved to the linked shipment and the shipment status will move to <strong>Container Booked</strong>.</p>
+            </div>
+            <div className="p-5 grid grid-cols-2 gap-3">
+              {[
+                ["container_number", "Container Number", "text"],
+                ["bl_number", "BL Number", "text"],
+                ["vessel_name", "Vessel Name", "text"],
+                ["shipping_line", "Shipping Line", "text"],
+                ["forwarder", "Freight Forwarder", "text"],
+                ["cha", "CHA (Customs House Agent)", "text"],
+                ["port_of_loading", "Port of Loading", "text"],
+                ["port_of_discharge", "Port of Discharge", "text"],
+                ["container_booking_date", "Container Booking Date", "date"],
+                ["dispatch_date", "Dispatch Date", "date"],
+                ["transit_days", "Transit Days", "number"],
+                ["estimated_arrival", "Estimated Arrival", "date"],
+              ].map(([key, label, type]) => (
+                <div key={key} className={key === "vessel_name" || key === "port_of_loading" || key === "port_of_discharge" ? "col-span-2" : ""}>
+                  <label className="block text-xs font-medium text-gray-600 mb-0.5">{label}</label>
+                  <input
+                    type={type}
+                    value={shipmentForm[key] || ""}
+                    onChange={(e) => setShipmentForm({ ...shipmentForm, [key]: e.target.value })}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button onClick={() => setShowContainerBookedModal(false)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={submitContainerBooked} disabled={containerBookedSubmitting} className="px-5 py-2 text-sm bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
+                {containerBookedSubmitting ? "Saving..." : "Save & Mark Container Booked"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dispatch step 1 — Insurance upload (mandatory) */}
+      {dispatchStep === "insurance" && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Step 1 of 2 — Upload Insurance</h3>
+              <p className="text-sm text-gray-500 mt-1">Insurance is mandatory to proceed with Dispatch.</p>
+            </div>
+            <form onSubmit={submitInsuranceUpload} className="p-5 space-y-4">
+              <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${insuranceFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}>
+                <input type="file" onChange={(e) => setInsuranceFile(e.target.files[0])} className="hidden" />
+                {insuranceFile ? (
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-gray-800">{insuranceFile.name}</p>
+                    <p className="text-xs text-gray-400">{(insuranceFile.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <p className="text-sm text-gray-500">Click to select Insurance file</p>
+                    <p className="text-xs text-gray-400 mt-0.5">PDF, image, etc.</p>
+                  </div>
+                )}
+              </label>
+              <div className="flex gap-2">
+                <button type="submit" disabled={!insuranceFile || insuranceUploading} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">
+                  {insuranceUploading ? "Uploading..." : "Upload & Continue"}
+                </button>
+                <button type="button" onClick={() => { setDispatchStep(null); setInsuranceFile(null); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dispatch step 2 — Estimated delivery time (mandatory) */}
+      {dispatchStep === "delivery" && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Step 2 of 2 — Estimated Delivery</h3>
+              <p className="text-sm text-gray-500 mt-1">Tell the client when they can expect to receive the shipment. This will be saved to Notes for future reference and added to the dispatch email.</p>
+            </div>
+            <div className="p-5 space-y-4">
+              <input
+                value={estDeliveryTime}
+                onChange={(e) => setEstDeliveryTime(e.target.value)}
+                placeholder="e.g. 25–30 days from dispatch / 15 May 2026 / Arriving Mombasa Port by 03 May"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button onClick={submitDispatch} disabled={!estDeliveryTime.trim() || dispatchSubmitting} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">
+                  {dispatchSubmitting ? "Dispatching..." : "Dispatch & Open Email Draft"}
+                </button>
+                <button onClick={() => { setDispatchStep(null); setEstDeliveryTime(""); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inspection result popup — shown when leaving Under Inspection */}
+      {showInspectionModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowInspectionModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">Inspection Result</h3>
+              <p className="text-sm text-gray-500 mt-1">Select the outcome of the inspection.</p>
+            </div>
+            <div className="p-5 flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  setShowInspectionModal(false);
+                  await handleTransition("inspection_passed");
+                }}
+                className="w-full px-4 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700"
+              >
+                ✓ Inspection Passed
+              </button>
+              <button
+                onClick={() => {
+                  setShowInspectionModal(false);
+                  toast("Inspection failed — order stays at Under Inspection.", { icon: "⚠️" });
+                }}
+                className="w-full px-4 py-2.5 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700"
+              >
+                ✕ Inspection Failed
+              </button>
+              <button
+                onClick={() => setShowInspectionModal(false)}
+                className="w-full px-4 py-2 mt-1 border border-gray-300 text-sm rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Docs Checklist Upload Modal */}
+      <Modal open={!!uploadChecklistFor} onClose={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); }} title={uploadChecklistFor ? `Upload ${uploadChecklistFor.label}` : "Upload"} size="sm">
+        <form onSubmit={handleChecklistUpload} className="space-y-4">
+          <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${checklistUploadFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}>
+            <input type="file" onChange={(e) => setChecklistUploadFile(e.target.files[0])} className="hidden" />
+            {checklistUploadFile ? (
+              <div className="text-center">
+                <p className="text-sm font-medium text-gray-800">{checklistUploadFile.name}</p>
+                <p className="text-xs text-gray-400">{(checklistUploadFile.size / 1024).toFixed(1)} KB</p>
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="text-sm text-gray-500">Click to select file</p>
+                <p className="text-xs text-gray-400 mt-0.5">PDF, Word, Images</p>
+              </div>
+            )}
+          </label>
+          <div className="flex gap-3">
+            <button type="submit" disabled={!checklistUploadFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button>
+            <button type="button" onClick={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); }} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          </div>
+        </form>
+      </Modal>
+
       {/* CI Editor — Commercial Invoice template */}
       {ciLoading && showCiModal && (
         <Modal open={true} onClose={() => setShowCiModal(false)} title="Loading CI..." size="sm">
@@ -891,8 +2107,19 @@ export default function OrderDetailPage() {
         onClose={() => setShowCiModal(false)}
         ci={ci} ciForm={ciForm} setCiForm={setCiForm}
         ciItems={ciItems} setCiItems={setCiItems}
-        onSave={handleSaveCI} onPreview={handlePreviewCI}
-        onSend={handleSendCI} sending={ciSending}
+        onSave={handleSaveCI}
+        generating={ciSending}
+        onGeneratePdf={async () => {
+          if (!ci?.id) return;
+          try {
+            const res = await api.get(`/finance/ci/${ci.id}/generate-pdf/`, { responseType: "blob" });
+            const blob = new Blob([res.data], { type: "application/pdf" });
+            window.open(URL.createObjectURL(blob), "_blank");
+            toast.success("Client Invoice generated & saved to Documents");
+            setShowCiModal(false);
+            loadOrder();
+          } catch { toast.error("Failed to generate CI"); }
+        }}
       />
 
       {/* LI Editor Modal */}
@@ -901,8 +2128,19 @@ export default function OrderDetailPage() {
         onClose={() => setShowLiModal(false)}
         li={li} liForm={liForm} setLiForm={setLiForm}
         liItems={liItems} setLiItems={setLiItems}
-        onSave={handleSaveLI} onPreview={handlePreviewLI}
-        onSend={handleSendLI} sending={liSending}
+        onSave={handleSaveLI}
+        generating={liSending}
+        onGeneratePdf={async () => {
+          if (!li?.id) return;
+          try {
+            const res = await api.get(`/finance/li/${li.id}/generate-pdf/`, { responseType: "blob" });
+            const blob = new Blob([res.data], { type: "application/pdf" });
+            window.open(URL.createObjectURL(blob), "_blank");
+            toast.success("Logistic Invoice generated & saved to Documents");
+            setShowLiModal(false);
+            loadOrder();
+          } catch { toast.error("Failed to generate LI"); }
+        }}
       />
       {liLoading && showLiModal && (
         <Modal open={true} onClose={() => setShowLiModal(false)} title="Loading LI..." size="sm">

@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 ALLOWED_TRANSITIONS = {
     'confirmed': ['po_received', 'cancelled'],
     'po_received': ['pif_sent', 'cancelled'],
-    'pif_sent': ['docs_preparing', 'cancelled'],
-    'docs_preparing': ['factory_ready', 'cancelled'],
-    'factory_ready': ['inspection', 'cancelled'],
+    'pif_sent': ['factory_ready', 'cancelled'],
+    'factory_ready': ['docs_preparing', 'cancelled'],
+    'docs_preparing': ['inspection', 'cancelled'],
     'inspection': ['inspection_passed', 'cancelled'],
     'inspection_passed': ['container_booked', 'cancelled'],
     'container_booked': ['docs_approved', 'packed', 'cancelled'],
@@ -36,9 +36,9 @@ ALLOWED_TRANSITIONS = {
 REVERT_TRANSITIONS = {
     'po_received': 'confirmed',
     'pif_sent': 'po_received',
-    'docs_preparing': 'pif_sent',
-    'factory_ready': 'docs_preparing',
-    'inspection': 'factory_ready',
+    'factory_ready': 'pif_sent',
+    'docs_preparing': 'factory_ready',
+    'inspection': 'docs_preparing',
     'inspection_passed': 'inspection',
     'container_booked': 'inspection_passed',
     'packed': 'container_booked',
@@ -48,23 +48,131 @@ REVERT_TRANSITIONS = {
 }
 
 # Statuses that require specific data before transition
+def _all_order_items_have_pif(order):
+    """True iff every OrderItem on this order has an associated PIF with a generated PDF."""
+    from finance.models import PackingInstructionForm
+    items = list(order.items.all())
+    if not items:
+        return False
+    for item in items:
+        pif = PackingInstructionForm.objects.filter(order_item=item).first()
+        if not pif or not pif.pdf_file:
+            return False
+    return True
+
+
+DEFAULT_READINESS_CHECKLIST = [
+    {'label': 'Product', 'checked': False, 'required': True},
+    {'label': 'Bottle', 'checked': False, 'required': True},
+]
+
+
+def _readiness_checklist_complete(order):
+    """True iff every item in the order's readiness checklist is checked."""
+    checklist = order.readiness_checklist or []
+    if not checklist:
+        return False
+    return all(bool(item.get('checked')) for item in checklist)
+
+
+DOCS_APPROVED_REQUIRED_TYPES = (
+    'client_invoice',
+    'client_packing_list',
+    'logistic_invoice',
+    'logistic_packing_list',
+    'coa',
+    'msds',
+    'dbk_declaration',
+    'examination_report',
+    'export_declaration',
+    'factory_stuffing',
+)
+
+
+def _missing_docs_for_approval(order):
+    """Return the list of required doc_type values that are not yet attached."""
+    from orders.models import OrderDocument
+    present = set(
+        OrderDocument.objects
+        .filter(order=order, is_deleted=False)
+        .values_list('doc_type', flat=True)
+    )
+    return [t for t in DOCS_APPROVED_REQUIRED_TYPES if t not in present]
+
+
+def _docs_approval_ready(order):
+    return len(_missing_docs_for_approval(order)) == 0
+
+
+def _has_insurance_doc(order):
+    from orders.models import OrderDocument
+    return OrderDocument.objects.filter(order=order, doc_type='insurance', is_deleted=False).exists()
+
+
+TRANSIT_REQUIRED_DOC_TYPES = ('bl', 'shipping_bill', 'schedule_list', 'coo')
+
+
+def _missing_transit_docs(order):
+    from orders.models import OrderDocument
+    present = set(OrderDocument.objects.filter(
+        order=order, is_deleted=False, doc_type__in=TRANSIT_REQUIRED_DOC_TYPES,
+    ).values_list('doc_type', flat=True))
+    return [t for t in TRANSIT_REQUIRED_DOC_TYPES if t not in present]
+
+
+def _has_transit_docs(order):
+    return len(_missing_transit_docs(order)) == 0
+
+
+def _readiness_required_complete(order):
+    """True iff every REQUIRED item (Product, Bottle, etc.) in the checklist is checked.
+    If the checklist is empty we treat the defaults (Product, Bottle) as not yet met."""
+    checklist = order.readiness_checklist or []
+    if not checklist:
+        return False
+    required = [it for it in checklist if it.get('required')]
+    if not required:
+        return True  # no required items defined — nothing to gate on
+    return all(bool(it.get('checked')) for it in required)
+
+
 TRANSITION_REQUIREMENTS = {
     'po_received': {
         'fields': ['po_document'],
         'message': 'PO/signed PI document must be uploaded before marking as PO Received.',
     },
+    'factory_ready': {
+        'check': lambda order: order.status != 'pif_sent' or _all_order_items_have_pif(order),
+        'message': 'Generate a Packing Instructions Form (PIF) for every product in this order before advancing.',
+    },
+    'docs_preparing': {
+        'check': lambda order: order.status != 'factory_ready' or _readiness_required_complete(order),
+        'message': 'Tick the required readiness items (Product and Bottle) before advancing to Documents Preparing.',
+    },
+    'inspection': {
+        'check': lambda order: order.status != 'docs_preparing' or _docs_approval_ready(order),
+        'message': 'Attach all required documents (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List, COA, MSDS, DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing) before advancing.',
+    },
     'container_booked': {
-        'fields': [],
-        'message': '',
+        'check': lambda order: order.status != 'inspection_passed' or _readiness_checklist_complete(order),
+        'message': 'Tick every item in the Product Readiness checklist (Product, Bottle, and any added items) before advancing to Container Booked.',
     },
     'dispatched': {
-        'check': lambda order: order.status == 'docs_approved',
-        'message': 'Documents must be approved before dispatching.',
+        'check': lambda order: _has_insurance_doc(order),
+        'message': 'Upload the Insurance document before dispatching.',
+    },
+    'in_transit': {
+        'check': lambda order: order.status != 'dispatched' or _has_transit_docs(order),
+        'message': 'Upload all four transit documents (BL, Shipping Bill, Schedule List, COO) before moving to In Transit.',
     },
 }
 
 # Statuses that trigger auto-email to client
-AUTO_EMAIL_STATUSES = ['inspection_passed', 'dispatched', 'in_transit', 'arrived']
+# Statuses that trigger an automatic client email on transition.
+# 'dispatched' and 'in_transit' are intentionally NOT in this list — those
+# emails are handled by the dispatch-mail-draft / transit-mail-draft flows
+# which build a proper AI draft on the existing thread for the user to send.
+AUTO_EMAIL_STATUSES = ['inspection_passed', 'arrived']
 
 # Status timestamp field mapping
 STATUS_TIMESTAMP_MAP = {
@@ -155,6 +263,10 @@ def transition_order(order, new_status, user, remarks=''):
     if ts_field:
         setattr(order, ts_field, now)
 
+    # Reset CRO reminder clock whenever we enter Container Booked
+    if new_status == 'container_booked':
+        order.last_cro_reminder_at = None
+
     order.save()
 
     # 4. Log status change
@@ -185,6 +297,10 @@ def transition_order(order, new_status, user, remarks=''):
     # 8. Auto-create purchase history when order arrives
     if new_status == 'arrived':
         _auto_create_purchase_history(order)
+
+    # 9. Auto-create the Shipment record on PO Received (idempotent)
+    if new_status == 'po_received':
+        _auto_create_shipment(order, user)
 
     logger.info(f'Order {order.order_number}: {old_status} → {new_status} by {user.username}')
     return order
@@ -288,8 +404,8 @@ def get_order_timeline(order):
     from orders.models import Order
 
     all_statuses = [
-        'confirmed', 'po_received', 'pif_sent', 'docs_preparing',
-        'factory_ready', 'inspection', 'inspection_passed',
+        'confirmed', 'po_received', 'pif_sent',
+        'factory_ready', 'docs_preparing', 'inspection', 'inspection_passed',
         'container_booked', 'docs_approved',
         'dispatched', 'in_transit', 'arrived',
     ]
@@ -308,7 +424,69 @@ def get_order_timeline(order):
             'timestamp': timestamp.isoformat() if timestamp else None,
         })
 
+    # Add Feedback as the last step
+    has_feedback = hasattr(order, 'feedback') and order.feedback is not None
+    try:
+        has_feedback = order.feedback is not None
+    except Exception:
+        has_feedback = False
+    feedback_state = 'completed' if has_feedback else ('current' if status_idx >= len(all_statuses) - 1 and order.status == 'arrived' else 'upcoming')
+    timeline.append({
+        'status': 'feedback',
+        'label': 'Feedback',
+        'state': feedback_state,
+        'timestamp': order.feedback.created_at.isoformat() if has_feedback else None,
+    })
+
     return timeline
+
+
+def _auto_create_shipment(order, user):
+    """Auto-create a Shipment record when an order moves to PO Received.
+
+    Idempotent — bails if a shipment already exists for this order. Pulls
+    shipping-relevant defaults from the order itself so the user has
+    something to start editing.
+    """
+    try:
+        from shipments.models import Shipment
+        if Shipment.objects.filter(order=order).exists():
+            return None
+
+        # Generate the next shipment number (zero-padded auto-increment),
+        # mirroring the pattern used by the Shipment serializer/viewset.
+        count = Shipment.objects.count() + 1
+        shipment_number = f'SHP-{count:05d}'
+        # Defensive: walk forward until unique in case of races / gaps.
+        while Shipment.objects.filter(shipment_number=shipment_number).exists():
+            count += 1
+            shipment_number = f'SHP-{count:05d}'
+
+        # Shipping fields the quotation/order may already carry — pulled here
+        # so the user doesn't have to retype them on the shipment form.
+        port_of_loading = ''
+        port_of_discharge = ''
+        if order.quotation_id:
+            try:
+                q = order.quotation
+                port_of_loading = getattr(q, 'port_of_loading', '') or ''
+                port_of_discharge = getattr(q, 'port_of_discharge', '') or ''
+            except Exception:
+                pass
+
+        Shipment.objects.create(
+            shipment_number=shipment_number,
+            order=order,
+            client=order.client,
+            status='pending',
+            delivery_terms=order.delivery_terms or '',
+            freight_type=order.freight_terms or '',
+            port_of_loading=port_of_loading,
+            port_of_discharge=port_of_discharge,
+        )
+        logger.info(f'Auto-created shipment {shipment_number} for order {order.order_number}')
+    except Exception as e:
+        logger.exception(f'Failed to auto-create shipment for order {order.order_number}: {e}')
 
 
 def _auto_create_purchase_history(order):

@@ -81,7 +81,7 @@ export default function OrdersPage() {
   const columns = [
     { key: "order_number", label: "Order #", render: (row) => <span className="font-medium">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span> },
     { key: "client_name", label: "Account" },
-    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "total", label: "Value", render: (row) => row.can_view_total && row.total != null ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "created_at", label: "Date", render: (row) => { try { return format(new Date(row.created_at), "MMM d, yyyy"); } catch { return "\u2014"; } } },
   ];

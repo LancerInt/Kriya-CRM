@@ -2,7 +2,8 @@ from rest_framework import serializers
 from .models import (Invoice, InvoiceItem, Payment, FIRCRecord, GSTRecord,
                       ProformaInvoice, ProformaInvoiceItem,
                       CommercialInvoice, CommercialInvoiceItem,
-                      LogisticsInvoice, LogisticsInvoiceItem)
+                      LogisticsInvoice, LogisticsInvoiceItem,
+                      PackingInstructionForm, PackingList, ComplianceDocument)
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -185,3 +186,47 @@ class LogisticsInvoiceSerializer(serializers.ModelSerializer):
         model = LogisticsInvoice
         fields = '__all__'
         read_only_fields = ['id', 'created_by', 'pdf_file']
+
+
+class ComplianceDocumentSerializer(serializers.ModelSerializer):
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+    client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    doc_type_display = serializers.CharField(source='get_doc_type_display', read_only=True)
+    pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ComplianceDocument
+        fields = '__all__'
+        read_only_fields = ['id', 'created_by', 'pdf_file']
+
+    def get_pdf_url(self, obj):
+        return obj.pdf_file.url if obj.pdf_file else None
+
+
+class PackingListSerializer(serializers.ModelSerializer):
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+    client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PackingList
+        fields = '__all__'
+        read_only_fields = ['id', 'invoice_number', 'created_by', 'pdf_file']
+
+    def get_pdf_url(self, obj):
+        return obj.pdf_file.url if obj.pdf_file else None
+
+
+class PackingInstructionFormSerializer(serializers.ModelSerializer):
+    order_number = serializers.CharField(source='order.order_number', read_only=True, default='')
+    client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
+    pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PackingInstructionForm
+        fields = '__all__'
+        read_only_fields = ['id', 'pif_number', 'created_by', 'pdf_file']
+
+    def get_pdf_url(self, obj):
+        return obj.pdf_file.url if obj.pdf_file else None

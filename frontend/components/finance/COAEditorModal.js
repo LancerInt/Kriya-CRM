@@ -14,7 +14,7 @@ import toast from "react-hot-toast";
  * Report number format: KB/YYMM/SEQ (e.g. KB/2604/001)
  * Auto-generated on open, editable, sequence consumed only on generate/send.
  */
-export default function COAEditorModal({ open, onClose, onGenerate, productName, clientName, initialData, onStateChange }) {
+export default function COAEditorModal({ open, onClose, onGenerate, productName, clientName, initialData, onStateChange, docsMode, generating }) {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
 
   const defaultForm = { report_no: "", date: new Date().toISOString().split("T")[0], checked_by: "Technical Manager" };
@@ -322,32 +322,42 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
-        <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
-        <div className="flex gap-2">
-          <button
-            onClick={async () => {
-              const productName = detailRows[0]?.value || "";
-              if (!productName.trim()) { alert("Please enter the Product Name"); return; }
-              try {
-                const data = await buildFormData();
-                const isFormData = data instanceof FormData;
-                const res = await api.post("/communications/generate-coa-pdf/", data, {
-                  responseType: "blob",
-                  ...(isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}),
-                });
-                setPdfPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })));
-              } catch { toast.error("Failed to generate preview"); }
-            }}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
-          >
-            Preview PDF
+      {docsMode ? (
+        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+          <button onClick={() => toast.success("Saved")} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
+          <button onClick={handleGenerate} disabled={generating} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {generating ? "Generating..." : "Save & Generate PDF"}
           </button>
-          <button onClick={handleGenerate} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-            Generate & Attach to Email
-          </button>
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                const productName = detailRows[0]?.value || "";
+                if (!productName.trim()) { alert("Please enter the Product Name"); return; }
+                try {
+                  const data = await buildFormData();
+                  const isFormData = data instanceof FormData;
+                  const res = await api.post("/communications/generate-coa-pdf/", data, {
+                    responseType: "blob",
+                    ...(isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}),
+                  });
+                  setPdfPreviewUrl(URL.createObjectURL(new Blob([res.data], { type: "application/pdf" })));
+                } catch { toast.error("Failed to generate preview"); }
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+            >
+              Preview PDF
+            </button>
+            <button onClick={handleGenerate} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+              Generate & Attach to Email
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* PDF Preview */}
       {pdfPreviewUrl && (

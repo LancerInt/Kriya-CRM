@@ -3,10 +3,12 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
-from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, CommercialInvoice, LogisticsInvoice
+from .models import Invoice, Payment, FIRCRecord, GSTRecord, ProformaInvoice, CommercialInvoice, LogisticsInvoice, PackingInstructionForm, PackingList, ComplianceDocument
 from .serializers import (InvoiceSerializer, PaymentSerializer, FIRCRecordSerializer,
                           GSTRecordSerializer, ProformaInvoiceSerializer,
-                          CommercialInvoiceSerializer, LogisticsInvoiceSerializer)
+                          CommercialInvoiceSerializer, LogisticsInvoiceSerializer,
+                          PackingInstructionFormSerializer, PackingListSerializer,
+                          ComplianceDocumentSerializer)
 from notifications.helpers import notify
 
 
@@ -848,12 +850,22 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='generate-pdf')
     def generate_pdf(self, request, pk=None):
-        """Generate and return CI PDF."""
+        """Generate CI PDF, save it to the order's documents, and return inline."""
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
         ci = self.get_object()
         from .ci_service import generate_ci_pdf
         pdf_buffer = generate_ci_pdf(ci)
+        filename = f'CI_{ci.invoice_number.replace("/", "-")}.pdf'
+        if ci.order_id:
+            OrderDocument.objects.filter(order_id=ci.order_id, doc_type='client_invoice', is_deleted=False).delete()
+            OrderDocument.objects.create(
+                order_id=ci.order_id, doc_type='client_invoice', name=filename,
+                file=ContentFile(pdf_buffer.getvalue(), name=filename), uploaded_by=request.user,
+            )
+            pdf_buffer.seek(0)
         response = HttpResponse(pdf_buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'inline; filename="CI_{ci.invoice_number.replace("/", "-")}_{ci.client_company_name.replace(" ", "_")}.pdf"'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
     @action(detail=True, methods=['post'], url_path='send-email')
@@ -946,11 +958,21 @@ class LogisticsInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='generate-pdf')
     def generate_pdf(self, request, pk=None):
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
         li = self.get_object()
         from .li_service import generate_li_pdf
         pdf_buffer = generate_li_pdf(li)
+        filename = f'LI_{li.invoice_number.replace("/", "-")}.pdf'
+        if li.order_id:
+            OrderDocument.objects.filter(order_id=li.order_id, doc_type='logistic_invoice', is_deleted=False).delete()
+            OrderDocument.objects.create(
+                order_id=li.order_id, doc_type='logistic_invoice', name=filename,
+                file=ContentFile(pdf_buffer.getvalue(), name=filename), uploaded_by=request.user,
+            )
+            pdf_buffer.seek(0)
         response = HttpResponse(pdf_buffer, content_type='application/pdf')
-        response['Content-Disposition'] = f'inline; filename="LI_{li.invoice_number.replace("/", "-")}_{li.client_company_name.replace(" ", "_")}.pdf"'
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
     @action(detail=True, methods=['post'], url_path='send-email')
@@ -968,3 +990,193 @@ class LogisticsInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             return Response({'status': 'sent', 'sent_to': sent_to})
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PackingInstructionFormViewSet(viewsets.ModelViewSet):
+    serializer_class = PackingInstructionFormSerializer
+    filterset_fields = ['order', 'order_item', 'client']
+
+    def get_queryset(self):
+        qs = PackingInstructionForm.objects.select_related('order', 'order_item', 'client').all()
+        user = self.request.user
+        if user.role == 'executive':
+            from clients.views import get_client_qs_for_user
+            client_ids = get_client_qs_for_user(user).values_list('id', flat=True)
+            qs = qs.filter(client__in=client_ids)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order-item')
+    def create_from_order_item(self, request):
+        from orders.models import OrderItem
+        order_item_id = request.data.get('order_item_id')
+        if not order_item_id:
+            return Response({'error': 'order_item_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            oi = OrderItem.objects.select_related('order', 'order__client').get(id=order_item_id)
+        except OrderItem.DoesNotExist:
+            return Response({'error': 'Order item not found'}, status=status.HTTP_404_NOT_FOUND)
+        existing = PackingInstructionForm.objects.filter(order_item=oi).first()
+        if existing:
+            return Response(PackingInstructionFormSerializer(existing).data)
+        from .pif_service import create_pif_from_order_item
+        pif = create_pif_from_order_item(oi, request.user)
+        return Response(PackingInstructionFormSerializer(pif).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='status-for-order')
+    def status_for_order(self, request):
+        """Return PIF status per order line. Used by the workflow gate/UI."""
+        from orders.models import Order, OrderItem
+        order_id = request.query_params.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        items = order.items.all()
+        result = []
+        for it in items:
+            pif = PackingInstructionForm.objects.filter(order_item=it).first()
+            result.append({
+                'order_item_id': it.id,
+                'product_name': it.product_name,
+                'client_product_name': it.client_product_name,
+                'quantity': str(it.quantity),
+                'unit': it.unit,
+                'pif_id': str(pif.id) if pif else None,
+                'pif_number': pif.pif_number if pif else None,
+                'has_pdf': bool(pif and pif.pdf_file),
+            })
+        all_ready = all(r['has_pdf'] for r in result) if result else False
+        return Response({'items': result, 'all_ready': all_ready, 'count': len(result)})
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        """Generate and persist the PIF PDF, attach to the order's documents, return inline."""
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
+        pif = self.get_object()
+        from .pif_service import generate_pif_pdf
+        pdf_buffer = generate_pif_pdf(pif)
+        filename = f'{pif.pif_number}.pdf'
+
+        # Save/overwrite pdf_file on the PIF
+        pif.pdf_file.save(filename, ContentFile(pdf_buffer.getvalue()), save=True)
+
+        # Mirror into the order's Documents tab (remove older PDF for the same PIF, then add fresh)
+        OrderDocument.objects.filter(order=pif.order, doc_type='pif', name=filename).delete()
+        OrderDocument.objects.create(
+            order=pif.order, doc_type='pif', name=filename,
+            file=pif.pdf_file, uploaded_by=request.user,
+        )
+
+        pdf_buffer.seek(0)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
+class ComplianceDocumentViewSet(viewsets.ModelViewSet):
+    """Covers DBK Declaration / Examination Report / Export Declaration / Factory Stuffing."""
+    serializer_class = ComplianceDocumentSerializer
+    filterset_fields = ['order', 'client', 'doc_type']
+
+    DOC_TYPE_TO_ORDER_DOC_TYPE = {
+        'examination_report': 'examination_report',
+        'dbk_declaration': 'dbk_declaration',
+        'export_declaration': 'export_declaration',
+        'factory_stuffing': 'factory_stuffing',
+        'non_dg_declaration': 'non_dg_declaration',
+    }
+
+    def get_queryset(self):
+        return ComplianceDocument.objects.select_related('order', 'client').all()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order')
+    def create_from_order(self, request):
+        from orders.models import Order
+        order_id = request.data.get('order_id')
+        doc_type = request.data.get('doc_type')
+        if not order_id or doc_type not in self.DOC_TYPE_TO_ORDER_DOC_TYPE:
+            return Response({'error': 'order_id and valid doc_type are required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        from .compliance_service import create_compliance_doc_from_order
+        doc = create_compliance_doc_from_order(order, doc_type, request.user)
+        return Response(ComplianceDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
+        doc = self.get_object()
+        from .compliance_service import generate_compliance_pdf
+        pdf_buffer = generate_compliance_pdf(doc)
+        filename = f'{doc.doc_type}_{doc.order.order_number}.pdf'
+        doc.pdf_file.save(filename, ContentFile(pdf_buffer.getvalue()), save=True)
+        order_doc_type = self.DOC_TYPE_TO_ORDER_DOC_TYPE[doc.doc_type]
+        OrderDocument.objects.filter(order=doc.order, doc_type=order_doc_type, is_deleted=False).delete()
+        OrderDocument.objects.create(
+            order=doc.order, doc_type=order_doc_type, name=filename,
+            file=doc.pdf_file, uploaded_by=request.user,
+        )
+        pdf_buffer.seek(0)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
+class PackingListViewSet(viewsets.ModelViewSet):
+    serializer_class = PackingListSerializer
+    filterset_fields = ['order', 'client', 'list_type']
+
+    def get_queryset(self):
+        return PackingList.objects.select_related('order', 'client').all()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['post'], url_path='create-from-order')
+    def create_from_order(self, request):
+        from orders.models import Order
+        order_id = request.data.get('order_id')
+        list_type = request.data.get('list_type')
+        if not order_id or list_type not in ('client', 'logistic'):
+            return Response({'error': 'order_id and list_type (client|logistic) are required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        from .packing_list_service import create_packing_list_from_order
+        pl = create_packing_list_from_order(order, list_type, request.user)
+        return Response(PackingListSerializer(pl).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='generate-pdf')
+    def generate_pdf(self, request, pk=None):
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
+        pl = self.get_object()
+        from .packing_list_service import generate_packing_list_pdf
+        pdf_buffer = generate_packing_list_pdf(pl)
+        filename = f'{pl.invoice_number}.pdf'
+        pl.pdf_file.save(filename, ContentFile(pdf_buffer.getvalue()), save=True)
+
+        # Persist into the order's Documents tab under the correct doc_type
+        doc_type = 'client_packing_list' if pl.list_type == 'client' else 'logistic_packing_list'
+        OrderDocument.objects.filter(order=pl.order, doc_type=doc_type, is_deleted=False).delete()
+        OrderDocument.objects.create(
+            order=pl.order, doc_type=doc_type, name=filename,
+            file=pl.pdf_file, uploaded_by=request.user,
+        )
+        pdf_buffer.seek(0)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response

@@ -517,6 +517,51 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.sent_at = timezone.now()
         draft.save(update_fields=['status', 'sent_at'])
 
+        # Auto-transition orders whose dispatch / transit emails just went out.
+        # We detect by attachment filename prefix:
+        #   Dispatch attachments: Client_Invoice_<ord>, Client_Packing_List_<ord>, ...
+        #     -> transition docs_approved -> dispatched
+        #   Transit attachments: BL_<ord>
+        #     -> transition dispatched -> in_transit
+        try:
+            import re as _re
+            from orders.models import Order
+            from orders.workflow_service import transition_order
+            dispatch_orders = set()
+            transit_orders = set()
+            for att in draft.attachments.all():
+                fn = att.filename or ''
+                m = _re.match(r'(?:Client_Invoice|Client_Packing_List|COA|MSDS|Insurance|Factory_Stuffing)_(ORD-[A-Za-z0-9-]+)', fn)
+                if m:
+                    dispatch_orders.add(m.group(1))
+                m2 = _re.match(r'BL_(ORD-[A-Za-z0-9-]+)', fn)
+                if m2:
+                    transit_orders.add(m2.group(1))
+
+            for ono in dispatch_orders:
+                # Skip if this order is also the target of a transit draft —
+                # the transit one will move dispatched -> in_transit. We only
+                # auto-dispatch if currently still at docs_approved.
+                order = Order.objects.filter(order_number=ono, status='docs_approved', is_deleted=False).first()
+                if order:
+                    try:
+                        transition_order(order, 'dispatched', request.user, remarks='Dispatch email sent')
+                    except Exception as _e:
+                        import logging
+                        logging.getLogger(__name__).warning(f'Auto-dispatch transition failed for {ono}: {_e}')
+
+            for ono in transit_orders:
+                order = Order.objects.filter(order_number=ono, status='dispatched', is_deleted=False).first()
+                if order:
+                    try:
+                        transition_order(order, 'in_transit', request.user, remarks='In-transit email sent')
+                    except Exception as _e:
+                        import logging
+                        logging.getLogger(__name__).warning(f'Auto-in-transit transition failed for {ono}: {_e}')
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('Failed during dispatch/transit post-send hook')
+
         # Mark the linked QuoteRequest + every Quotation that was actually
         # attached to this draft as sent. We can't rely on QuoteRequest's
         # linked_quotation alone because revisions (V2/V3/...) keep V1 as the
@@ -667,6 +712,18 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         try:
             from samples.models import Sample
             from django.utils import timezone as _tz
+            from datetime import date as _date
+            # Mark prepared samples as dispatched when dispatch email is sent
+            Sample.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+                status__in=['prepared', 'requested'],
+            ).update(
+                status='dispatched',
+                dispatch_date=_date.today(),
+                dispatch_notified_at=_tz.now(),
+            )
+            # Stamp dispatch_notified_at on already-dispatched samples
             Sample.objects.filter(
                 source_communication=draft.communication,
                 is_deleted=False,
@@ -674,7 +731,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                 dispatch_notified_at__isnull=True,
             ).update(dispatch_notified_at=_tz.now())
         except Exception as e:
-            _log.warning(f'Could not stamp Sample dispatch_notified_at: {e}')
+            _log.warning(f'Could not stamp Sample dispatch status: {e}')
 
         # Create outgoing Communication record — store the body that was
         # actually sent (with the signature appended) so the thread view
@@ -1385,6 +1442,23 @@ def generate_coa_pdf_view(request):
             import logging
             logging.getLogger(__name__).warning(f'COA attach failed: {e}')
 
+    # Save to the order's Documents tab if order_id provided
+    order_id = data.get('order_id')
+    if order_id:
+        try:
+            from orders.models import Order, OrderDocument
+            order = Order.objects.get(id=order_id)
+            product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
+            filename = f'COA_{product_name}.pdf'
+            OrderDocument.objects.filter(order=order, doc_type='coa', is_deleted=False).delete()
+            OrderDocument.objects.create(
+                order=order, doc_type='coa', name=filename,
+                file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f'COA order-attach failed: {e}')
+
     from django.http import HttpResponse
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'inline; filename="COA_{data.get("product_name", "Product")}.pdf"'
@@ -1661,6 +1735,22 @@ def generate_msds_pdf_view(request):
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f'MSDS attach failed: {e}')
+
+    order_id = data.get('order_id')
+    if order_id:
+        try:
+            from orders.models import Order, OrderDocument
+            order = Order.objects.get(id=order_id)
+            product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
+            filename = f'MSDS_{product_name}.pdf'
+            OrderDocument.objects.filter(order=order, doc_type='msds', is_deleted=False).delete()
+            OrderDocument.objects.create(
+                order=order, doc_type='msds', name=filename,
+                file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f'MSDS order-attach failed: {e}')
 
     from django.http import HttpResponse
     response = HttpResponse(pdf_bytes, content_type='application/pdf')

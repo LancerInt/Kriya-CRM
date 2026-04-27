@@ -11,6 +11,9 @@ router.register('gst', views.GSTRecordViewSet, basename='gst')
 router.register('pi', views.ProformaInvoiceViewSet, basename='proforma-invoice')
 router.register('ci', views.CommercialInvoiceViewSet, basename='commercial-invoice')
 router.register('li', views.LogisticsInvoiceViewSet, basename='logistics-invoice')
+router.register('pif', views.PackingInstructionFormViewSet, basename='packing-instruction-form')
+router.register('packing-list', views.PackingListViewSet, basename='packing-list')
+router.register('compliance', views.ComplianceDocumentViewSet, basename='compliance-document')
 
 urlpatterns = [
     # Dashboard analytics endpoints (must come before the router include

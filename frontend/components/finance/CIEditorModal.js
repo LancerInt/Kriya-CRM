@@ -13,9 +13,20 @@ const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] ||
  * Packing table (USD+INR) + Discount/SubTotal/GST/Grand Total + Additional Details.
  * ALL existing calculation logic is PRESERVED.
  */
-export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ciItems, setCiItems, onSave, onSend, onPreview, sending }) {
+export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ciItems, setCiItems, onSave, onGeneratePdf, generating }) {
   const editorRef = useRef(null);
+  const ciTableRef = useRef(null);
   const [scriptMode, setScriptMode] = useState(null);
+
+  // Auto-resize all textareas when items change (after save/preview re-render)
+  useEffect(() => {
+    if (!ciTableRef.current) return;
+    const textareas = ciTableRef.current.querySelectorAll("textarea");
+    textareas.forEach((ta) => {
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    });
+  }, [ciItems, open]);
 
   const handleScriptClick = useCallback((mode) => {
     const active = document.activeElement;
@@ -64,6 +75,32 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
     return () => container.removeEventListener("keydown", handler, true);
   }, [scriptMode]);
 
+  // Sync auto-generated amount in words to ciForm so it gets saved
+  useEffect(() => {
+    if (!open || !ci) return;
+    const totalUsd_ = ciItems.reduce((s, it) => s + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
+    const rate_ = parseFloat(ciForm.exchange_rate) || 0;
+    const freight_ = parseFloat(ciForm.freight) || 0;
+    const insurance_ = parseFloat(ciForm.insurance) || 0;
+    const totalInvInr_ = (totalUsd_ + freight_ + insurance_) * rate_;
+    const igstRate_ = parseFloat(ciForm.igst_rate) || 0;
+    const igstAmount_ = totalInvInr_ * igstRate_ / 100;
+    const discMode_ = ciForm._ci_discount_mode || 'usd';
+    const discInput_ = parseFloat(ciForm._ci_discount_usd) || 0;
+    const discUsd_ = discMode_ === 'percent' ? (totalUsd_ * discInput_ / 100) : discInput_;
+    const discInr_ = discUsd_ * rate_;
+    const grandUsd_ = totalUsd_ + freight_ + insurance_ - discUsd_;
+    if (grandUsd_ > 0) {
+      const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      const cv = (n) => { if(n<20)return ones[n]; if(n<100)return tens[Math.floor(n/10)]+(n%10?' '+ones[n%10]:''); if(n<1000)return ones[Math.floor(n/100)]+' Hundred'+(n%100?' and '+cv(n%100):''); if(n<100000)return cv(Math.floor(n/1000))+' Thousand'+(n%1000?' '+cv(n%1000):''); if(n<10000000)return cv(Math.floor(n/100000))+' Lakh'+(n%100000?' '+cv(n%100000):''); return cv(Math.floor(n/10000000))+' Crore'+(n%10000000?' '+cv(n%10000000):''); };
+      const words = `USD ${cv(Math.round(grandUsd_))} Dollars Only`;
+      if (words !== ciForm.amount_in_words) {
+        setCiForm(prev => ({ ...prev, amount_in_words: words }));
+      }
+    }
+  }, [open, ci, ciItems, ciForm.exchange_rate, ciForm.freight, ciForm.insurance, ciForm.igst_rate, ciForm._ci_discount_usd, ciForm._ci_discount_mode]);
+
   if (!open || !ci) return null;
 
   const ic = "border-0 outline-none bg-transparent text-xs w-full focus:bg-yellow-50 hover:bg-yellow-50/50 px-1";
@@ -83,10 +120,47 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
   const igstAmount = totalInvInr * igstRate / 100;
   const grandTotalInr = totalInvInr + igstAmount;
 
-  // ── NEW: Discount + Sub Total for INR side ──
-  const discountInr = parseFloat(ciForm._ci_discount) || 0;
+  // ── Discount (supports % or flat USD) + Sub Total for INR side ──
+  const discountMode = ciForm._ci_discount_mode || 'usd'; // 'usd' or 'percent'
+  const discountInput = parseFloat(ciForm._ci_discount_usd) || 0;
+  const discountUsd = discountMode === 'percent' ? (totalUsd * discountInput / 100) : discountInput;
+  const discountInr = discountUsd * rate;
   const subTotalInr = totalInvInr;
   const finalGrandTotalInr = grandTotalInr - discountInr;
+
+  // Auto-generate amount in words for INR
+  const _numToWords = (num) => {
+    const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    const convert = (n) => {
+      if (n < 20) return ones[n];
+      if (n < 100) return tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '');
+      if (n < 1000) return ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' and ' + convert(n%100) : '');
+      if (n < 100000) return convert(Math.floor(n/1000)) + ' Thousand' + (n%1000 ? ' ' + convert(n%1000) : '');
+      if (n < 10000000) return convert(Math.floor(n/100000)) + ' Lakh' + (n%100000 ? ' ' + convert(n%100000) : '');
+      return convert(Math.floor(n/10000000)) + ' Crore' + (n%10000000 ? ' ' + convert(n%10000000) : '');
+    };
+    return convert(Math.floor(num));
+  };
+  const grandTotalUsd = totalUsd - discountUsd;
+  const autoAmountWords = grandTotalUsd > 0 ? `USD ${_numToWords(Math.round(grandTotalUsd))} Dollars Only` : '';
+
+  // (amount sync moved before early return)
+
+  // Tab inside a cell textarea inserts a real tab character
+  const handleCellKeyDown = (e) => {
+    if (e.key === "Tab" && !e.shiftKey) {
+      e.preventDefault();
+      const ta = e.target;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const newValue = ta.value.substring(0, start) + "\t" + ta.value.substring(end);
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(ta, newValue);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
+    }
+  };
 
   const updateItem = (i, field, value) => {
     const items = [...ciItems];
@@ -118,7 +192,12 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
       igst_amount: igstAmount,
       grand_total_inr: grandTotalInr,
     }));
-    setTimeout(() => onSave(), 50);
+    return new Promise((resolve) => {
+      setTimeout(async () => {
+        try { await onSave?.(); } catch {}
+        resolve();
+      }, 50);
+    });
   };
 
   const G = "#558b2f";
@@ -261,10 +340,6 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
                   <td className="border border-gray-400 p-0"><input value={ciForm.buyer_order_no || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_order_no: e.target.value })} className={ic} /></td>
                 </tr>
                 <tr>
-                  <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Exchange Rate per USD</span></td>
-                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={ciForm.exchange_rate || ""} onChange={(e) => setCiForm({ ...ciForm, exchange_rate: e.target.value })} placeholder="₹0.00" className={ic} /></td>
-                </tr>
-                <tr>
                   <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Batch No.</span></td>
                   <td className="border border-gray-400 p-0"><input value={ciForm.batch_no || ""} onChange={(e) => setCiForm({ ...ciForm, batch_no: e.target.value })} placeholder="e.g. B-2026-001" className={ic} /></td>
                 </tr>
@@ -280,7 +355,7 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
                 { label: "ICICI INR", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611905057914", type: "CA Account" },
                 { label: "ICICI USD", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611906000027", type: "CA Account" },
                 { label: "DBS INR", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832210073820", type: "CA Account" },
-                { label: "DBS USD", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0811", swift: "DBSSINBB", ac: "832250073848", type: "CA Account" },
+                { label: "DBS USD", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832250073848", type: "CA Account" },
               ].map(b => (
                 <button key={b.label} type="button" onClick={() => setCiForm(prev => ({ ...prev, _bank_name: b.name, _bank_branch: b.branch, _bank_beneficiary: b.beneficiary, _bank_ifsc: b.ifsc, _bank_swift: b.swift, _bank_ac: b.ac, _bank_ac_type: b.type }))}
                   className="px-1.5 py-0.5 text-[8px] font-medium rounded border border-gray-300 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors">
@@ -304,38 +379,35 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
 
         {/* ── PACKING DETAILS ── */}
         <div className="text-right text-lg font-light mb-1" style={{ color: "#999" }}>PACKING DETAILS</div>
-        <table className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
+        <table ref={ciTableRef} className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
           <thead>
             <tr style={{ backgroundColor: G }}>
-              <th className="border border-gray-400 p-1 text-left text-white text-[9px]">Product Name</th>
-              <th className="border border-gray-400 p-1 text-left text-white text-[9px]">No. & Kind of Packages</th>
-              <th className="border border-gray-400 p-1 text-left text-white text-[9px]">Product Details</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-[9px]">Quantity</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-[9px]">Price/Kg</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-[9px]">Amount in USD</th>
-              <th className="border border-gray-400 p-1 text-right text-white text-[9px]">Amount in INR</th>
+              <th className="border border-gray-400 p-1 text-center text-white text-[9px]" style={{ width: "12%" }}>Product Details</th>
+              <th className="border border-gray-400 p-1 text-center text-white text-[9px]" style={{ width: "25%" }}>No. & Kind of Packages</th>
+              <th className="border border-gray-400 p-1 text-center text-white text-[9px]" style={{ width: "22%" }}>Description of Goods</th>
+              <th className="border border-gray-400 p-1 text-center text-white text-[9px]" style={{ width: "10%" }}>Quantity</th>
+              <th className="border border-gray-400 p-1 text-right text-white text-[9px]" style={{ width: "13%" }}>Price/Ltr</th>
+              <th className="border border-gray-400 p-1 text-right text-white text-[9px]" style={{ width: "17%" }}>Amount</th>
               <th className="border border-gray-400 p-1 w-5"></th>
             </tr>
           </thead>
           <tbody>
             {ciItems.map((item, i) => {
               const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
-              const lineInr = lineTotal * rate;
               return (
                 <tr key={item.id || i}>
-                  <td className="border border-gray-400 p-0"><input value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} className={ic} /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.packages_description} onChange={(e) => updateItem(i, "packages_description", e.target.value)} className={ic} /></td>
-                  <td className="border border-gray-400 p-0"><input value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} className={ic} /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" value={item.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} className={icr + " w-16"} /></td>
-                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={item.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className={icr + " w-20"} /></td>
-                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{lineTotal ? `$${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "$0.00"}</td>
-                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{rate ? `Rs.${lineInr.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "Rs.0.00"}</td>
+                  <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.product_name} onChange={(e) => updateItem(i, "product_name", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans font-bold"} onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
+                  <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.packages_description} onChange={(e) => updateItem(i, "packages_description", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans"} onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
+                  <td className="border border-gray-400 p-0 align-top"><textarea rows={1} value={item.description_of_goods} onChange={(e) => updateItem(i, "description_of_goods", e.target.value)} onKeyDown={handleCellKeyDown} className={ic + " resize-none overflow-hidden whitespace-pre-wrap break-words py-1 font-sans"} onInput={(e) => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }} /></td>
+                  <td className="border border-gray-400 p-0"><input type="number" value={item.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} className={icr} /></td>
+                  <td className="border border-gray-400 p-0"><input type="number" step="0.01" value={item.unit_price} onChange={(e) => updateItem(i, "unit_price", e.target.value)} className={icr} /></td>
+                  <td className="border border-gray-400 p-0 text-right px-1 font-medium bg-gray-50">{lineTotal ? `$ ${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "$ 0.00"}</td>
                   <td className="border border-gray-400 p-0 text-center"><button onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600">&times;</button></td>
                 </tr>
               );
             })}
             <tr>
-              <td colSpan="8" className="border border-gray-400 p-1">
+              <td colSpan="7" className="border border-gray-400 p-1">
                 <button onClick={addItem} className="text-[10px] text-indigo-600 hover:text-indigo-700 font-medium">+ Add Item</button>
               </td>
             </tr>
@@ -344,32 +416,26 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
 
         {/* ── FINANCIAL BREAKDOWN (right-aligned) ── */}
         <div className="flex justify-end mb-2">
-          <table className="border-collapse text-[10px]" style={{ width: "320px" }}>
+          <table className="border-collapse text-[10px]" style={{ width: "250px" }}>
             <tbody>
+              {discountUsd > 0 && (
               <tr>
-                <td className="text-right font-bold p-1 border border-gray-300"></td>
-                <td className="text-right font-bold p-1 border border-gray-300">USD</td>
-                <td className="text-right font-bold p-1 border border-gray-300">INR</td>
+                <td className="text-right font-bold p-1 border border-gray-300">
+                  Discount
+                  <div className="inline-flex ml-1 gap-0.5">
+                    <button type="button" onClick={() => setCiForm({ ...ciForm, _ci_discount_mode: 'usd' })} className={`px-1 py-0 text-[8px] rounded ${discountMode === 'usd' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>USD</button>
+                    <button type="button" onClick={() => setCiForm({ ...ciForm, _ci_discount_mode: 'percent' })} className={`px-1 py-0 text-[8px] rounded ${discountMode === 'percent' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>%</button>
+                  </div>
+                </td>
+                <td className="text-right p-1 border border-gray-300">
+                  <input type="number" step="0.01" value={ciForm._ci_discount_usd || ""} onChange={(e) => setCiForm({ ...ciForm, _ci_discount_usd: e.target.value })} placeholder={discountMode === 'percent' ? '0 %' : '0.00'} className={icr + " w-24"} />
+                  {discountMode === 'percent' && discountUsd > 0 && <div className="text-[8px] text-gray-400">$ {discountUsd.toFixed(2)}</div>}
+                </td>
               </tr>
-              <tr>
-                <td className="text-right font-bold p-1 border border-gray-300">Discount</td>
-                <td className="text-right p-1 border border-gray-300"><input type="number" step="0.01" value={ciForm._ci_discount_usd || ""} onChange={(e) => setCiForm({ ...ciForm, _ci_discount_usd: e.target.value })} placeholder="0.00" className={icr + " w-20"} /></td>
-                <td className="text-right p-1 border border-gray-300"><input type="number" step="0.01" value={ciForm._ci_discount || ""} onChange={(e) => setCiForm({ ...ciForm, _ci_discount: e.target.value })} placeholder="0.00" className={icr + " w-20"} /></td>
-              </tr>
-              <tr>
-                <td className="text-right font-bold p-1 border border-gray-300">Sub Total</td>
-                <td className="text-right p-1 border border-gray-300">${totalInvUsd.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                <td className="text-right p-1 border border-gray-300">{rate ? `Rs.${subTotalInr.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "-"}</td>
-              </tr>
-              <tr>
-                <td className="text-right font-bold p-1 border border-gray-300">GST <input type="number" step="0.01" value={ciForm.igst_rate || ""} onChange={(e) => setCiForm({ ...ciForm, igst_rate: e.target.value })} className="border border-gray-200 rounded px-1 py-0 text-xs w-10 outline-none" />%</td>
-                <td className="text-right p-1 border border-gray-300"></td>
-                <td className="text-right p-1 border border-gray-300">{rate ? `Rs.${igstAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "-"}</td>
-              </tr>
+              )}
               <tr style={{ backgroundColor: "#f0fdf4" }}>
                 <td className="text-right font-bold p-1 border border-gray-300" style={{ color: G }}>Grand Total</td>
-                <td className="text-right font-bold p-1 border border-gray-300" style={{ color: G }}></td>
-                <td className="text-right font-bold p-1 border border-gray-300" style={{ color: G }}>{rate ? `Rs.${finalGrandTotalInr.toLocaleString(undefined, {minimumFractionDigits: 2})}` : "-"}</td>
+                <td className="text-right font-bold p-1 border border-gray-300" style={{ color: G }}>$ {(totalUsd - discountUsd).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
               </tr>
             </tbody>
           </table>
@@ -384,13 +450,12 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
         </div>
 
         {/* ── Amount in Words ── */}
-        <div className="text-center p-2 border border-gray-400 mb-3 text-[10px]" style={{ backgroundColor: "#dce9d0" }}>
-          <span className="font-bold">Amount In Words : </span>
+        <div className="p-2 border border-gray-400 mb-3 text-[10px]" style={{ backgroundColor: "#dce9d0" }}>
           <input
-            value={ciForm.amount_in_words || ""}
-            onChange={(e) => setCiForm({ ...ciForm, amount_in_words: e.target.value })}
-            placeholder="Rupees zero Only"
-            className="border-0 outline-none bg-transparent text-[10px] font-bold text-center w-72 focus:bg-yellow-50"
+            value={`Amount In Words : ${autoAmountWords || ciForm.amount_in_words || ""}`}
+            onChange={(e) => { const v = e.target.value.replace(/^Amount In Words\s*:\s*/i, ''); setCiForm({ ...ciForm, amount_in_words: v }); }}
+            placeholder="Amount In Words : Rupees zero Only"
+            className="border-0 outline-none bg-transparent text-[10px] font-bold w-full text-center focus:bg-yellow-50"
           />
         </div>
 
@@ -417,15 +482,12 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
         </div>
 
         {/* ── ACTION BUTTONS ── */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
+        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+          <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
+          <button onClick={async () => { await handleSaveWithTotals(); await onGeneratePdf?.(); }} disabled={generating} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {generating ? "Generating..." : "Save & Generate PDF"}
+          </button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
-          <div className="flex gap-2">
-            <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50">Save Draft</button>
-            <button onClick={onPreview} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Preview PDF</button>
-            <button onClick={onSend} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-              {sending ? "Sending..." : "Send CI"}
-            </button>
-          </div>
         </div>
       </div>
     </Modal>

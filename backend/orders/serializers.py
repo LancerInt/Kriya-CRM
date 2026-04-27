@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Order, OrderItem, OrderStatusHistory, OrderDocument, WorkflowEventLog, EmailLog
+from .models import Order, OrderItem, OrderStatusHistory, OrderDocument, WorkflowEventLog, EmailLog, OrderFeedback
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -39,29 +39,57 @@ class EmailLogSerializer(serializers.ModelSerializer):
         fields = ['id', 'to_email', 'subject', 'status', 'error', 'triggered_by', 'created_at']
 
 
+class OrderFeedbackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderFeedback
+        fields = ['id', 'comments', 'issues', 'bulk_order_interest', 'created_at']
+
+
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    client_primary_executive_name = serializers.CharField(source='client.primary_executive.full_name', read_only=True, default='')
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     allowed_transitions = serializers.SerializerMethodField()
     can_revert = serializers.SerializerMethodField()
     revert_to = serializers.SerializerMethodField()
+    can_view_total = serializers.SerializerMethodField()
     quotation_number = serializers.CharField(source='quotation.quotation_number', read_only=True, default='')
+    _feedback = OrderFeedbackSerializer(source='feedback', read_only=True, default=None)
 
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'client', 'client_name', 'quotation', 'quotation_number',
+            'id', 'order_number', 'client', 'client_name', 'client_primary_executive_name', 'quotation', 'quotation_number',
             'order_type', 'status', 'currency', 'delivery_terms', 'payment_terms',
-            'freight_terms', 'total', 'notes', 'created_by', 'created_by_name',
+            'freight_terms', 'total', 'can_view_total', 'notes', 'readiness_checklist', 'created_by', 'created_by_name',
             'po_document', 'po_number', 'po_received_date',
             'confirmed_at', 'pi_sent_at', 'po_received_at', 'pif_sent_at', 'docs_approved_at',
             'factory_ready_at', 'container_booked_at', 'inspection_passed_at',
             'dispatched_at', 'delivered_at',
             'docs_preparing_at', 'inspection_at', 'in_transit_at', 'arrived_at',
-            'allowed_transitions', 'can_revert', 'revert_to', 'items', 'created_at', 'updated_at',
+            'allowed_transitions', 'can_revert', 'revert_to', 'items', '_feedback', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'status']
+
+    def get_can_view_total(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            return False
+        if user.role in ('admin', 'manager'):
+            return True
+        if user.role == 'executive':
+            client = obj.client
+            if client.primary_executive_id == user.id or client.shadow_executive_id == user.id:
+                return True
+        return False
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not data.get('can_view_total'):
+            data['total'] = None
+        return data
 
     def get_allowed_transitions(self, obj):
         from orders.workflow_service import get_allowed_transitions, get_status_display
