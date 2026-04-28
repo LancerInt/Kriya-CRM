@@ -81,9 +81,13 @@ def recycle_bin_list(request):
 
         deleted = Model.objects.filter(is_deleted=True).order_by('-deleted_at')
         for obj in deleted:
+            # Prefer deleted_at; fall back to updated_at for legacy records
+            # whose deleted_at was never populated. updated_at is touched by
+            # soft_delete(), so it is a reliable proxy for the archive moment.
+            anchor = obj.deleted_at or getattr(obj, 'updated_at', None)
             days_left = 30
-            if obj.deleted_at:
-                days_left = max(0, 30 - (timezone.now() - obj.deleted_at).days)
+            if anchor:
+                days_left = max(0, 30 - (timezone.now() - anchor).days)
 
             # For communications, show specific type (Email, WhatsApp, Call, Note)
             item_type = display_name
@@ -96,7 +100,7 @@ def recycle_bin_list(request):
                 'model': model_label,
                 'type': item_type,
                 'name': _get_display(obj, model_label),
-                'deleted_at': obj.deleted_at.isoformat() if obj.deleted_at else None,
+                'deleted_at': (obj.deleted_at or getattr(obj, 'updated_at', None)).isoformat() if (obj.deleted_at or getattr(obj, 'updated_at', None)) else None,
                 'days_left': days_left,
             }
             # Add extra info for communications

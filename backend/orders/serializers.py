@@ -18,10 +18,11 @@ class OrderStatusHistorySerializer(serializers.ModelSerializer):
 
 class OrderDocumentSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default='')
+    order_item_product_name = serializers.CharField(source='order_item.product_name', read_only=True, default='')
 
     class Meta:
         model = OrderDocument
-        fields = ['id', 'doc_type', 'name', 'file', 'uploaded_by', 'uploaded_by_name', 'created_at']
+        fields = ['id', 'doc_type', 'name', 'file', 'order_item', 'order_item_product_name', 'uploaded_by', 'uploaded_by_name', 'created_at']
         read_only_fields = ['id', 'uploaded_by']
 
 
@@ -49,6 +50,7 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
     client_primary_executive_name = serializers.CharField(source='client.primary_executive.full_name', read_only=True, default='')
+    client_primary_executive_id = serializers.PrimaryKeyRelatedField(source='client.primary_executive', read_only=True)
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default='')
     allowed_transitions = serializers.SerializerMethodField()
     can_revert = serializers.SerializerMethodField()
@@ -60,7 +62,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'client', 'client_name', 'client_primary_executive_name', 'quotation', 'quotation_number',
+            'id', 'order_number', 'client', 'client_name', 'client_primary_executive_name', 'client_primary_executive_id', 'quotation', 'quotation_number',
             'order_type', 'status', 'currency', 'delivery_terms', 'payment_terms',
             'freight_terms', 'total', 'can_view_total', 'notes', 'readiness_checklist', 'created_by', 'created_by_name',
             'po_document', 'po_number', 'po_received_date',
@@ -68,6 +70,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'factory_ready_at', 'container_booked_at', 'inspection_passed_at',
             'dispatched_at', 'delivered_at',
             'docs_preparing_at', 'inspection_at', 'in_transit_at', 'arrived_at',
+            'firc_received_at',
             'allowed_transitions', 'can_revert', 'revert_to', 'items', '_feedback', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'status']

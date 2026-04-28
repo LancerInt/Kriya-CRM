@@ -75,6 +75,7 @@ def sync_emails(email_account_id=None, days_back=None):
                 status='received' if direction == 'inbound' else 'sent',
                 email_message_id=em['message_id'],
                 email_in_reply_to=em['in_reply_to'],
+                email_references=em.get('references', '') or '',
                 email_account=account,
                 external_email=external,
                 email_cc=em.get('cc', ''),
@@ -87,6 +88,25 @@ def sync_emails(email_account_id=None, days_back=None):
             # Override created_at with the actual email date
             if em.get('date'):
                 Communication.objects.filter(id=comm.id).update(created_at=em['date'])
+
+            # Persist any file attachments that came with the email — these
+            # are needed by the PO auto-attach flow (and the timeline / drafts).
+            atts = em.get('attachments') or []
+            if atts:
+                from communications.models import CommunicationAttachment
+                from django.core.files.base import ContentFile
+                for a in atts:
+                    try:
+                        att = CommunicationAttachment(
+                            communication=comm,
+                            filename=a.get('filename') or 'attachment.bin',
+                            file_size=a.get('size') or 0,
+                            mime_type=a.get('mime_type') or '',
+                        )
+                        att.file.save(a.get('filename') or 'attachment.bin',
+                                      ContentFile(a.get('content') or b''), save=True)
+                    except Exception as e:
+                        logger.warning(f'Failed to save attachment for {comm.id}: {e}')
 
             # Auto-archive if sender is in the archived senders list
             if direction == 'inbound' and external:

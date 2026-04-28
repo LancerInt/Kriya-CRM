@@ -105,6 +105,13 @@ class Quotation(TimeStampedModel):
     notes = models.TextField(blank=True)
     sent_via = models.CharField(max_length=20, blank=True, help_text='email or whatsapp')
     sent_at = models.DateTimeField(null=True, blank=True)
+    # Source email thread — used by the email service to keep quotation
+    # send-outs threaded with the original client inquiry.
+    source_communication = models.ForeignKey(
+        'communications.Communication', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='quotations',
+        help_text='Inbound client email this quotation responds to (drives email threading).',
+    )
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_quotations')
     approved_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_quotations')
     approved_at = models.DateTimeField(null=True, blank=True)

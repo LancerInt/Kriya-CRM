@@ -178,15 +178,15 @@ def on_shipment_status_change(sender, instance, created, **kwargs):
     title, message = STATUS_MESSAGES.get(current, (current, f'Shipment status updated to {current}.'))
     client_name = instance.client.company_name if instance.client else 'N/A'
 
-    # Update order status for key stages
+    # NOTE: We deliberately do NOT mirror shipment.status back onto order.status.
+    # The order workflow is the single source of truth — orders/workflow_service.py
+    # already mirrors order → shipment via _sync_shipment_status.
+    #
+    # The previous code here forced order.status = 'shipped' (which is not even
+    # a value on Order.Status — corrupting the timeline) and 'delivered'
+    # without going through transition_order, skipping timestamps, audit,
+    # and gates. Removed.
     order = instance.order
-    if order:
-        if current == 'dispatched' and order.status not in ('shipped', 'delivered', 'cancelled'):
-            order.status = 'shipped'
-            order.save(update_fields=['status', 'updated_at'])
-        elif current == 'delivered' and order.status != 'delivered':
-            order.status = 'delivered'
-            order.save(update_fields=['status', 'updated_at'])
 
     # Notify internal team
     notified = set()
@@ -207,12 +207,15 @@ def on_shipment_status_change(sender, instance, created, **kwargs):
             link=f'/shipments/{instance.id}',
         )
 
-    # Auto-email client at key stages
-    if current in ('dispatched', 'arrived'):
-        try:
-            _email_client_status(instance, title, message)
-        except Exception as e:
-            logger.error(f'Failed to email client status: {e}')
+    # Auto-email client at key stages — DISABLED.
+    # The order workflow is the single source of truth for client emails:
+    #   • Dispatched → user-reviewed rich dispatch draft (with CI, CPL, COA,
+    #     MSDS, factory-stuffing photos) sent from the Communications page.
+    #   • In Transit → rich transit draft (BL, etc.).
+    #   • Arrived   → orders/email_service.send_order_status_email via
+    #     AUTO_EMAIL_STATUSES.
+    # Firing _email_client_status here too produced a duplicate templated
+    # "Container: TBD, B/L: TBD" email after the real one was sent.
 
 
 # ---------------------------------------------------------------------------

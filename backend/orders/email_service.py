@@ -6,6 +6,29 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_thread(client, source_communication=None):
+    """Resolve threading headers + reply subject for outbound mails so we
+    keep the conversation in the same thread the client started."""
+    from communications.services import get_thread_headers
+    return get_thread_headers(client, source_communication=source_communication)
+
+
+def _stamp_outbound(comm, in_reply_to, references, message_id):
+    """Persist threading metadata onto an outbound Communication record."""
+    fields = []
+    if in_reply_to and not (comm.email_in_reply_to or '').strip():
+        comm.email_in_reply_to = in_reply_to
+        fields.append('email_in_reply_to')
+    if references and not (comm.email_references or '').strip():
+        comm.email_references = references
+        fields.append('email_references')
+    if message_id and not (comm.email_message_id or '').strip():
+        comm.email_message_id = message_id
+        fields.append('email_message_id')
+    if fields:
+        comm.save(update_fields=fields)
+
 STATUS_EMAIL_TEMPLATES = {
     'inspection_passed': {
         'subject': 'Inspection Passed',
@@ -53,8 +76,15 @@ def send_order_status_email(order, status):
     bl_number = shipment.bl_number if shipment else 'TBD'
     eta = str(shipment.estimated_arrival) if shipment and shipment.estimated_arrival else 'TBD'
 
+    # Resolve the original inquiry thread so this status update stays in the
+    # same conversation the customer started.
+    in_reply_to, references, reply_subject = _resolve_thread(
+        order.client, source_communication=getattr(order, 'source_communication', None),
+    )
+
     # Build email — order number is intentionally NOT exposed to the client.
-    subject = template['subject']
+    base_subject = template['subject']
+    subject = reply_subject or base_subject
     body_text = template['body'].format(
         container=container, bl_number=bl_number, eta=eta,
     )
@@ -74,12 +104,14 @@ def send_order_status_email(order, status):
 
     # Send
     error_msg = ''
+    sent_message_id = ''
     try:
         from communications.services import EmailService
-        EmailService.send_email(
+        sent_message_id = EmailService.send_email(
             email_account=email_account, to=contact.email,
             subject=subject, body_html=body_html,
-        )
+            in_reply_to=in_reply_to, references=references,
+        ) or ''
     except Exception as e:
         error_msg = str(e)
         logger.error(f'Email send failed: {e}')
@@ -99,14 +131,16 @@ def send_order_status_email(order, status):
         metadata={'to': contact.email, 'status': status, 'error': error_msg},
     )
 
-    # Also create Communication record
+    # Also create Communication record — stamped with threading metadata so
+    # subsequent replies stay in the same thread.
     from communications.models import Communication
-    Communication.objects.create(
+    comm = Communication.objects.create(
         client=order.client, contact=contact,
         comm_type='email', direction='outbound',
         subject=subject, body=body_html, status='sent',
         email_account=email_account, external_email=contact.email,
     )
+    _stamp_outbound(comm, in_reply_to, references, sent_message_id)
 
     logger.info(f'Status email sent for {order.order_number} → {contact.email}')
 
@@ -137,7 +171,15 @@ def send_quotation_email(quotation, user):
             <td style="padding:8px;border:1px solid #eee;text-align:right;">{quotation.currency} {item.total_price:,.2f}</td>
         </tr>'''
 
-    subject = f'Quotation {quotation.quotation_number} - Kriya Biosys Private Limited'
+    # Resolve thread — prefer the quotation's source communication, then
+    # fall back to the latest inbound from this client.
+    in_reply_to, references, reply_subject = _resolve_thread(
+        quotation.client,
+        source_communication=getattr(quotation, 'source_communication', None),
+    )
+
+    base_subject = f'Quotation {quotation.quotation_number} - Kriya Biosys Private Limited'
+    subject = reply_subject or base_subject
     body_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:700px;">
         <h2 style="color:#1e3a5f;">Quotation - {quotation.quotation_number}</h2>
@@ -167,12 +209,28 @@ def send_quotation_email(quotation, user):
     """
 
     from communications.services import EmailService
-    EmailService.send_email(email_account=email_account, to=contact.email, subject=subject, body_html=body_html)
+    sent_message_id = EmailService.send_email(
+        email_account=email_account, to=contact.email,
+        subject=subject, body_html=body_html,
+        in_reply_to=in_reply_to, references=references,
+    ) or ''
 
     # Log
     EmailLog.objects.create(
         to_email=contact.email, subject=subject, body=body_html,
         status='sent', triggered_by='quotation_send',
     )
+
+    # Communication record stamped with threading metadata so any reply we
+    # send next (PI, Sales Order, dispatch, transit, etc.) stays in the same
+    # thread.
+    from communications.models import Communication
+    comm = Communication.objects.create(
+        client=quotation.client, contact=contact, user=user,
+        comm_type='email', direction='outbound',
+        subject=subject, body=body_html, status='sent',
+        email_account=email_account, external_email=contact.email,
+    )
+    _stamp_outbound(comm, in_reply_to, references, sent_message_id)
 
     return contact.email

@@ -297,6 +297,7 @@ export function PIFListModal({ open, onClose, orderId, onAllReady }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // orderItem row
+  const [attaching, setAttaching] = useState(false);
 
   const load = () => {
     if (!orderId) return;
@@ -305,6 +306,25 @@ export function PIFListModal({ open, onClose, orderId, onAllReady }) {
       .then((r) => setStatus(r.data))
       .catch(() => toast.error("Failed to load PIF status"))
       .finally(() => setLoading(false));
+  };
+
+  const attachAllToEmail = async () => {
+    setAttaching(true);
+    try {
+      const res = await api.post("/finance/pif/attach-all-to-email/", { order_id: orderId });
+      const commId = res.data.communication_id;
+      const draftId = res.data.draft_id;
+      toast.success(`Attached ${res.data.pif_count} PIF(s) — opening draft`);
+      if (commId) {
+        const qs = draftId ? `?draft=${draftId}` : "";
+        window.location.href = `/communications/${commId}${qs}`;
+      } else {
+        toast("No source thread — open Communications to find the draft.", { icon: "ℹ️" });
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error || "Failed to attach PIFs";
+      toast.error(msg);
+    } finally { setAttaching(false); }
   };
 
   useEffect(() => { if (open) load(); }, [open, orderId]);
@@ -352,6 +372,30 @@ export function PIFListModal({ open, onClose, orderId, onAllReady }) {
                       <button onClick={() => setEditing(it)} className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
                         {state === "missing" ? "Create" : state === "draft" ? "Edit & Generate" : "Edit"}
                       </button>
+                      {state === "ready" && it.pif_id && (
+                        <button
+                          onClick={() => {
+                            const input = document.createElement("input");
+                            input.type = "file";
+                            input.accept = "application/pdf,image/*";
+                            input.onchange = async () => {
+                              const f = input.files?.[0];
+                              if (!f) return;
+                              const fd = new FormData();
+                              fd.append("file", f);
+                              try {
+                                await api.post(`/finance/pif/${it.pif_id}/replace-pdf/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+                                toast.success("PIF replaced");
+                                load();
+                              } catch { toast.error("Failed to replace PIF"); }
+                            };
+                            input.click();
+                          }}
+                          className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                        >
+                          Replace
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -359,10 +403,12 @@ export function PIFListModal({ open, onClose, orderId, onAllReady }) {
             )}
           </div>
 
-          <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+          <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs text-gray-500">{status ? `${(status.items || []).filter(i => i.has_pdf).length} of ${status.count} generated` : ""}</span>
             <div className="flex items-center gap-2">
-              {status?.all_ready && <span className="text-xs font-medium text-emerald-700">All PIFs ready — you can advance the order.</span>}
+              {status?.all_ready && (
+                <span className="text-xs font-medium text-emerald-700">All PIFs ready — you can advance the order.</span>
+              )}
               <button onClick={onClose} className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Done</button>
             </div>
           </div>

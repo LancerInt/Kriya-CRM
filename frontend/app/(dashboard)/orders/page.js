@@ -27,8 +27,8 @@ export default function OrdersPage() {
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [nextOrderNum, setNextOrderNum] = useState("");
   const [form, setForm] = useState({
-    client: "", product_name: "", delivery_terms: "FOB",
-    freight_terms: "", payment_terms: "",
+    client: "", product_name: "", quantity: "", unit: "KG", unit_price: "",
+    currency: "USD", delivery_terms: "FOB", freight_terms: "", payment_terms: "",
   });
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function OrdersPage() {
   }, []);
 
   const openCreate = () => {
-    setForm({ client: "", product_name: "", delivery_terms: "FOB", freight_terms: "", payment_terms: "" });
+    setForm({ client: "", product_name: "", quantity: "", unit: "KG", unit_price: "", currency: "USD", delivery_terms: "FOB", freight_terms: "", payment_terms: "" });
     setProductSearch(""); setClientSearch(""); setShowProductDropdown(false); setShowClientDropdown(false);
     if (clients.length === 0) {
       api.get("/clients/").then(r => {
@@ -61,6 +61,7 @@ export default function OrdersPage() {
       const res = await api.post("/orders/", {
         client: form.client,
         order_type: "direct",
+        currency: form.currency || "USD",
         delivery_terms: form.delivery_terms,
         freight_terms: form.freight_terms,
         payment_terms: form.payment_terms,
@@ -69,6 +70,9 @@ export default function OrdersPage() {
       if (form.product_name) {
         await api.post(`/orders/${res.data.id}/add-item/`, {
           product_name: form.product_name,
+          quantity: form.quantity ? Number(form.quantity) : 1,
+          unit: form.unit || "KG",
+          unit_price: form.unit_price ? Number(form.unit_price) : 0,
         });
       }
       toast.success(`Order ${res.data.order_number} created`);
@@ -78,12 +82,42 @@ export default function OrdersPage() {
     finally { setSubmitting(false); }
   };
 
+  const user = useSelector((state) => state.auth?.user);
+  const canDeleteOrder = user?.role === "admin" || user?.role === "manager";
+  const [deleteTarget, setDeleteTarget] = useState(null); // order row pending delete
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDeleteOrder = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/orders/${deleteTarget.id}/`);
+      toast.success("Order deleted");
+      setDeleteTarget(null);
+      dispatch(fetchOrders());
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to delete order")); }
+    finally { setDeleting(false); }
+  };
+
   const columns = [
     { key: "order_number", label: "Order #", render: (row) => <span className="font-medium">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span> },
     { key: "client_name", label: "Account" },
-    { key: "total", label: "Value", render: (row) => row.can_view_total && row.total != null ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "total", label: "Value", render: (row) => row.can_view_total && row.total != null ? `$${Number(row.total).toLocaleString()}` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "created_at", label: "Date", render: (row) => { try { return format(new Date(row.created_at), "MMM d, yyyy"); } catch { return "\u2014"; } } },
+    { key: "created_at", label: "Date", render: (row) => { try { return format(new Date(row.created_at), "MMM d, yyyy"); } catch { return "—"; } } },
+    ...(canDeleteOrder ? [{
+      key: "actions", label: "", render: (row) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
+          title="Delete order"
+          className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+          </svg>
+        </button>
+      ),
+    }] : []),
   ];
 
   const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm";
@@ -153,6 +187,40 @@ export default function OrdersPage() {
             )}
           </div>
 
+          {/* Quantity / Unit / Unit Price — populates Order.total */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <input type="number" step="0.01" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="0" className={ic} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
+              <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={ic}>
+                <option value="KG">KG</option>
+                <option value="MT">MT</option>
+                <option value="LTR">LTR</option>
+                <option value="Ltrs">Ltrs</option>
+                <option value="PCS">PCS</option>
+                <option value="GM">GM</option>
+                <option value="ML">ML</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price</label>
+              <input type="number" step="0.01" min="0" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} placeholder="0.00" className={ic} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={ic}>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="INR">INR</option>
+                <option value="GBP">GBP</option>
+                <option value="AED">AED</option>
+              </select>
+            </div>
+          </div>
+
           {/* Client — searchable dropdown */}
           <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
@@ -219,6 +287,41 @@ export default function OrdersPage() {
             <button type="button" onClick={() => setShowCreateModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete confirmation modal */}
+      <Modal open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} title="Delete Sales Order" size="sm">
+        {deleteTarget && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm text-gray-800">
+                  Are you sure you want to delete <span className="font-semibold">{deleteTarget.order_number || "this order"}</span>?
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  The order will be removed from the list. Linked shipments and documents are kept.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+              >Cancel</button>
+              <button
+                onClick={confirmDeleteOrder}
+                disabled={deleting}
+                className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700 disabled:opacity-50"
+              >{deleting ? "Deleting..." : "Yes, Delete"}</button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

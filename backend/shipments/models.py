@@ -28,6 +28,7 @@ class Shipment(TimeStampedModel):
     vessel_name = models.CharField(max_length=255, blank=True)
     port_of_loading = models.CharField(max_length=255, blank=True)
     port_of_discharge = models.CharField(max_length=255, blank=True)
+    country = models.CharField(max_length=100, blank=True, help_text="Destination country, populated from the client's country.")
     delivery_terms = models.CharField(max_length=20, blank=True)
     freight_type = models.CharField(max_length=20, blank=True)
     dispatch_date = models.DateField(null=True, blank=True)

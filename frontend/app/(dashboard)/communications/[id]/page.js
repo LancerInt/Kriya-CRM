@@ -178,7 +178,25 @@ export default function CommunicationDetailPage() {
     try {
       const drafts = await api.get(`/communications/drafts/`, { params: { communication: target.id } });
       const list = drafts.data?.results || drafts.data || [];
-      draft = list.find(d => d.status === "draft") || list[0] || null;
+      // 1. URL override: ?draft=<id> wins (used by dispatch/transit deep-links)
+      const overrideId = (typeof window !== "undefined")
+        ? new URL(window.location.href).searchParams.get("draft")
+        : null;
+      if (overrideId) {
+        draft = list.find(d => String(d.id) === String(overrideId)) || null;
+      }
+      // 2. Prefer drafts the system stamped (dispatch/transit) over plain replies
+      if (!draft) {
+        const stamped = list.filter(d => d.status === "draft" && ((d.editor_data?.auto_actions || []).length > 0));
+        stamped.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+        draft = stamped[0] || null;
+      }
+      // 3. Otherwise fall back to the most recent open draft
+      if (!draft) {
+        const open = list.filter(d => d.status === "draft");
+        open.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+        draft = open[0] || list[0] || null;
+      }
       if (!draft) {
         try {
           const r = await api.post(`/communications/${target.id}/generate-draft/`);
@@ -455,14 +473,18 @@ export default function CommunicationDetailPage() {
               <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50">
                 <p className="text-xs font-medium text-gray-500 mb-2">Attachments ({msg.attachments.length})</p>
                 <div className="flex flex-wrap gap-2">
-                  {msg.attachments.map((att) => (
-                    <a key={att.id} href={att.file} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                      <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                      <span className="text-xs font-medium text-gray-700">{att.filename}</span>
-                      <span className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
-                    </a>
-                  ))}
+                  {msg.attachments.map((att) => {
+                    const raw = att.file || "";
+                    const href = raw.startsWith("http") ? raw : `http://localhost:8000${raw}`;
+                    return (
+                      <a key={att.id} href={href} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                        <span className="text-xs font-medium text-gray-700">{att.filename}</span>
+                        <span className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</span>
+                      </a>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -667,12 +689,22 @@ export default function CommunicationDetailPage() {
                     {savedAttachments.map((att) => (
                       <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs hover:bg-green-100 transition-colors">
                         <div
-                          onClick={() => {
+                          onClick={async () => {
+                            const raw = att.file || "";
+                            const url = raw.startsWith("http") ? raw : `http://localhost:8000${raw}`;
                             const isPdf = (att.filename || "").toLowerCase().endsWith(".pdf");
-                            if (isPdf) {
-                              setPdfView({ url: att.file, title: att.filename });
-                            } else {
-                              window.open(att.file, "_blank");
+                            try {
+                              const res = await fetch(url, { credentials: "include" });
+                              const blob = await res.blob();
+                              const blobUrl = URL.createObjectURL(blob);
+                              if (isPdf) {
+                                setPdfView({ url: blobUrl, title: att.filename });
+                              } else {
+                                window.open(blobUrl, "_blank");
+                              }
+                            } catch {
+                              // fall back to a direct open if the fetch fails
+                              window.open(url, "_blank");
                             }
                           }}
                           title={`View ${att.filename}`}

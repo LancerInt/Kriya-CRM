@@ -12,17 +12,17 @@ logger = logging.getLogger(__name__)
 @shared_task(name='orders.check_cro_reminders')
 def check_cro_reminders():
     """
-    Nudge users every 4 hours to upload the CRO document once an order enters
+    Nudge users every 2 hours to upload the CRO document once an order enters
     the Container Booked stage. Stops nudging as soon as a CRO is attached.
 
-    Scheduled to run frequently (every 30 min); the 4h cool-down is enforced
+    Scheduled to run frequently (every 30 min); the 2h cool-down is enforced
     per-order via `Order.last_cro_reminder_at`.
     """
     from orders.models import Order, OrderDocument
     from notifications.helpers import notify
 
     now = timezone.now()
-    threshold = now - timedelta(hours=4)
+    threshold = now - timedelta(hours=2)
 
     qs = Order.objects.filter(status='container_booked', is_deleted=False).select_related('client')
     sent = 0
@@ -32,12 +32,12 @@ def check_cro_reminders():
         if OrderDocument.objects.filter(order=order, doc_type='cro', is_deleted=False).exists():
             continue
 
-        # Respect the 4h cool-down
+        # Respect the 2h cool-down
         if order.last_cro_reminder_at and order.last_cro_reminder_at > threshold:
             continue
 
-        # Don't start nudging until container_booked_at is at least 4h old —
-        # first reminder fires 4 hours after the stage change.
+        # Don't start nudging until container_booked_at is at least 2h old —
+        # first reminder fires 2 hours after the stage change.
         if order.container_booked_at and order.container_booked_at > threshold:
             continue
 
@@ -45,7 +45,7 @@ def check_cro_reminders():
             title=f'CRO pending for {order.order_number}',
             message=(
                 f'Order {order.order_number} ({order.client.company_name}) has been at '
-                f'Container Booked for at least 4 hours and the Container Release Order (CRO) '
+                f'Container Booked for at least 2 hours and the Container Release Order (CRO) '
                 f'document is still not attached. Please upload it to the Documents Checklist.'
             ),
             notification_type='reminder',

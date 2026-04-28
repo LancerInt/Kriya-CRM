@@ -96,6 +96,9 @@ class Communication(TimeStampedModel):
     # Email integration fields
     email_message_id = models.CharField(max_length=500, blank=True, db_index=True)
     email_in_reply_to = models.CharField(max_length=500, blank=True)
+    # Full RFC 5322 References chain (space- or whitespace-separated message-IDs).
+    # Used to keep replies threaded across mail clients via the References: header.
+    email_references = models.TextField(blank=True, default='')
     email_account = models.ForeignKey(
         EmailAccount, on_delete=models.SET_NULL, null=True, blank=True, related_name='communications'
     )

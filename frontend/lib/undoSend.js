@@ -156,9 +156,11 @@ function UndoToastContent({ onUndo, preview }) {
 }
 
 /**
- * Toast shown after undo — with "View message" still available.
+ * Toast shown after undo — with "View message" and "Redo" buttons.
+ * Redo re-runs the original sendWithUndo so the user gets another 10-second
+ * window to undo again.
  */
-function CancelledToastContent({ preview }) {
+function CancelledToastContent({ preview, onRedo }) {
   const [showPreview, setShowPreview] = useState(false);
   return (
     <>
@@ -170,6 +172,17 @@ function CancelledToastContent({ preview }) {
             <span className="text-white/20">|</span>
             <button onClick={() => setShowPreview(true)} className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
               View message
+            </button>
+          </>
+        )}
+        {onRedo && (
+          <>
+            <span className="text-white/20">|</span>
+            <button onClick={onRedo} className="text-sm font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+              Redo
             </button>
           </>
         )}
@@ -192,16 +205,23 @@ function CancelledToastContent({ preview }) {
  * @param {() => void}          opts.onUndone  – called if user clicked Undo
  * @param {(err: any) => void}  opts.onError   – called on send failure
  */
-export function sendWithUndo(sendFn, { preview, onSent, onUndone, onError } = {}) {
+export function sendWithUndo(sendFn, opts = {}) {
+  const { preview, onSent, onUndone, onError } = opts;
   let cancelled = false;
   let toastId;
+  let cancelledToastId;
+
+  const redo = () => {
+    if (cancelledToastId) toast.dismiss(cancelledToastId);
+    sendWithUndo(sendFn, opts);
+  };
 
   const undo = () => {
     cancelled = true;
     toast.dismiss(toastId);
-    toast.custom(
-      () => <CancelledToastContent preview={preview} />,
-      { duration: 5000, position: "bottom-center" }
+    cancelledToastId = toast.custom(
+      () => <CancelledToastContent preview={preview} onRedo={redo} />,
+      { duration: 8000, position: "bottom-center" }
     );
     if (onUndone) onUndone();
   };

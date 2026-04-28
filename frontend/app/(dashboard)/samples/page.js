@@ -151,17 +151,50 @@ export default function SamplesPage() {
     setShowFeedbackModal(true);
   };
 
+  const productNames = (row) => {
+    const items = Array.isArray(row.items) ? row.items : [];
+    const names = items.map((it) => it.client_product_name || it.product_name).filter(Boolean);
+    if (names.length === 0) {
+      const fallback = row.client_product_name || row.product_name;
+      return fallback ? [fallback] : [];
+    }
+    return names;
+  };
+
+  const itemQuantities = (row) => {
+    const items = Array.isArray(row.items) ? row.items : [];
+    const qtys = items.map((it) => (it.quantity || "").trim()).filter(Boolean);
+    if (qtys.length === 0) return row.quantity ? [row.quantity] : [];
+    return qtys;
+  };
+
   const columns = [
-    { key: "product_name", label: "Product", render: (row) => <span className="font-medium">{row.client_product_name || row.product_name || "\u2014"}</span> },
-    { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
-    { key: "quantity", label: "Quantity", render: (row) => row.quantity || "\u2014" },
+    { key: "product_name", label: "Product", render: (row) => {
+      const names = productNames(row);
+      if (names.length === 0) return <span className="text-gray-400">—</span>;
+      return (
+        <div className="flex flex-col gap-0.5">
+          {names.map((n, i) => <span key={i} className="font-medium">{n}</span>)}
+        </div>
+      );
+    }},
+    { key: "client_name", label: "Client", render: (row) => row.client_name || "—" },
+    { key: "quantity", label: "Quantity", render: (row) => {
+      const qtys = itemQuantities(row);
+      if (qtys.length === 0) return "—";
+      return (
+        <div className="flex flex-col gap-0.5">
+          {qtys.map((q, i) => <span key={i}>{q}</span>)}
+        </div>
+      );
+    }},
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "created_at", label: "Requested", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "\u2014" },
-    { key: "dispatch_date", label: "Dispatched", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "\u2014" },
-    { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "\u2014" },
+    { key: "created_at", label: "Requested", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "—" },
+    { key: "dispatch_date", label: "Dispatched", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
+    { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "—" },
     { key: "feedback", label: "Feedback", render: (row) => row.feedback ? (
       <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">{row.feedback.comments ? row.feedback.comments.slice(0, 30) + (row.feedback.comments.length > 30 ? "..." : "") : `Rating: ${row.feedback.rating}/5`}</span>
-    ) : <span className="text-gray-400">{"\u2014"}</span> },
+    ) : <span className="text-gray-400">{"—"}</span> },
     { key: "actions", label: "", render: (row) => (
       <div className="flex gap-1 items-center">
         {(row.status === "delivered" || row.status === "feedback_pending") && !row.feedback && (

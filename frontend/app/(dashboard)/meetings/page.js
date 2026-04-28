@@ -10,8 +10,8 @@ import api from "@/lib/axios";
 import { getErrorMessage } from "@/lib/errorHandler";
 
 function fmtDateTime(d) {
-  if (!d) return "\u2014";
-  try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "\u2014"; }
+  if (!d) return "—";
+  try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "—"; }
 }
 
 export default function MeetingsPage() {
@@ -20,6 +20,7 @@ export default function MeetingsPage() {
   const [clients, setClients] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState(null);
+  const [inviteDraft, setInviteDraft] = useState(null); // { meetingId, subject, to, cc, body, sending }
   const [form, setForm] = useState({
     client: "", scheduled_at: "", agenda: "", call_notes: "",
     duration_minutes: "", status: "scheduled",
@@ -67,10 +68,10 @@ export default function MeetingsPage() {
 
   const columns = [
     { key: "platform", label: "Platform", render: (row) => <StatusBadge status={row.platform || "other"} /> },
-    { key: "client_name", label: "Client", render: (row) => <span className="font-medium">{row.client_name || "\u2014"}</span> },
-    { key: "agenda", label: "Agenda", render: (row) => row.agenda || "\u2014" },
+    { key: "client_name", label: "Client", render: (row) => <span className="font-medium">{row.client_name || "—"}</span> },
+    { key: "agenda", label: "Agenda", render: (row) => row.agenda || "—" },
     { key: "scheduled_at", label: "Scheduled", render: (row) => fmtDateTime(row.scheduled_at) },
-    { key: "duration_minutes", label: "Duration", render: (row) => row.duration_minutes ? `${row.duration_minutes} min` : "\u2014" },
+    { key: "duration_minutes", label: "Duration", render: (row) => row.duration_minutes ? `${row.duration_minutes} min` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "meeting_link", label: "", render: (row) => {
       if (row.status === "completed" || row.status === "cancelled" || row.status === "missed") {
@@ -85,7 +86,28 @@ export default function MeetingsPage() {
         return <a href={row.meeting_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Join</a>;
       }
       if (row.platform === "zoom" || row.platform === "google_meet") {
-        return <button onClick={async (e) => { e.stopPropagation(); try { const r = await api.post(`/meetings/${row.id}/generate-link/`); toast.success(r.data.email_sent ? "Link generated & invite emailed to client!" : "Link generated!"); fetchMeetings(); } catch (err) { toast.error(err.response?.data?.error || "Failed to generate link"); } }} className="text-xs text-green-600 hover:text-green-700 font-medium">Generate Link</button>;
+        return <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              const r = await api.post(`/meetings/${row.id}/generate-link/`);
+              toast.success("Link generated — review the draft before sending");
+              fetchMeetings();
+              const d = r.data?.draft || {};
+              setInviteDraft({
+                meetingId: row.id,
+                subject: d.subject || "",
+                to: d.to || "",
+                cc: Array.isArray(d.cc) ? d.cc.join(", ") : (d.cc || ""),
+                body: d.body_html || "",
+                sending: false,
+              });
+            } catch (err) {
+              toast.error(err.response?.data?.error || "Failed to generate link");
+            }
+          }}
+          className="text-xs text-green-600 hover:text-green-700 font-medium"
+        >Generate Link</button>;
       }
       return null;
     }},
@@ -260,6 +282,78 @@ export default function MeetingsPage() {
 
             <div className="flex justify-end pt-2">
               <button onClick={() => setSelectedMeeting(null)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-sm hover:bg-gray-50">Close</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Meeting-invite Draft modal — opens after Generate Link so the user
+          can review and edit the email (and CC list) before sending. */}
+      <Modal open={!!inviteDraft} onClose={() => setInviteDraft(null)} title="AI Draft Reply" size="lg">
+        {inviteDraft && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700">✦ AI Generated</span>
+              <span className="text-sm text-gray-500">To: <span className="font-medium text-gray-700">{inviteDraft.to || "—"}</span></span>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+              <input
+                value={inviteDraft.subject}
+                onChange={(e) => setInviteDraft({ ...inviteDraft, subject: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CC <span className="text-xs text-gray-400 font-normal">(comma-separated, defaults to client contacts)</span></label>
+              <input
+                value={inviteDraft.cc}
+                onChange={(e) => setInviteDraft({ ...inviteDraft, cc: e.target.value })}
+                placeholder="email1@example.com, email2@example.com"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
+              <textarea
+                rows={12}
+                value={inviteDraft.body}
+                onChange={(e) => setInviteDraft({ ...inviteDraft, body: e.target.value })}
+                spellCheck="true"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <p className="text-xs text-gray-400 mt-1">HTML is supported. The Join Meeting button is already embedded.</p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button onClick={() => setInviteDraft(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
+              <button
+                disabled={inviteDraft.sending || !inviteDraft.to.trim()}
+                onClick={async () => {
+                  setInviteDraft({ ...inviteDraft, sending: true });
+                  try {
+                    const cc = inviteDraft.cc.split(",").map((s) => s.trim()).filter(Boolean);
+                    await api.post(`/meetings/${inviteDraft.meetingId}/send-invite/`, {
+                      subject: inviteDraft.subject,
+                      to: inviteDraft.to,
+                      cc,
+                      body_html: inviteDraft.body,
+                    });
+                    toast.success("Meeting invite sent");
+                    setInviteDraft(null);
+                    fetchMeetings();
+                  } catch (err) {
+                    toast.error(getErrorMessage(err, "Failed to send invite"));
+                    setInviteDraft((p) => p ? { ...p, sending: false } : p);
+                  }
+                }}
+                className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {inviteDraft.sending ? "Sending..." : "Send Invite"}
+              </button>
             </div>
           </div>
         )}

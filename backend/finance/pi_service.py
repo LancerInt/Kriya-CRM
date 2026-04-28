@@ -540,33 +540,47 @@ def send_pi_email(pi, user):
     pdf_file = BytesIO(pdf_bytes)
     pdf_file.name = f'PI_{pi.invoice_number.replace("/", "-")}.pdf'
 
-    # Continue in the same email thread as the original conversation
+    # Continue in the same email thread as the original conversation.
+    # get_thread_headers normalizes the subject to a single "Re:" prefix.
     from communications.services import get_thread_headers
-    in_reply_to, references, orig_subj = get_thread_headers(pi.client, pi.source_communication)
-    if orig_subj:
-        subject = f'Re: {orig_subj}' if not orig_subj.startswith('Re:') else orig_subj
+    in_reply_to, references, reply_subject = get_thread_headers(pi.client, pi.source_communication)
+    if reply_subject:
+        subject = reply_subject
 
-    EmailService.send_email(
+    sent_message_id = EmailService.send_email(
         email_account=email_account, to=contact_email,
         subject=subject, body_html=body_html,
         attachments=[pdf_file],
         cc=cc_string or None,
         in_reply_to=in_reply_to,
         references=references,
-    )
+    ) or ''
 
     # Update status
     pi.status = 'sent'
     pi.save(update_fields=['status'])
 
-    # Log communication
-    Communication.objects.create(
+    # Log communication, stamped with threading metadata so further replies
+    # (sales order email, dispatch draft, etc.) keep the conversation chained.
+    comm = Communication.objects.create(
         client=pi.client, contact=contact, user=user,
         comm_type='email', direction='outbound',
         subject=subject, body=body_html, status='sent',
         email_account=email_account, external_email=contact_email,
         email_cc=cc_string,
     )
+    fields = []
+    if in_reply_to:
+        comm.email_in_reply_to = in_reply_to
+        fields.append('email_in_reply_to')
+    if references:
+        comm.email_references = references
+        fields.append('email_references')
+    if sent_message_id:
+        comm.email_message_id = sent_message_id
+        fields.append('email_message_id')
+    if fields:
+        comm.save(update_fields=fields)
 
     return contact_email
 

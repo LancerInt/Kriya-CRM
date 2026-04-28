@@ -50,13 +50,13 @@ export default function ShipmentDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (!shipment) return <p className="text-center text-gray-500 py-8">Shipment not found</p>;
 
-  const formatDate = (d) => d ? format(new Date(d), "MMM d, yyyy") : "\u2014";
+  const formatDate = (d) => d ? format(new Date(d), "MMM d, yyyy") : "—";
 
   return (
     <div>
       <PageHeader
         title={shipment.shipment_number}
-        subtitle={`${shipment.client_name || "\u2014"} \u00b7 ${shipment.order_number || "\u2014"}`}
+        subtitle={`${shipment.client_name || "—"} · ${shipment.order_number || "—"}`}
         action={
           <div className="flex gap-2">
             <button onClick={() => setShowStatusModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
@@ -76,12 +76,14 @@ export default function ShipmentDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Status:</span> <StatusBadge status={shipment.status} /></div>
             <div><span className="text-gray-500">Shipment #:</span> <span className="ml-1">{shipment.shipment_number}</span></div>
-            <div><span className="text-gray-500">Client:</span> <span className="ml-1">{shipment.client_name || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Order #:</span> <span className="ml-1">{shipment.order_number || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Container #:</span> <span className="ml-1">{shipment.container_number || "\u2014"}</span></div>
-            <div><span className="text-gray-500">BL Number:</span> <span className="ml-1">{shipment.bl_number || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Forwarder:</span> <span className="ml-1">{shipment.forwarder || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Delivery Terms:</span> <span className="ml-1">{shipment.delivery_terms || "\u2014"}</span></div>
+            <div><span className="text-gray-500">Client:</span> <span className="ml-1">{shipment.client_name || "—"}</span></div>
+            <div><span className="text-gray-500">Country:</span> <span className="ml-1">{shipment.country || "—"}</span></div>
+            <div><span className="text-gray-500">Order #:</span> <span className="ml-1">{shipment.order_number || "—"}</span></div>
+            <div><span className="text-gray-500">BL Number:</span> <span className="ml-1">{shipment.bl_number || "—"}</span></div>
+            <div><span className="text-gray-500">Forwarder:</span> <span className="ml-1">{shipment.forwarder || "—"}</span></div>
+            <div><span className="text-gray-500">CHA:</span> <span className="ml-1">{shipment.cha || "—"}</span></div>
+            <div><span className="text-gray-500">Liner:</span> <span className="ml-1">{shipment.shipping_line || "—"}</span></div>
+            <div><span className="text-gray-500">Delivery Terms:</span> <span className="ml-1">{shipment.delivery_terms || "—"}</span></div>
           </div>
         </div>
 
@@ -89,10 +91,10 @@ export default function ShipmentDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="font-semibold mb-4">Shipping Details</h3>
           <div className="space-y-3 text-sm">
-            <div><span className="text-gray-500">Port of Loading:</span> <span className="ml-1 block font-medium">{shipment.port_of_loading || "\u2014"}</span></div>
-            <div><span className="text-gray-500">Port of Discharge:</span> <span className="ml-1 block font-medium">{shipment.port_of_discharge || "\u2014"}</span></div>
+            <div><span className="text-gray-500">Port of Loading:</span> <span className="ml-1 block font-medium">{shipment.port_of_loading || "—"}</span></div>
+            <div><span className="text-gray-500">Port of Discharge:</span> <span className="ml-1 block font-medium">{shipment.port_of_discharge || "—"}</span></div>
             <div><span className="text-gray-500">Dispatch Date:</span> <span className="ml-1 block font-medium">{formatDate(shipment.dispatch_date)}</span></div>
-            <div><span className="text-gray-500">Transit Days:</span> <span className="ml-1 block font-medium">{shipment.transit_days || "\u2014"}</span></div>
+            <div><span className="text-gray-500">Transit Days:</span> <span className="ml-1 block font-medium">{shipment.transit_days || "—"}</span></div>
             <div><span className="text-gray-500">Estimated Arrival:</span> <span className="ml-1 block font-medium">{formatDate(shipment.estimated_arrival)}</span></div>
             <div><span className="text-gray-500">Actual Arrival:</span> <span className="ml-1 block font-medium">{formatDate(shipment.actual_arrival)}</span></div>
           </div>

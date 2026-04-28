@@ -494,16 +494,39 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             cc_parts = [c.strip() for c in draft.cc.split(',') if c.strip() and '@' in c]
             cc_clean = ','.join(cc_parts)
 
-        # Send email with CC and attachments
+        # Resolve threading headers from the source communication so the
+        # outbound mail stays in the same thread as the original inquiry.
+        from .services import get_thread_headers, normalize_reply_subject
+        in_reply_to, references, reply_subject = get_thread_headers(
+            draft.client, source_communication=draft.communication,
+        )
+        # When we have a thread, force the email's subject to the thread's
+        # canonical "Re: <original>" so Gmail/Outlook visually group it with
+        # the source conversation. Headers alone aren't enough — most mail
+        # clients also collapse on subject.
+        # If the source thread had no usable subject (rare), fall back to
+        # normalizing whatever the user composed.
+        if in_reply_to:
+            usable = (reply_subject or '').strip()
+            if usable and usable.lower() not in ('re:', 're :'):
+                draft.subject = usable
+            else:
+                normalized = normalize_reply_subject(draft.subject)
+                if normalized and normalized != draft.subject:
+                    draft.subject = normalized
+
+        # Send email with CC and attachments + threading headers
         try:
-            EmailService.send_email(
+            sent_message_id = EmailService.send_email(
                 email_account=email_account,
                 to=draft.to_email.strip(),
                 subject=draft.subject,
                 body_html=outgoing_html,
                 cc=cc_clean or None,
                 attachments=attachments if attachments else None,
-            )
+                in_reply_to=in_reply_to,
+                references=references,
+            ) or ''
         except Exception as e:
             _log.exception(f'Failed to send draft {draft.id}')
             return Response(
@@ -517,16 +540,44 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.sent_at = timezone.now()
         draft.save(update_fields=['status', 'sent_at'])
 
-        # Auto-transition orders whose dispatch / transit emails just went out.
-        # We detect by attachment filename prefix:
-        #   Dispatch attachments: Client_Invoice_<ord>, Client_Packing_List_<ord>, ...
-        #     -> transition docs_approved -> dispatched
-        #   Transit attachments: BL_<ord>
-        #     -> transition dispatched -> in_transit
+        # Auto-transition orders whose dispatch / transit emails just went
+        # out. Priority: explicit `editor_data.auto_actions` set by the
+        # dispatch-mail-draft / transit-mail-draft endpoints (cleanest +
+        # works even if attachments were edited or none were attached).
+        # Fallback: scan attachment filenames for legacy drafts without
+        # the auto_actions metadata.
         try:
             import re as _re
+            import logging
             from orders.models import Order
             from orders.workflow_service import transition_order
+            log = logging.getLogger(__name__)
+
+            handled_order_ids = set()
+
+            # 1. Honour explicit auto_actions stamped on the draft
+            actions = (draft.editor_data or {}).get('auto_actions') or []
+            for act in actions:
+                if act.get('type') != 'order_transition':
+                    continue
+                oid = act.get('order_id')
+                target = act.get('to_status')
+                expected_from = act.get('from_status')
+                if not (oid and target):
+                    continue
+                order = Order.objects.filter(id=oid, is_deleted=False).first()
+                if not order:
+                    continue
+                if expected_from and order.status != expected_from:
+                    log.info(f'Skip auto-transition for {order.order_number}: status {order.status} != {expected_from}')
+                    continue
+                try:
+                    transition_order(order, target, request.user, remarks=f'Auto-transition on email send ({target})')
+                    handled_order_ids.add(str(order.id))
+                except Exception as _e:
+                    log.warning(f'Auto-transition for {oid} -> {target} failed: {_e}')
+
+            # 2. Filename-based fallback for legacy drafts
             dispatch_orders = set()
             transit_orders = set()
             for att in draft.attachments.all():
@@ -539,25 +590,22 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                     transit_orders.add(m2.group(1))
 
             for ono in dispatch_orders:
-                # Skip if this order is also the target of a transit draft —
-                # the transit one will move dispatched -> in_transit. We only
-                # auto-dispatch if currently still at docs_approved.
                 order = Order.objects.filter(order_number=ono, status='docs_approved', is_deleted=False).first()
-                if order:
+                if order and str(order.id) not in handled_order_ids:
                     try:
                         transition_order(order, 'dispatched', request.user, remarks='Dispatch email sent')
+                        handled_order_ids.add(str(order.id))
                     except Exception as _e:
-                        import logging
-                        logging.getLogger(__name__).warning(f'Auto-dispatch transition failed for {ono}: {_e}')
+                        log.warning(f'Auto-dispatch transition failed for {ono}: {_e}')
 
             for ono in transit_orders:
                 order = Order.objects.filter(order_number=ono, status='dispatched', is_deleted=False).first()
-                if order:
+                if order and str(order.id) not in handled_order_ids:
                     try:
                         transition_order(order, 'in_transit', request.user, remarks='In-transit email sent')
+                        handled_order_ids.add(str(order.id))
                     except Exception as _e:
-                        import logging
-                        logging.getLogger(__name__).warning(f'Auto-in-transit transition failed for {ono}: {_e}')
+                        log.warning(f'Auto-in-transit transition failed for {ono}: {_e}')
         except Exception:
             import logging
             logging.getLogger(__name__).exception('Failed during dispatch/transit post-send hook')
@@ -735,7 +783,9 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
 
         # Create outgoing Communication record — store the body that was
         # actually sent (with the signature appended) so the thread view
-        # matches what the recipient received.
+        # matches what the recipient received. Stamp the threading metadata
+        # so any further reply we send (PI, dispatch, transit, etc.) keeps
+        # the same References chain.
         Communication.objects.create(
             client=draft.client,
             user=request.user,
@@ -746,7 +796,10 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             status='sent',
             email_account=email_account,
             external_email=draft.to_email,
-            email_in_reply_to=draft.communication.email_message_id or '',
+            email_message_id=sent_message_id,
+            email_in_reply_to=in_reply_to or (draft.communication.email_message_id or ''),
+            email_references=references or '',
+            email_cc=cc_clean,
         )
 
         if draft.client:
@@ -1038,24 +1091,8 @@ def send_email_view(request):
     from .signature import append_signature
     outgoing_body = append_signature(data['body'], request.user)
 
-    # Send the email
-    try:
-        message_id = EmailService.send_email(
-            email_account=account,
-            to=data['to'],
-            subject=data['subject'],
-            body_html=outgoing_body,
-            cc=data.get('cc') or None,
-            bcc=data.get('bcc') or None,
-            attachments=attachments or None,
-        )
-    except Exception as e:
-        return Response(
-            {'error': f'Failed to send email: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-    # Auto-match client
+    # Resolve the recipient's client first so we can thread on top of any
+    # existing conversation with them.
     client = None
     contact = None
     if data.get('client'):
@@ -1064,18 +1101,49 @@ def send_email_view(request):
     else:
         client, contact = ContactMatcher.match_by_email(data['to'])
 
+    # Pull thread headers — replies into an existing client conversation use
+    # the same In-Reply-To / References chain. New conversations get fresh
+    # headers.
+    from .services import get_thread_headers, normalize_reply_subject
+    in_reply_to, references, _reply_subject = get_thread_headers(client)
+    subject_to_send = data['subject']
+    if in_reply_to:
+        subject_to_send = normalize_reply_subject(subject_to_send)
+
+    # Send the email
+    try:
+        message_id = EmailService.send_email(
+            email_account=account,
+            to=data['to'],
+            subject=subject_to_send,
+            body_html=outgoing_body,
+            cc=data.get('cc') or None,
+            bcc=data.get('bcc') or None,
+            attachments=attachments or None,
+            in_reply_to=in_reply_to,
+            references=references,
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Failed to send email: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
     # Create Communication record (store the signed body so the thread view
-    # matches what the recipient actually received)
+    # matches what the recipient actually received), stamped with full
+    # threading metadata.
     comm = Communication.objects.create(
         client=client,
         contact=contact,
         user=request.user,
         comm_type='email',
         direction='outbound',
-        subject=data['subject'],
+        subject=subject_to_send,
         body=outgoing_body,
         status='sent',
         email_message_id=message_id,
+        email_in_reply_to=in_reply_to or '',
+        email_references=references or '',
         email_account=account,
         external_email=data['to'],
     )
@@ -1444,15 +1512,25 @@ def generate_coa_pdf_view(request):
 
     # Save to the order's Documents tab if order_id provided
     order_id = data.get('order_id')
+    order_item_id = data.get('order_item_id')
     if order_id:
         try:
-            from orders.models import Order, OrderDocument
+            from orders.models import Order, OrderDocument, OrderItem
             order = Order.objects.get(id=order_id)
             product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
             filename = f'COA_{product_name}.pdf'
-            OrderDocument.objects.filter(order=order, doc_type='coa', is_deleted=False).delete()
+            order_item = None
+            if order_item_id:
+                try:
+                    order_item = OrderItem.objects.get(id=order_item_id, order=order)
+                except OrderItem.DoesNotExist:
+                    order_item = None
+            if order_item:
+                OrderDocument.objects.filter(order=order, doc_type='coa', order_item=order_item, is_deleted=False).delete()
+            else:
+                OrderDocument.objects.filter(order=order, doc_type='coa', order_item__isnull=True, is_deleted=False).delete()
             OrderDocument.objects.create(
-                order=order, doc_type='coa', name=filename,
+                order=order, order_item=order_item, doc_type='coa', name=filename,
                 file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,
             )
         except Exception as e:
@@ -1737,15 +1815,25 @@ def generate_msds_pdf_view(request):
             logging.getLogger(__name__).warning(f'MSDS attach failed: {e}')
 
     order_id = data.get('order_id')
+    order_item_id = data.get('order_item_id')
     if order_id:
         try:
-            from orders.models import Order, OrderDocument
+            from orders.models import Order, OrderDocument, OrderItem
             order = Order.objects.get(id=order_id)
             product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
             filename = f'MSDS_{product_name}.pdf'
-            OrderDocument.objects.filter(order=order, doc_type='msds', is_deleted=False).delete()
+            order_item = None
+            if order_item_id:
+                try:
+                    order_item = OrderItem.objects.get(id=order_item_id, order=order)
+                except OrderItem.DoesNotExist:
+                    order_item = None
+            if order_item:
+                OrderDocument.objects.filter(order=order, doc_type='msds', order_item=order_item, is_deleted=False).delete()
+            else:
+                OrderDocument.objects.filter(order=order, doc_type='msds', order_item__isnull=True, is_deleted=False).delete()
             OrderDocument.objects.create(
-                order=order, doc_type='msds', name=filename,
+                order=order, order_item=order_item, doc_type='msds', name=filename,
                 file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,
             )
         except Exception as e:

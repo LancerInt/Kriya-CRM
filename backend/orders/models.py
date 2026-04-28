@@ -48,7 +48,7 @@ class Order(TimeStampedModel):
     # Shape: [{ 'label': 'Product', 'checked': False, 'required': True }, ...]
     readiness_checklist = models.JSONField(default=list, blank=True)
 
-    # CRO (Container Release Order) reminder tracking — nudged every 4h after Container Booked
+    # CRO (Container Release Order) reminder tracking — nudged every 2h after Container Booked
     last_cro_reminder_at = models.DateTimeField(null=True, blank=True)
 
     # Delivery acknowledgment reminder — fired once before estimated delivery
@@ -69,6 +69,18 @@ class Order(TimeStampedModel):
     in_transit_at = models.DateTimeField(null=True, blank=True)
     arrived_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
+    # FIRC (Foreign Inward Remittance Certificate) — final 11th step,
+    # marked after delivery + feedback. Drives the shipment progress to 100%.
+    firc_received_at = models.DateTimeField(null=True, blank=True)
+
+    # Source email thread — used by the email service to keep all order-stage
+    # emails (PI, Sales Order, dispatch, transit, delivery) threaded with the
+    # original client inquiry that started the conversation.
+    source_communication = models.ForeignKey(
+        'communications.Communication', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='orders',
+        help_text='Inbound client email thread this order belongs to (drives email threading).',
+    )
 
     class Meta:
         db_table = 'orders'
@@ -144,6 +156,10 @@ class OrderDocument(TimeStampedModel):
         OTHER = 'other', 'Other'
 
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_documents')
+    order_item = models.ForeignKey(
+        'orders.OrderItem', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='documents',
+    )
     doc_type = models.CharField(max_length=30, choices=DocType.choices)
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to='order_documents/%Y/%m/')

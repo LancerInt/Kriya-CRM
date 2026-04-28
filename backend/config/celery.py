@@ -70,7 +70,7 @@ app.conf.beat_schedule = {
         'task': 'tasks.check_task_due_reminders',
         'schedule': crontab(hour=8, minute=30),
     },
-    # CRO reminder — runs every 30 min; per-order 4h cool-down enforced inside
+    # CRO reminder — runs every 30 min; per-order 2h cool-down enforced inside
     'check-cro-reminders-every-30-minutes': {
         'task': 'orders.check_cro_reminders',
         'schedule': crontab(minute='*/30'),

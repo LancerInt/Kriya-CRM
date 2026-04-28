@@ -821,6 +821,9 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             delivery_terms=q.delivery_terms, total=q.total, created_by=request.user,
             payment_terms=q.payment_terms or q.payment_terms_detail or '',
             freight_terms=q.freight_terms or '',
+            # Carry the original inquiry email forward so every order-stage
+            # email (PI, dispatch, transit, delivery) stays in the same thread.
+            source_communication=getattr(q, 'source_communication', None),
         )
         for qi in q.items.all():
             OrderItem.objects.create(
@@ -927,14 +930,18 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             pdf_file.name = f'Quotation_{q.quotation_number.replace("/", "-")}.pdf'
 
             from communications.services import EmailService, get_thread_headers
-            # Find source communication for threading
+            # Find source communication for threading. Prefer the explicit
+            # link on the Quotation, fall back to the QuoteRequest link.
             from communications.models import QuoteRequest
-            _qr = QuoteRequest.objects.filter(linked_quotation=q).select_related('source_communication').first()
-            _src_comm = _qr.source_communication if _qr else None
-            in_reply_to, references, orig_subj = get_thread_headers(q.client, _src_comm)
-            qt_subject = f'Re: {orig_subj}' if orig_subj and not orig_subj.startswith('Re:') else (orig_subj or f'Quotation {q.quotation_number} - Kriya Biosys')
+            _src_comm = getattr(q, 'source_communication', None)
+            if not _src_comm:
+                _qr = QuoteRequest.objects.filter(linked_quotation=q).select_related('source_communication').first()
+                _src_comm = _qr.source_communication if _qr else None
+            in_reply_to, references, reply_subject = get_thread_headers(q.client, _src_comm)
+            qt_subject = reply_subject or f'Quotation {q.quotation_number} - Kriya Biosys'
+            sent_message_id = ''
             try:
-                EmailService.send_email(
+                sent_message_id = EmailService.send_email(
                     email_account=email_account,
                     to=contact_email,
                     subject=qt_subject,
@@ -943,18 +950,31 @@ class QuotationViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                     cc=cc_string or None,
                     in_reply_to=in_reply_to,
                     references=references,
-                )
+                ) or ''
             except Exception as e:
                 return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Log communication
+            # If the quotation didn't already have a source communication
+            # anchored, anchor it now so future revisions stay in the same
+            # thread.
+            if _src_comm and not getattr(q, 'source_communication_id', None):
+                try:
+                    q.source_communication = _src_comm
+                    q.save(update_fields=['source_communication'])
+                except Exception:
+                    pass
+
+            # Log communication, stamped with threading headers.
             from communications.models import Communication
-            Communication.objects.create(
+            comm_out = Communication.objects.create(
                 client=q.client, contact=contact, user=request.user,
                 comm_type='email', direction='outbound',
-                subject=f'Quotation {q.quotation_number}', body=body_html,
+                subject=qt_subject, body=body_html,
                 status='sent', email_account=email_account, external_email=contact_email,
                 email_cc=cc_string,
+                email_message_id=sent_message_id,
+                email_in_reply_to=in_reply_to or '',
+                email_references=references or '',
             )
 
         q.sent_via = send_via

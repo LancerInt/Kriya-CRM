@@ -21,13 +21,23 @@ EXPORTER = {
 
 
 def create_li_from_order(order, user):
-    """Create a LogisticsInvoice from an Order, auto-filling client data."""
+    """Create a LogisticsInvoice from an Order, auto-filling client data.
+    Idempotent — if an LI already exists for this order, return it as-is."""
     from .models import LogisticsInvoice, LogisticsInvoiceItem
 
+    existing = LogisticsInvoice.objects.filter(order=order).order_by('-created_at').first()
+    if existing:
+        return existing
+
     client = order.client
-    count = LogisticsInvoice.objects.count() + 1
     today = date.today()
-    invoice_number = f'EXP{today.strftime("%y")}/{today.year}-{today.strftime("%y")[-1:]}6'
+    # Sequential, year-bucketed invoice number: EXP<YY>/<YYYY>-<NNN>
+    count = LogisticsInvoice.objects.filter(invoice_date__year=today.year).count() + 1
+    invoice_number = f'EXP{today.strftime("%y")}/{today.year}-{count:03d}'
+    # Belt-and-braces: walk forward until unique in case of races / gaps
+    while LogisticsInvoice.objects.filter(invoice_number=invoice_number).exists():
+        count += 1
+        invoice_number = f'EXP{today.strftime("%y")}/{today.year}-{count:03d}'
 
     li = LogisticsInvoice.objects.create(
         order=order,
@@ -437,18 +447,30 @@ def send_li_email(li, user):
     pdf_file.name = f'LI_{li.invoice_number.replace("/", "-")}.pdf'
 
     from communications.services import get_thread_headers
-    in_reply_to, references, orig_subj = get_thread_headers(li.client, getattr(li, 'source_communication', None))
-    if orig_subj:
-        subject = f'Re: {orig_subj}' if not orig_subj.startswith('Re:') else orig_subj
+    src_comm = (
+        getattr(li, 'source_communication', None)
+        or getattr(getattr(li, 'order', None), 'source_communication', None)
+    )
+    in_reply_to, references, reply_subject = get_thread_headers(li.client, src_comm)
+    if reply_subject:
+        subject = reply_subject
 
-    EmailService.send_email(email_account=email_account, to=contact_email, subject=subject, body_html=body_html,
-                            attachments=[pdf_file], cc=cc_string or None, in_reply_to=in_reply_to, references=references)
+    sent_message_id = EmailService.send_email(
+        email_account=email_account, to=contact_email, subject=subject, body_html=body_html,
+        attachments=[pdf_file], cc=cc_string or None,
+        in_reply_to=in_reply_to, references=references,
+    ) or ''
 
     li.status = 'sent'
     li.save(update_fields=['status'])
 
-    Communication.objects.create(client=li.client, contact=contact, user=user, comm_type='email', direction='outbound',
-                                 subject=subject, body=body_html, status='sent', email_account=email_account,
-                                 external_email=contact_email, email_cc=cc_string)
+    Communication.objects.create(
+        client=li.client, contact=contact, user=user, comm_type='email', direction='outbound',
+        subject=subject, body=body_html, status='sent', email_account=email_account,
+        external_email=contact_email, email_cc=cc_string,
+        email_message_id=sent_message_id,
+        email_in_reply_to=in_reply_to or '',
+        email_references=references or '',
+    )
 
     return contact_email

@@ -20,7 +20,7 @@ import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 import ComplianceDocEditorModal from "@/components/finance/ComplianceDocEditorModal";
 
-function fmtDate(d) { if (!d) return "\u2014"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; } }
+function fmtDate(d) { if (!d) return "—"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
 
 function StatusStepper({ timeline }) {
@@ -68,6 +68,9 @@ export default function OrderDetailPage() {
   const [transitioning, setTransitioning] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [orderFeedbackForm, setOrderFeedbackForm] = useState({ comments: "", issues: "", bulk_order_interest: false });
+  const [editHeaderOpen, setEditHeaderOpen] = useState(false);
+  const [headerForm, setHeaderForm] = useState({ currency: "USD" });
+  const [headerSaving, setHeaderSaving] = useState(false);
   const [orderNotes, setOrderNotes] = useState([]);
   const [newNote, setNewNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState(null);
@@ -126,25 +129,30 @@ export default function OrderDetailPage() {
   const [savingChecklist, setSavingChecklist] = useState(false);
   const [uploadChecklistFor, setUploadChecklistFor] = useState(null); // { doc_type, label }
   const [checklistUploadFile, setChecklistUploadFile] = useState(null);
+  const [blNumberInput, setBlNumberInput] = useState("");
   const [packingListType, setPackingListType] = useState(null); // "client" | "logistic" | null
-  const [showCoaEditor, setShowCoaEditor] = useState(false);
-  const [showMsdsEditor, setShowMsdsEditor] = useState(false);
+  const [coaEditorFor, setCoaEditorFor] = useState(null); // { orderItemId, productName } | null
+  const [msdsEditorFor, setMsdsEditorFor] = useState(null); // { orderItemId, productName } | null
   const [complianceDocType, setComplianceDocType] = useState(null); // examination_report|dbk_declaration|export_declaration|factory_stuffing
   const [showInspectionModal, setShowInspectionModal] = useState(false);
+  const [showStuffingPhotoModal, setShowStuffingPhotoModal] = useState(false);
+  const [inspectionUploadFor, setInspectionUploadFor] = useState(null); // null | 'passed' | 'failed'
   const [showCroPromptModal, setShowCroPromptModal] = useState(false);
   const [showCroAdvanceModal, setShowCroAdvanceModal] = useState(null); // { target_status }
-  const [dispatchStep, setDispatchStep] = useState(null); // null | 'insurance' | 'delivery'
+  const [dispatchStep, setDispatchStep] = useState(null); // null | 'insurance'
   const [insuranceFile, setInsuranceFile] = useState(null);
   const [insuranceUploading, setInsuranceUploading] = useState(false);
   const [estDeliveryTime, setEstDeliveryTime] = useState("");
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const [transitDeliveryOpen, setTransitDeliveryOpen] = useState(false);
+  const [transitSubmitting, setTransitSubmitting] = useState(false);
+  const [transitBlNumber, setTransitBlNumber] = useState("");
   const [showContainerBookedModal, setShowContainerBookedModal] = useState(false);
+  const [shipmentGrammarChecking, setShipmentGrammarChecking] = useState(false);
+  const [shipmentGrammarFixes, setShipmentGrammarFixes] = useState([]); // [{ key, original, corrected, reason }]
   const [shipmentForm, setShipmentForm] = useState({
-    container_number: "", bl_number: "", vessel_name: "",
     forwarder: "", cha: "", shipping_line: "",
     port_of_loading: "", port_of_discharge: "",
-    container_booking_date: "", dispatch_date: "",
-    transit_days: "", estimated_arrival: "",
   });
   const [containerBookedSubmitting, setContainerBookedSubmitting] = useState(false);
   const [showQtModal, setShowQtModal] = useState(false);
@@ -180,6 +188,30 @@ export default function OrderDetailPage() {
 
   useEffect(() => { loadOrder(); }, [id]);
 
+  const openHeaderEditor = () => {
+    if (!order) return;
+    setHeaderForm({ total: order.total != null ? String(order.total) : "" });
+    setEditHeaderOpen(true);
+  };
+
+  const saveHeaderEdits = async () => {
+    if (!order) return;
+    setHeaderSaving(true);
+    try {
+      const next = headerForm.total === "" || headerForm.total == null ? null : Number(headerForm.total);
+      if (next != null && Number.isFinite(next) && next !== Number(order.total)) {
+        await api.patch(`/orders/${id}/`, { total: next });
+      }
+      toast.success("Order total updated");
+      setEditHeaderOpen(false);
+      loadOrder();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to update order total"));
+    } finally {
+      setHeaderSaving(false);
+    }
+  };
+
   // Prompt to upload CRO whenever the user opens an order that's at Container
   // Booked and has no CRO yet. Shown once per browser session per order id.
   useEffect(() => {
@@ -199,7 +231,10 @@ export default function OrderDetailPage() {
   // ── Product Readiness checklist helpers ──
   const DEFAULT_CHECKLIST = [
     { label: "Product", checked: false, required: true },
-    { label: "Bottle", checked: false, required: true },
+    { label: "Containers", checked: false, required: true },
+    { label: "Cotton Box", checked: false, required: false },
+    { label: "Leaflets", checked: false, required: false },
+    { label: "Batch No. Stickers", checked: false, required: false },
   ];
   const checklist = (order?.readiness_checklist && order.readiness_checklist.length > 0)
     ? order.readiness_checklist
@@ -242,32 +277,55 @@ export default function OrderDetailPage() {
   };
 
   // ── Docs-Preparing document checklist ──
+  // COA and MSDS expand into one row per OrderItem (so a 2-product order
+  // requires 2 COAs and 2 MSDSes). All other doc types are single rows.
+  const orderItems = order?.items || [];
   const DOCS_APPROVAL_CHECKLIST = [
     { doc_type: "client_invoice", label: "Client Invoice", action: "generate-ci" },
     { doc_type: "client_packing_list", label: "Client Packing List", action: "generate-cpl" },
     { doc_type: "logistic_invoice", label: "Logistic Invoice", action: "generate-li" },
     { doc_type: "logistic_packing_list", label: "Logistic Packing List", action: "generate-lpl" },
-    { doc_type: "coa", label: "COA", action: "generate-coa" },
-    { doc_type: "msds", label: "MSDS", action: "generate-msds" },
-    { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk" },
-    { doc_type: "examination_report", label: "Examination Report", action: "generate-exam" },
-    { doc_type: "export_declaration", label: "Export Declaration Form", action: "generate-exportdecl" },
-    { doc_type: "factory_stuffing", label: "Factory Stuffing", action: "generate-factorystuffing" },
+    ...(orderItems.length > 0
+      ? orderItems.map((it) => ({ doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`}`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name }))
+      : [{ doc_type: "coa", label: "COA", action: "generate-coa", optional: true }]),
+    ...(orderItems.length > 0
+      ? orderItems.map((it) => ({ doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`}`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name }))
+      : [{ doc_type: "msds", label: "MSDS", action: "generate-msds", optional: true }]),
+    { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk", optional: true },
+    { doc_type: "examination_report", label: "Examination Report", action: "generate-exam", optional: true },
+    { doc_type: "export_declaration", label: "Export Declaration Form", action: "generate-exportdecl", optional: true },
+    { doc_type: "factory_stuffing", label: "Factory Stuffing", action: "generate-factorystuffing", optional: true },
     { doc_type: "non_dg_declaration", label: "Non-DG Declaration", action: "generate-nondg", optional: true },
   ];
   const hasDoc = (docType) => orderDocs.some((d) => d.doc_type === docType);
+  const hasDocForItem = (docType, itemId) => {
+    if (!itemId) return hasDoc(docType);
+    return orderDocs.some((d) => d.doc_type === docType && (d.order_item === itemId || d.order_item === null));
+  };
+  const isRowPresent = (row) => (row.order_item_id ? hasDocForItem(row.doc_type, row.order_item_id) : hasDoc(row.doc_type));
   const requiredChecklistRows = DOCS_APPROVAL_CHECKLIST.filter((r) => !r.optional);
-  const docsApprovalReady = requiredChecklistRows.every((r) => hasDoc(r.doc_type));
-  const docsMissingCount = requiredChecklistRows.filter((r) => !hasDoc(r.doc_type)).length;
+  const docsApprovalReady = requiredChecklistRows.every(isRowPresent);
+  const docsMissingCount = requiredChecklistRows.filter((r) => !isRowPresent(r)).length;
 
-  const openEditorForDocType = (docType) => {
+  // Per-item COA/MSDS missing — each OrderItem must have its own doc.
+  const perItemDispatchMissing = (() => {
+    if (!orderItems.length) return [];
+    const out = [];
+    for (const it of orderItems) {
+      if (!hasDocForItem("coa", it.id)) out.push({ doc_type: "coa", order_item_id: it.id, label: `COA — ${it.product_name || `Item #${it.id}`}` });
+      if (!hasDocForItem("msds", it.id)) out.push({ doc_type: "msds", order_item_id: it.id, label: `MSDS — ${it.product_name || `Item #${it.id}`}` });
+    }
+    return out;
+  })();
+
+  const openEditorForDocType = (docType, opts = {}) => {
     switch (docType) {
       case "client_invoice": handleGenerateCI(); return;
       case "logistic_invoice": handleGenerateLI(); return;
       case "client_packing_list": setPackingListType("client"); return;
       case "logistic_packing_list": setPackingListType("logistic"); return;
-      case "coa": setShowCoaEditor(true); return;
-      case "msds": setShowMsdsEditor(true); return;
+      case "coa": setCoaEditorFor({ orderItemId: opts.order_item_id || null, productName: opts.product_name || "" }); return;
+      case "msds": setMsdsEditorFor({ orderItemId: opts.order_item_id || null, productName: opts.product_name || "" }); return;
       case "dbk_declaration":
       case "examination_report":
       case "export_declaration":
@@ -288,15 +346,77 @@ export default function OrderDetailPage() {
       toast.success("Container Booked — shipment updated");
       setShowContainerBookedModal(false);
       setShipmentForm({
-        container_number: "", bl_number: "", vessel_name: "",
         forwarder: "", cha: "", shipping_line: "",
         port_of_loading: "", port_of_discharge: "",
-        container_booking_date: "", dispatch_date: "",
-        transit_days: "", estimated_arrival: "",
       });
+      setShipmentGrammarFixes([]);
       loadOrder();
     } catch (err) { toast.error(getErrorMessage(err, "Failed to advance")); }
     finally { setContainerBookedSubmitting(false); }
+  };
+
+  const checkShipmentGrammar = async () => {
+    const fields = ["forwarder", "cha", "shipping_line", "port_of_loading", "port_of_discharge"];
+    const text = fields.map((k) => `${k}: ${shipmentForm[k] || ""}`).filter((l) => l.split(": ")[1].trim()).join("\n");
+    if (!text || text.trim().length < 3) { toast("Fill in some fields first.", { icon: "ℹ️" }); return; }
+    setShipmentGrammarChecking(true);
+    setShipmentGrammarFixes([]);
+    try {
+      const res = await api.post("/communications/grammar-check/", { text });
+      const fixes = res.data?.corrections || [];
+      if (fixes.length === 0) {
+        toast.success("No errors found — looks good!");
+      } else {
+        const tagged = fixes.map((f) => {
+          const matchKey = fields.find((k) => (shipmentForm[k] || "").toLowerCase().includes((f.original || "").toLowerCase()));
+          return { ...f, key: matchKey || null };
+        });
+        setShipmentGrammarFixes(tagged);
+      }
+    } catch { toast.error("Grammar check failed"); }
+    finally { setShipmentGrammarChecking(false); }
+  };
+
+  const applyShipmentFix = (fix) => {
+    if (!fix.original || !fix.key) {
+      setShipmentGrammarFixes((prev) => prev.filter((c) => c !== fix));
+      return;
+    }
+    const escaped = fix.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "gi");
+    setShipmentForm((prev) => ({ ...prev, [fix.key]: (prev[fix.key] || "").replace(re, fix.corrected) }));
+    setShipmentGrammarFixes((prev) => prev.filter((c) => c !== fix));
+  };
+
+  const applyAllShipmentFixes = () => {
+    let next = { ...shipmentForm };
+    for (const fix of shipmentGrammarFixes) {
+      if (!fix.original || !fix.key) continue;
+      const escaped = fix.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(escaped, "gi");
+      next[fix.key] = (next[fix.key] || "").replace(re, fix.corrected);
+    }
+    setShipmentForm(next);
+    setShipmentGrammarFixes([]);
+  };
+
+  const triggerDispatchEmailDraft = async () => {
+    setDispatchSubmitting(true);
+    try {
+      const res = await api.post(`/orders/${id}/dispatch-mail-draft/`, {});
+      toast.success("Email draft ready — order will move to Dispatched once you send it");
+      setDispatchStep(null);
+      const commId = res.data.communication_id;
+      const draftId = res.data.draft_id;
+      if (commId) {
+        const qs = draftId ? `?draft=${draftId}` : "";
+        router.push(`/communications/${commId}${qs}`);
+      } else {
+        toast("No source email thread found — open the draft from Communications.", { icon: "ℹ️" });
+        loadOrder();
+      }
+    } catch (err) { toast.error(getErrorMessage(err, "Dispatch failed")); }
+    finally { setDispatchSubmitting(false); }
   };
 
   const submitInsuranceUpload = async (e) => {
@@ -312,32 +432,46 @@ export default function OrderDetailPage() {
       toast.success("Insurance uploaded");
       setInsuranceFile(null);
       await loadOrder();
-      setDispatchStep("delivery");
+      // Jump straight to building the dispatch email draft — no delivery prompt here.
+      await triggerDispatchEmailDraft();
     } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
     finally { setInsuranceUploading(false); }
   };
 
-  const submitDispatch = async () => {
+  const submitTransitDelivery = async () => {
+    if (!transitBlNumber.trim()) { toast.error("BL Number is required"); return; }
     if (!estDeliveryTime.trim()) { toast.error("Estimated delivery time is required"); return; }
-    setDispatchSubmitting(true);
+    setTransitSubmitting(true);
     try {
-      const res = await api.post(`/orders/${id}/dispatch-mail-draft/`, { estimated_delivery_time: estDeliveryTime.trim() });
-      toast.success("Email draft ready — order will move to Dispatched once you send it");
-      setDispatchStep(null);
+      // Save BL number as a Note (best-effort; doesn't block the draft if it fails)
+      try {
+        await api.post(`/orders/${id}/events/`, {
+          event_type: "note",
+          description: `BL Number: ${transitBlNumber.trim()}`,
+        });
+      } catch {}
+      const res = await api.post(`/orders/${id}/transit-mail-draft/`, {
+        estimated_delivery_time: estDeliveryTime.trim(),
+        bl_number: transitBlNumber.trim(),
+      });
+      toast.success("Email draft ready — order will move to In Transit once you send it");
+      setTransitDeliveryOpen(false);
       setEstDeliveryTime("");
+      setTransitBlNumber("");
       const commId = res.data.communication_id;
+      const draftId = res.data.draft_id;
       if (commId) {
-        router.push(`/communications/${commId}`);
-      } else {
-        toast("No source email thread found — open the draft from Communications.", { icon: "ℹ️" });
-        loadOrder();
-      }
-    } catch (err) { toast.error(getErrorMessage(err, "Dispatch failed")); }
-    finally { setDispatchSubmitting(false); }
+        const qs = draftId ? `?draft=${draftId}` : "";
+        router.push(`/communications/${commId}${qs}`);
+      } else { toast("No source thread — open the draft from Communications.", { icon: "ℹ️" }); loadOrder(); }
+    } catch (err) { toast.error(getErrorMessage(err, "Failed to prepare transit email")); }
+    finally { setTransitSubmitting(false); }
   };
 
-  const viewOrderDoc = async (docType) => {
-    const doc = orderDocs.find((d) => d.doc_type === docType);
+  const viewOrderDoc = async (docType, itemId = null) => {
+    const doc = itemId
+      ? orderDocs.find((d) => d.doc_type === docType && (d.order_item === itemId || d.order_item === null))
+      : orderDocs.find((d) => d.doc_type === docType);
     if (!doc || !doc.file) { toast.error("No file to preview yet"); return; }
     try {
       const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
@@ -351,14 +485,32 @@ export default function OrderDetailPage() {
   const handleChecklistUpload = async (e) => {
     e.preventDefault();
     if (!checklistUploadFile || !uploadChecklistFor) return;
+    const isBl = uploadChecklistFor.doc_type === "bl";
+    if (isBl && !blNumberInput.trim()) {
+      toast.error("Enter the BL Number first");
+      return;
+    }
     const fd = new FormData();
     fd.append("file", checklistUploadFile);
     fd.append("doc_type", uploadChecklistFor.doc_type);
-    fd.append("name", `${uploadChecklistFor.label} - ${checklistUploadFile.name}`);
+    const namedFile = isBl
+      ? `${uploadChecklistFor.label} ${blNumberInput.trim()} - ${checklistUploadFile.name}`
+      : `${uploadChecklistFor.label} - ${checklistUploadFile.name}`;
+    fd.append("name", namedFile);
+    if (isBl) fd.append("bl_number", blNumberInput.trim());
     try {
       await api.post(`/orders/${id}/upload-document/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      // Save BL number as a Note for future reference (Shipment is synced server-side)
+      if (isBl) {
+        try {
+          await api.post(`/orders/${id}/events/`, {
+            event_type: "note",
+            description: `BL Number: ${blNumberInput.trim()}`,
+          });
+        } catch {}
+      }
       toast.success(`${uploadChecklistFor.label} uploaded`);
-      setUploadChecklistFor(null); setChecklistUploadFile(null);
+      setUploadChecklistFor(null); setChecklistUploadFile(null); setBlNumberInput("");
       loadOrder();
     } catch (err) { toast.error(getErrorMessage(err, "Upload failed")); }
   };
@@ -570,13 +722,16 @@ export default function OrderDetailPage() {
     if (added) e.preventDefault();
   };
 
-  const submitNote = async () => {
+  const submitNote = async (category = null) => {
     if (!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0) return;
     try {
+      const desc = newNote.trim();
+      const taggedDesc = category ? `[${category}]${desc ? ` ${desc}` : ""}` : desc;
       if (noteAttachments.length > 0 || noteExistingDocs.length > 0) {
         const fd = new FormData();
         fd.append("event_type", "note");
-        fd.append("description", newNote.trim());
+        fd.append("description", taggedDesc);
+        if (category) fd.append("name_prefix", `[${category}] `);
         noteAttachments.forEach((a) => {
           fd.append("attachments", a.file);
           fd.append("attachment_kinds", a.kind);
@@ -584,7 +739,7 @@ export default function OrderDetailPage() {
         noteExistingDocs.forEach((d) => fd.append("library_documents", d.id));
         await api.post(`/orders/${id}/events/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       } else {
-        await api.post(`/orders/${id}/events/`, { event_type: "note", description: newNote.trim() });
+        await api.post(`/orders/${id}/events/`, { event_type: "note", description: taggedDesc });
       }
       setNewNote("");
       clearNoteAttachments();
@@ -878,7 +1033,27 @@ export default function OrderDetailPage() {
     <div>
       <PageHeader
         title={`Order ${order.order_number}`}
-        subtitle={`${order.client_name}${order.can_view_total ? ` \u00b7 ${order.currency} ${Number(order.total || 0).toLocaleString()}` : ""}${canSeeExecutive && order.client_primary_executive_name ? ` \u00b7 Executive: ${order.client_primary_executive_name}` : ""}`}
+        subtitle={
+          <span className="inline-flex items-center gap-2">
+            <span>
+              {order.client_name}
+              {order.can_view_total ? ` · ${order.currency} ${Number(order.total || 0).toLocaleString()}` : ""}
+              {canSeeExecutive && order.client_primary_executive_name ? ` · Executive: ${order.client_primary_executive_name}` : ""}
+            </span>
+            {isAdminOrManager && (
+              <button
+                type="button"
+                onClick={openHeaderEditor}
+                title="Edit client / currency / executive"
+                className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
+            )}
+          </span>
+        }
         action={
           <div className="flex gap-2">
             {order.status === "pif_sent" && (
@@ -907,11 +1082,6 @@ export default function OrderDetailPage() {
             {order.po_document && (
               <span className="text-xs text-green-600 font-medium flex items-center gap-1">✅ PO</span>
             )}
-            {["po_received", "pif_sent"].includes(order.status) && !orderDocs.some(d => d.doc_type === "pif") && (
-              <button onClick={() => setShowPifModal(true)} className="px-3 py-1.5 text-xs bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200 flex items-center gap-1">
-                📎 Upload PIF
-              </button>
-            )}
             {orderDocs.some(d => d.doc_type === "pif") && (
               <span className="text-xs text-green-600 font-medium flex items-center gap-1">✅ PIF</span>
             )}
@@ -923,7 +1093,7 @@ export default function OrderDetailPage() {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h4 className="font-medium text-sm text-gray-800">Product Readiness Checklist</h4>
-                <p className="text-xs text-gray-500">Required items (Product, Bottle) unlock Documents Preparing. All items must be ticked before Container Booked.</p>
+                <p className="text-xs text-gray-500">Required items (Product, Containers) unlock Documents Preparing. All items must be ticked before Container Booked.</p>
               </div>
               {savingChecklist && <span className="text-xs text-gray-400">Saving...</span>}
             </div>
@@ -959,8 +1129,8 @@ export default function OrderDetailPage() {
               <div>
                 <h4 className="font-medium text-sm text-gray-800">Documents Checklist</h4>
                 <p className="text-xs text-gray-500">{order.status === "docs_preparing"
-                  ? `Attach all ${requiredChecklistRows.length} required documents before advancing to Under Inspection (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done). Non-DG Declaration is optional.`
-                  : `Keep editing through In Transit if anything needs to be updated (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} required done). Non-DG Declaration is optional.`}
+                  ? `Generate the ${requiredChecklistRows.length} required invoices/packing lists (CI, CPL, LI, LPL) to enable Under Inspection (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done). The other rows are optional.`
+                  : `Keep editing through In Transit if anything needs to be updated (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} required done). The remaining rows are optional.`}
                 </p>
               </div>
             </div>
@@ -1048,10 +1218,11 @@ export default function OrderDetailPage() {
             })()}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {DOCS_APPROVAL_CHECKLIST.map((row) => {
-                const present = hasDoc(row.doc_type);
+              {DOCS_APPROVAL_CHECKLIST.map((row, rIdx) => {
+                const present = isRowPresent(row);
+                const rowKey = `${row.doc_type}-${row.order_item_id || rIdx}`;
                 return (
-                  <div key={row.doc_type} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}>
+                  <div key={rowKey} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}>
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
                       <span className={`text-sm ${present ? "text-emerald-800 font-medium" : "text-gray-800"}`}>{row.label}</span>
@@ -1059,40 +1230,40 @@ export default function OrderDetailPage() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {present && (
-                        <button onClick={() => viewOrderDoc(row.doc_type)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                        <button onClick={() => viewOrderDoc(row.doc_type, row.order_item_id || null)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
                       )}
                       {row.action === "generate-ci" && (
-                        <button onClick={handleGenerateCI} className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={handleGenerateCI} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-li" && (
-                        <button onClick={handleGenerateLI} className="px-2.5 py-1 text-xs bg-cyan-600 text-white rounded hover:bg-cyan-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={handleGenerateLI} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-cpl" && (
-                        <button onClick={() => setPackingListType("client")} className="px-2.5 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setPackingListType("client")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-lpl" && (
-                        <button onClick={() => setPackingListType("logistic")} className="px-2.5 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setPackingListType("logistic")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-coa" && (
-                        <button onClick={() => setShowCoaEditor(true)} className="px-2.5 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setCoaEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "" })} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-msds" && (
-                        <button onClick={() => setShowMsdsEditor(true)} className="px-2.5 py-1 text-xs bg-rose-600 text-white rounded hover:bg-rose-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setMsdsEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "" })} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-dbk" && (
-                        <button onClick={() => setComplianceDocType("dbk_declaration")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("dbk_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-exam" && (
-                        <button onClick={() => setComplianceDocType("examination_report")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("examination_report")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-exportdecl" && (
-                        <button onClick={() => setComplianceDocType("export_declaration")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("export_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-factorystuffing" && (
-                        <button onClick={() => setComplianceDocType("factory_stuffing")} className="px-2.5 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-800">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("factory_stuffing")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-nondg" && (
-                        <button onClick={() => setComplianceDocType("non_dg_declaration")} className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("non_dg_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "upload" && (
                         <button onClick={() => { setUploadChecklistFor(row); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Replace" : "Upload"}</button>
@@ -1113,22 +1284,56 @@ export default function OrderDetailPage() {
                 const needsPO = t.status === "po_received" && !order.po_document;
                 const needsPIFGen = t.status === "factory_ready" && order.status === "pif_sent" && !pifReady;
                 const needsRequired = t.status === "docs_preparing" && order.status === "factory_ready" && !checklistRequiredDone;
-                const needsAllDocs = t.status === "inspection" && order.status === "docs_preparing" && !docsApprovalReady;
+                const needsAllDocs = (t.status === "inspection" && order.status === "docs_preparing" && !docsApprovalReady)
+                  || (t.status === "docs_approved" && ["container_booked", "packed"].includes(order.status) && !docsApprovalReady);
                 const TRANSIT_DT = ["bl", "shipping_bill", "schedule_list", "coo"];
                 const transitMissing = TRANSIT_DT.filter(dt => !orderDocs.some(d => d.doc_type === dt));
                 const needsTransitDocs = t.status === "in_transit" && order.status === "dispatched" && transitMissing.length > 0;
-                const needsChecklist = (t.status === "container_booked" && order.status === "inspection_passed" && !checklistAllDone) || needsRequired || needsAllDocs || needsTransitDocs;
+                const DISPATCH_SIMPLE = [
+                  "client_invoice", "client_packing_list", "logistic_invoice", "logistic_packing_list",
+                  "dbk_declaration", "examination_report", "export_declaration", "factory_stuffing",
+                  "insurance",
+                ];
+                const DISPATCH_LABELS = {
+                  client_invoice: "Client Invoice", client_packing_list: "Client Packing List",
+                  logistic_invoice: "Logistic Invoice", logistic_packing_list: "Logistic Packing List",
+                  coa: "COA", msds: "MSDS",
+                  dbk_declaration: "DBK Declaration", examination_report: "Examination Report",
+                  export_declaration: "Export Declaration Form", factory_stuffing: "Factory Stuffing",
+                  insurance: "Insurance",
+                };
+                const dispatchMissingSimple = DISPATCH_SIMPLE.filter(dt => !orderDocs.some(d => d.doc_type === dt));
+                const dispatchMissingLabels = [
+                  ...dispatchMissingSimple.map(dt => DISPATCH_LABELS[dt]),
+                  ...perItemDispatchMissing.map(m => m.label),
+                ];
+                const dispatchTotal = DISPATCH_SIMPLE.length + (orderItems.length * 2);
+                const dispatchDone = dispatchTotal - dispatchMissingLabels.length;
+                const needsDispatchDocs = t.status === "dispatched" && order.status === "docs_approved" && dispatchMissingLabels.length > 0;
+                const inspectionAtMs = order.inspection_at ? new Date(order.inspection_at).getTime() : 0;
+                const hasStuffingPhoto = inspectionAtMs > 0 && orderDocs.some((d) => {
+                  const name = (d.name || "").toLowerCase();
+                  const isImg = /\.(jpg|jpeg|png|webp|gif)$/.test(name);
+                  const created = d.created_at ? new Date(d.created_at).getTime() : 0;
+                  return isImg && created >= inspectionAtMs;
+                });
+                const needsStuffingPhoto = t.status === "container_booked" && order.status === "inspection_passed" && !hasStuffingPhoto;
+                const needsChecklist = (t.status === "container_booked" && order.status === "inspection_passed" && !checklistAllDone) || needsRequired || needsAllDocs || needsTransitDocs || needsStuffingPhoto || needsDispatchDocs;
                 const blocked = needsPO || needsPIFGen || needsChecklist;
                 const pifHint = needsPIFGen ? `Generate PIFs for every product first (${pifCounts.done}/${pifCounts.total} done)` : undefined;
                 const checklistHint = needsRequired
-                  ? "Tick the required items (Product and Bottle) before advancing to Documents Preparing."
+                  ? "Tick the required items (Product and Containers) before advancing to Documents Preparing."
                   : needsAllDocs
                     ? `Attach all ${requiredChecklistRows.length} required documents (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done) before advancing.`
+                    : needsDispatchDocs
+                      ? `Every document must be uploaded before Dispatch — missing: ${dispatchMissingLabels.join(", ")} (${dispatchDone}/${dispatchTotal} done). The dispatch email goes out with these attached.`
                     : needsTransitDocs
-                      ? `Upload the transit documents first (${4 - transitMissing.length}/4 done).`
-                      : needsChecklist
-                        ? "Tick every readiness checklist item before advancing to Container Booked."
-                        : undefined;
+                      ? `Upload the transit documents first — missing: ${transitMissing.map(dt => ({bl:"BL",shipping_bill:"Shipping Bill",schedule_list:"Schedule List",coo:"COO"})[dt]).join(", ")} (${4 - transitMissing.length}/4 done).`
+                      : needsStuffingPhoto
+                        ? "Upload at least one factory stuffing photo before advancing to Container Booked."
+                        : needsChecklist
+                          ? "Tick every readiness checklist item before advancing to Container Booked."
+                          : undefined;
                 return (
                   <div key={t.status} className="flex items-center gap-1">
                     <button onClick={() => {
@@ -1148,8 +1353,43 @@ export default function OrderDetailPage() {
                         return;
                       }
                       if (order.status === "docs_approved" && t.status === "dispatched") {
-                        const hasInsurance = orderDocs.some(d => d.doc_type === "insurance");
-                        setDispatchStep(hasInsurance ? "delivery" : "insurance");
+                        const REQ_SIMPLE = [
+                          "client_invoice", "client_packing_list", "logistic_invoice", "logistic_packing_list",
+                          "dbk_declaration", "examination_report", "export_declaration", "factory_stuffing",
+                          "insurance",
+                        ];
+                        const LBL = {
+                          client_invoice: "Client Invoice", client_packing_list: "Client Packing List",
+                          logistic_invoice: "Logistic Invoice", logistic_packing_list: "Logistic Packing List",
+                          coa: "COA", msds: "MSDS",
+                          dbk_declaration: "DBK Declaration", examination_report: "Examination Report",
+                          export_declaration: "Export Declaration Form", factory_stuffing: "Factory Stuffing",
+                          insurance: "Insurance",
+                        };
+                        const missingSimple = REQ_SIMPLE.filter(dt => !orderDocs.some(d => d.doc_type === dt));
+                        const allMissingLabels = [
+                          ...missingSimple.map(dt => LBL[dt]),
+                          ...perItemDispatchMissing.map(m => m.label),
+                        ];
+                        if (allMissingLabels.length > 0) {
+                          toast.error(`Missing: ${allMissingLabels.join(", ")}`);
+                          // Insurance has its own popup; otherwise route to first missing doc
+                          if (missingSimple[0] === "insurance" && allMissingLabels.length === 1) {
+                            setDispatchStep("insurance");
+                          } else if (missingSimple.length > 0) {
+                            setUploadChecklistFor({ doc_type: missingSimple[0], label: LBL[missingSimple[0]] });
+                            setChecklistUploadFile(null);
+                          } else if (perItemDispatchMissing.length > 0) {
+                            // All simple docs present — open editor for first missing per-item doc.
+                            const first = perItemDispatchMissing[0];
+                            const item = orderItems.find((it) => it.id === first.order_item_id);
+                            const productName = item?.product_name || "";
+                            if (first.doc_type === "coa") setCoaEditorFor({ orderItemId: first.order_item_id, productName });
+                            else if (first.doc_type === "msds") setMsdsEditorFor({ orderItemId: first.order_item_id, productName });
+                          }
+                          return;
+                        }
+                        triggerDispatchEmailDraft();
                         return;
                       }
                       if (order.status === "dispatched" && t.status === "in_transit") {
@@ -1162,15 +1402,21 @@ export default function OrderDetailPage() {
                           setChecklistUploadFile(null);
                           return;
                         }
-                        (async () => {
-                          try {
-                            const res = await api.post(`/orders/${id}/transit-mail-draft/`);
-                            toast.success("Email draft ready — order will move to In Transit once you send it");
-                            const commId = res.data.communication_id;
-                            if (commId) router.push(`/communications/${commId}`);
-                            else { toast("No source thread — open the draft from Communications.", { icon: "ℹ️" }); loadOrder(); }
-                          } catch (err) { toast.error(getErrorMessage(err, "Failed to prepare transit email")); }
-                        })();
+                        // Ask for BL number + estimated delivery first, then build the draft.
+                        setEstDeliveryTime("");
+                        // Pre-fill BL number from a previously-saved note if any
+                        const blNote = (events || []).find((e) => {
+                          if (e.event_type !== "note") return false;
+                          const txt = (e.description || "").trim();
+                          return /^BL\s*Number\s*[:\-]/i.test(txt);
+                        });
+                        if (blNote) {
+                          const m = (blNote.description || "").match(/^BL\s*Number\s*[:\-]\s*(.+)$/i);
+                          setTransitBlNumber(m ? m[1].trim() : "");
+                        } else {
+                          setTransitBlNumber("");
+                        }
+                        setTransitDeliveryOpen(true);
                         return;
                       }
                       handleTransition(t.status);
@@ -1251,8 +1497,8 @@ export default function OrderDetailPage() {
               <div><span className="text-gray-500 block text-xs">Order #</span>{order.order_number}</div>
               <div><span className="text-gray-500 block text-xs">Client</span>{order.client_name}</div>
               <div><span className="text-gray-500 block text-xs">Delivery Terms</span>{order.delivery_terms}</div>
-              <div><span className="text-gray-500 block text-xs">Payment Terms</span>{order.payment_terms || "\u2014"}</div>
-              <div><span className="text-gray-500 block text-xs">Freight</span>{order.freight_terms || "\u2014"}</div>
+              <div><span className="text-gray-500 block text-xs">Payment Terms</span>{order.payment_terms || "—"}</div>
+              <div><span className="text-gray-500 block text-xs">Freight</span>{order.freight_terms || "—"}</div>
               <div><span className="text-gray-500 block text-xs">Created</span>{fmtDate(order.created_at)}</div>
               {order.po_number && <div><span className="text-gray-500 block text-xs">PO Number</span>{order.po_number}</div>}
             </div>
@@ -1376,51 +1622,95 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {activeTab === "documents" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Documents ({orderDocs.length})</h3>
-            <button onClick={() => setShowDocModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg">+ Upload</button>
-          </div>
-          {orderDocs.length === 0 ? <p className="text-gray-400 text-sm">No documents uploaded</p> : (
-            <div className="space-y-2">{orderDocs.map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-                onClick={async () => {
-                  if (!doc.file) return;
-                  const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
-                  try {
-                    const res = await fetch(url);
-                    const blob = await res.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
-                    if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
-                      setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                    } else if (ext === "pdf") {
-                      setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                    } else {
-                      const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
-                    }
-                  } catch { toast.error("Failed to open document"); }
-                }}>
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">{{"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊","jpg":"🖼️","jpeg":"🖼️","png":"🖼️","pi":"📋","po":"📦"}[(doc.name || doc.file || "").split(".").pop()?.toLowerCase()] || {"pi":"📋","po":"📦","commercial_invoice":"📑","packing_list":"📦","bl":"🚢","coa":"🧪","insurance":"🛡️"}[doc.doc_type] || "📎"}</span>
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{doc.name}</p>
-                    <p className="text-xs text-gray-500">{doc.doc_type} · {fmtDateTime(doc.created_at)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-indigo-600 font-medium">View</span>
-                  {["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type) && (
-                    <button onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
-                  )}
-                  <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
-                </div>
+      {activeTab === "documents" && (() => {
+        const LOGISTICS_TYPES = ["coa", "msds", "dbk_declaration", "examination_report", "export_declaration", "factory_stuffing", "non_dg_declaration"];
+        const inspectionPassedDocs = orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Passed]"));
+        const inspectionFailedDocs = orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Failed]"));
+        const logisticsDocs = orderDocs.filter((d) => {
+          const n = d.name || "";
+          if (n.startsWith("[Inspection Passed]") || n.startsWith("[Inspection Failed]")) return false;
+          return LOGISTICS_TYPES.includes(d.doc_type);
+        });
+        const otherDocs = orderDocs.filter((d) => {
+          const n = d.name || "";
+          if (n.startsWith("[Inspection Passed]") || n.startsWith("[Inspection Failed]")) return false;
+          return !LOGISTICS_TYPES.includes(d.doc_type);
+        });
+        const stripPrefix = (name) => (name || "").replace(/^\[Inspection (Passed|Failed)\]\s*/, "");
+        const renderDocRow = (doc) => (
+          <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+            onClick={async () => {
+              if (!doc.file) return;
+              const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+              try {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
+                if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
+                  setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                } else if (ext === "pdf") {
+                  setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                } else {
+                  const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
+                }
+              } catch { toast.error("Failed to open document"); }
+            }}>
+            <div className="flex items-center gap-3">
+              <span className="text-xl">{{"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊","jpg":"🖼️","jpeg":"🖼️","png":"🖼️","pi":"📋","po":"📦"}[(doc.name || doc.file || "").split(".").pop()?.toLowerCase()] || {"pi":"📋","po":"📦","commercial_invoice":"📑","packing_list":"📦","bl":"🚢","coa":"🧪","insurance":"🛡️"}[doc.doc_type] || "📎"}</span>
+              <div>
+                <p className="text-sm font-medium text-gray-800">{stripPrefix(doc.name)}</p>
+                <p className="text-xs text-gray-500">{doc.doc_type} · {fmtDateTime(doc.created_at)}</p>
               </div>
-            ))}</div>
-          )}
-        </div>
-      )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-indigo-600 font-medium">View</span>
+              {["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type) && (
+                <button onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
+              )}
+              <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+            </div>
+          </div>
+        );
+        const renderFolder = (label, docs, accent) => (
+          <details open className={`border ${accent.border} rounded-lg ${accent.bg}`}>
+            <summary className={`px-3 py-2 cursor-pointer flex items-center justify-between ${accent.headerText} font-medium text-sm`}>
+              <span className="flex items-center gap-2">📁 {label} <span className={`text-[11px] ${accent.badge} px-1.5 py-0.5 rounded`}>{docs.length}</span></span>
+            </summary>
+            <div className="p-3 pt-0 space-y-2">
+              {docs.length === 0 ? <p className="text-xs text-gray-500">No documents in this folder yet.</p> : docs.map(renderDocRow)}
+            </div>
+          </details>
+        );
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Documents ({orderDocs.length})</h3>
+              <button onClick={() => setShowDocModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg">+ Upload</button>
+            </div>
+            {orderDocs.length === 0 ? <p className="text-gray-400 text-sm">No documents uploaded</p> : (
+              <div className="space-y-3">
+                {(inspectionPassedDocs.length > 0 || order.inspection_passed_at) && renderFolder(
+                  "Inspection Passed",
+                  inspectionPassedDocs,
+                  { border: "border-emerald-200", bg: "bg-emerald-50/30", headerText: "text-emerald-800", badge: "bg-emerald-100 text-emerald-700" },
+                )}
+                {inspectionFailedDocs.length > 0 && renderFolder(
+                  "Inspection Failed",
+                  inspectionFailedDocs,
+                  { border: "border-rose-200", bg: "bg-rose-50/30", headerText: "text-rose-800", badge: "bg-rose-100 text-rose-700" },
+                )}
+                {logisticsDocs.length > 0 && renderFolder(
+                  "Logistics",
+                  logisticsDocs,
+                  { border: "border-indigo-200", bg: "bg-indigo-50/30", headerText: "text-indigo-800", badge: "bg-indigo-100 text-indigo-700" },
+                )}
+                <div className="space-y-2">{otherDocs.map(renderDocRow)}</div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {activeTab === "notes" && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -1558,6 +1848,34 @@ export default function OrderDetailPage() {
         </div>
       )}
 
+      {/* FIRC — Foreign Inward Remittance Certificate. 11th and final step. */}
+      {(order.status === "arrived" || order.status === "delivered" || order._feedback || order.firc_received_at) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold">FIRC — Foreign Inward Remittance Certificate</h3>
+            <button
+              onClick={async () => {
+                const wantToMark = !order.firc_received_at;
+                if (!wantToMark && !confirm("Unmark FIRC as received? Shipment progress will drop back to 90%.")) return;
+                try {
+                  await api.post(`/orders/${id}/mark-firc/`, { received: wantToMark });
+                  toast.success(wantToMark ? "FIRC marked received — order is now 100% complete" : "FIRC unmarked");
+                  loadOrder();
+                } catch (err) { toast.error(getErrorMessage(err, "Failed to update FIRC")); }
+              }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg ${order.firc_received_at ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100" : "text-indigo-700 bg-indigo-50 hover:bg-indigo-100"}`}
+            >
+              {order.firc_received_at ? "✓ FIRC Received — Unmark" : "Mark FIRC Received"}
+            </button>
+          </div>
+          {order.firc_received_at ? (
+            <p className="text-sm text-emerald-700">Received on {fmtDateTime(order.firc_received_at)}. Shipment progress: 100%.</p>
+          ) : (
+            <p className="text-sm text-gray-400">Mark FIRC as received once the foreign payment has been confirmed by the bank. This is the final step in the order lifecycle.</p>
+          )}
+        </div>
+      )}
+
       <Modal open={showFeedbackModal} onClose={() => setShowFeedbackModal(false)} title="Add Client Feedback" size="sm">
         <form onSubmit={async (e) => {
           e.preventDefault();
@@ -1670,7 +1988,7 @@ export default function OrderDetailPage() {
 
       {/* Doc Picker Modal (pick from Documents library) */}
       {showDocPicker && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowDocPicker(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={() => setShowDocPicker(false)}>
           <div className="bg-white rounded-xl overflow-hidden max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="p-3 border-b border-gray-200 flex items-center justify-between">
               <div>
@@ -1740,7 +2058,7 @@ export default function OrderDetailPage() {
 
       {/* Camera Modal */}
       {showCamera && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={closeCamera}>
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={closeCamera}>
           <div className="bg-white rounded-xl overflow-hidden max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="p-3 border-b border-gray-200 flex items-center justify-between">
               <h3 className="font-semibold">Take a photo</h3>
@@ -1825,39 +2143,44 @@ export default function OrderDetailPage() {
       />
 
       <COAEditorModal
-        open={showCoaEditor}
-        onClose={() => setShowCoaEditor(false)}
-        productName={order?.items?.[0]?.product_name || ""}
+        key={`coa-${coaEditorFor?.orderItemId || 'none'}`}
+        open={!!coaEditorFor}
+        onClose={() => setCoaEditorFor(null)}
+        productName={coaEditorFor?.productName || ""}
         clientName={order?.client_name || ""}
         docsMode
         onGenerate={async (formData) => {
           try {
+            const itemId = coaEditorFor?.orderItemId || null;
             const isFormData = formData instanceof FormData;
             if (isFormData) {
               const existing = JSON.parse(formData.get("payload"));
               existing.order_id = id;
+              if (itemId) existing.order_item_id = itemId;
               formData.set("payload", JSON.stringify(existing));
               await api.post("/communications/generate-coa-pdf/", formData, { headers: { "Content-Type": "multipart/form-data" } });
             } else {
-              await api.post("/communications/generate-coa-pdf/", { ...formData, order_id: id });
+              await api.post("/communications/generate-coa-pdf/", { ...formData, order_id: id, ...(itemId ? { order_item_id: itemId } : {}) });
             }
             toast.success("COA generated & saved to Documents");
-            setShowCoaEditor(false);
+            setCoaEditorFor(null);
             loadOrder();
           } catch { toast.error("Failed to generate COA"); }
         }}
       />
 
       <MSDSEditorModal
-        open={showMsdsEditor}
-        onClose={() => setShowMsdsEditor(false)}
-        productName={order?.items?.[0]?.product_name || ""}
+        key={`msds-${msdsEditorFor?.orderItemId || 'none'}`}
+        open={!!msdsEditorFor}
+        onClose={() => setMsdsEditorFor(null)}
+        productName={msdsEditorFor?.productName || ""}
         docsMode
         onGenerate={async (formData) => {
           try {
-            await api.post("/communications/generate-msds-pdf/", { ...formData, order_id: id });
+            const itemId = msdsEditorFor?.orderItemId || null;
+            await api.post("/communications/generate-msds-pdf/", { ...formData, order_id: id, ...(itemId ? { order_item_id: itemId } : {}) });
             toast.success("MSDS generated & saved to Documents");
-            setShowMsdsEditor(false);
+            setMsdsEditorFor(null);
             loadOrder();
           } catch { toast.error("Failed to generate MSDS"); }
         }}
@@ -1877,7 +2200,7 @@ export default function OrderDetailPage() {
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-gray-200">
               <h3 className="font-semibold text-gray-900">Upload Container Release Order</h3>
-              <p className="text-sm text-gray-500 mt-1">This order just entered Container Booked. Please upload the CRO document when ready. You'll be reminded every 4 hours until it's attached.</p>
+              <p className="text-sm text-gray-500 mt-1">This order just entered Container Booked. Please upload the CRO document when ready. You'll be reminded every 2 hours until it's attached.</p>
             </div>
             <div className="p-5 flex flex-col gap-2">
               <button
@@ -1939,29 +2262,65 @@ export default function OrderDetailPage() {
             </div>
             <div className="p-5 grid grid-cols-2 gap-3">
               {[
-                ["container_number", "Container Number", "text"],
-                ["bl_number", "BL Number", "text"],
-                ["vessel_name", "Vessel Name", "text"],
-                ["shipping_line", "Shipping Line", "text"],
                 ["forwarder", "Freight Forwarder", "text"],
                 ["cha", "CHA (Customs House Agent)", "text"],
+                ["shipping_line", "Liner", "text"],
                 ["port_of_loading", "Port of Loading", "text"],
                 ["port_of_discharge", "Port of Discharge", "text"],
-                ["container_booking_date", "Container Booking Date", "date"],
-                ["dispatch_date", "Dispatch Date", "date"],
-                ["transit_days", "Transit Days", "number"],
-                ["estimated_arrival", "Estimated Arrival", "date"],
               ].map(([key, label, type]) => (
-                <div key={key} className={key === "vessel_name" || key === "port_of_loading" || key === "port_of_discharge" ? "col-span-2" : ""}>
+                <div key={key} className={key === "shipping_line" ? "col-span-2" : ""}>
                   <label className="block text-xs font-medium text-gray-600 mb-0.5">{label}</label>
                   <input
                     type={type}
                     value={shipmentForm[key] || ""}
                     onChange={(e) => setShipmentForm({ ...shipmentForm, [key]: e.target.value })}
+                    spellCheck="true"
+                    lang="en"
                     className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
                 </div>
               ))}
+            </div>
+            <div className="px-5 pb-3">
+              <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg">
+                <button
+                  onClick={checkShipmentGrammar}
+                  disabled={shipmentGrammarChecking}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-white border border-gray-200 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors disabled:opacity-50"
+                  title="AI-powered spell check and grammar review"
+                >
+                  {shipmentGrammarChecking ? (
+                    <><span className="animate-spin inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full" /> Checking...</>
+                  ) : (
+                    <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Check Grammar</>
+                  )}
+                </button>
+                {shipmentGrammarFixes.length > 0 && (
+                  <>
+                    <span className="text-[11px] text-red-600 font-medium">{shipmentGrammarFixes.length} issue{shipmentGrammarFixes.length > 1 ? "s" : ""} found</span>
+                    <button onClick={applyAllShipmentFixes} className="text-[11px] px-2 py-0.5 bg-indigo-600 text-white rounded font-medium hover:bg-indigo-700">Fix All</button>
+                  </>
+                )}
+                <span className="text-[11px] text-gray-400 ml-auto">Browser spellcheck is also active — right-click a red-underlined word for suggestions.</span>
+              </div>
+              {shipmentGrammarFixes.length > 0 && (
+                <div className="mt-2 border border-gray-300 rounded-lg overflow-hidden bg-white max-h-48 overflow-y-auto">
+                  {shipmentGrammarFixes.map((fix, i) => (
+                    <div key={i} className="flex items-start gap-3 px-3 py-2 text-xs border-b border-gray-100 last:border-0 hover:bg-yellow-50/50">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="line-through text-red-600 font-medium bg-red-50 px-1.5 py-0.5 rounded">{fix.original}</span>
+                          <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                          <span className="text-green-700 font-medium bg-green-50 px-1.5 py-0.5 rounded">{fix.corrected}</span>
+                          {fix.key && <span className="text-[10px] text-gray-500 italic">({fix.key.replace(/_/g, " ")})</span>}
+                        </div>
+                        {fix.reason && <p className="text-gray-500 mt-0.5">{fix.reason}</p>}
+                      </div>
+                      <button onClick={() => applyShipmentFix(fix)} className="shrink-0 px-2 py-1 bg-green-600 text-white rounded font-medium hover:bg-green-700">Fix</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-end gap-2">
               <button onClick={() => setShowContainerBookedModal(false)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -1978,7 +2337,7 @@ export default function OrderDetailPage() {
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
             <div className="px-5 py-4 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">Step 1 of 2 — Upload Insurance</h3>
+              <h3 className="font-semibold text-gray-900">Upload Insurance</h3>
               <p className="text-sm text-gray-500 mt-1">Insurance is mandatory to proceed with Dispatch.</p>
             </div>
             <form onSubmit={submitInsuranceUpload} className="p-5 space-y-4">
@@ -2007,27 +2366,112 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* Dispatch step 2 — Estimated delivery time (mandatory) */}
-      {dispatchStep === "delivery" && (
+      {/* In Transit — BL Number + Estimated delivery prompt */}
+      {transitDeliveryOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
             <div className="px-5 py-4 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">Step 2 of 2 — Estimated Delivery</h3>
-              <p className="text-sm text-gray-500 mt-1">Tell the client when they can expect to receive the shipment. This will be saved to Notes for future reference and added to the dispatch email.</p>
+              <h3 className="font-semibold text-gray-900">In Transit — Confirm Details</h3>
+              <p className="text-sm text-gray-500 mt-1">Both fields are saved to Notes for future reference and added to the In-Transit email.</p>
             </div>
             <div className="p-5 space-y-4">
-              <input
-                value={estDeliveryTime}
-                onChange={(e) => setEstDeliveryTime(e.target.value)}
-                placeholder="e.g. 25–30 days from dispatch / 15 May 2026 / Arriving Mombasa Port by 03 May"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                autoFocus
-              />
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">BL Number <span className="text-red-500">*</span></label>
+                <input
+                  value={transitBlNumber}
+                  onChange={(e) => setTransitBlNumber(e.target.value)}
+                  placeholder="e.g. MEDUMR123456789"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  autoFocus
+                />
+                {transitBlNumber.trim() && <p className="text-[11px] text-gray-500 mt-1">Will be saved to Notes as <span className="font-medium">"BL Number: {transitBlNumber.trim()}"</span>.</p>}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Estimated Delivery <span className="text-red-500">*</span></label>
+                <input
+                  value={estDeliveryTime}
+                  onChange={(e) => setEstDeliveryTime(e.target.value)}
+                  placeholder="e.g. 25–30 days from dispatch / 15 May 2026 / Arriving Mombasa Port by 03 May"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
               <div className="flex gap-2">
-                <button onClick={submitDispatch} disabled={!estDeliveryTime.trim() || dispatchSubmitting} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">
-                  {dispatchSubmitting ? "Dispatching..." : "Dispatch & Open Email Draft"}
+                <button onClick={submitTransitDelivery} disabled={!transitBlNumber.trim() || !estDeliveryTime.trim() || transitSubmitting} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">
+                  {transitSubmitting ? "Preparing..." : "Save & Open Email Draft"}
                 </button>
-                <button onClick={() => { setDispatchStep(null); setEstDeliveryTime(""); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button onClick={() => { setTransitDeliveryOpen(false); setEstDeliveryTime(""); setTransitBlNumber(""); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Factory Stuffing photo upload — opens after Inspection Passed/Failed */}
+      {showStuffingPhotoModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full my-4">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-900">
+                Upload {inspectionUploadFor === "failed" ? "Inspection Failed Evidence" : "Factory Stuffing Photos"}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {inspectionUploadFor === "failed"
+                  ? "Attach photos, files, or voice notes documenting the inspection failure. Everything uploaded here will be filed under the Inspection Failed folder in the Documents tab."
+                  : "Upload at least one photo to enable Container Booked. You can drop files, paste, snap a photo, record voice, or pick from the Documents library — same options as Notes. The popup stays open until you click Close. Items will be filed under the Inspection Passed folder in the Documents tab."}
+              </p>
+            </div>
+            <div className="p-5 space-y-3">
+              <div
+                className={`p-3 rounded-lg border-2 border-dashed transition-colors ${isDraggingNote ? "border-indigo-400 bg-indigo-50" : "border-gray-300"}`}
+                onDragOver={(e) => { e.preventDefault(); if (!isDraggingNote) setIsDraggingNote(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDraggingNote(false); }}
+                onDrop={handleNoteDrop}
+              >
+                <input
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  onPaste={handleNotePaste}
+                  placeholder="Optional caption (drag & drop or paste files here)"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <button type="button" onClick={pickNoteFile} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📎 <span className="text-xs">File</span></button>
+                  <button type="button" onClick={openCamera} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📷 <span className="text-xs">Photo</span></button>
+                  {!recording ? (
+                    <button type="button" onClick={startVoiceRecording} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">🎤 <span className="text-xs">Voice</span></button>
+                  ) : (
+                    <button type="button" onClick={stopVoiceRecording} className="px-2.5 py-1.5 text-sm border border-red-400 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 animate-pulse">⏹ <span className="text-xs">Stop ({recordElapsed}s)</span></button>
+                  )}
+                  <button type="button" onClick={openLibraryPicker} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📂 <span className="text-xs">From Docs</span></button>
+                </div>
+                {(noteAttachments.length > 0 || noteExistingDocs.length > 0) && (
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {noteAttachments.map((att, idx) => (
+                      <div key={`new-${idx}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg">
+                        {att.kind === "photo" || att.kind === "image" || att.file.type.startsWith("image/") ? (
+                          <img src={att.previewUrl} alt="preview" className="w-8 h-8 object-cover rounded" />
+                        ) : att.kind === "voice" || att.file.type.startsWith("audio/") ? (
+                          <span className="text-base">🎵</span>
+                        ) : (
+                          <span className="text-base">📄</span>
+                        )}
+                        <span className="text-xs text-indigo-800 max-w-[160px] truncate">{att.file.name}</span>
+                        <button type="button" onClick={() => removeNoteAttachment(idx)} className="text-xs text-red-600 hover:text-red-800">✕</button>
+                      </div>
+                    ))}
+                    {noteExistingDocs.map((d) => (
+                      <div key={`existing-${d.id}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <span className="text-base">📂</span>
+                        <span className="text-xs text-emerald-800 max-w-[160px] truncate">{d.name}</span>
+                        <button type="button" onClick={() => removeExistingDoc(d.id)} className="text-xs text-red-600 hover:text-red-800">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={async () => { await submitNote(inspectionUploadFor === "failed" ? "Inspection Failed" : inspectionUploadFor === "passed" ? "Inspection Passed" : null); }} disabled={!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Add to Notes</button>
+                <button onClick={() => { setShowStuffingPhotoModal(false); setInspectionUploadFor(null); }} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
               </div>
             </div>
           </div>
@@ -2047,6 +2491,8 @@ export default function OrderDetailPage() {
                 onClick={async () => {
                   setShowInspectionModal(false);
                   await handleTransition("inspection_passed");
+                  setInspectionUploadFor("passed");
+                  setShowStuffingPhotoModal(true);
                 }}
                 className="w-full px-4 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700"
               >
@@ -2056,6 +2502,8 @@ export default function OrderDetailPage() {
                 onClick={() => {
                   setShowInspectionModal(false);
                   toast("Inspection failed — order stays at Under Inspection.", { icon: "⚠️" });
+                  setInspectionUploadFor("failed");
+                  setShowStuffingPhotoModal(true);
                 }}
                 className="w-full px-4 py-2.5 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700"
               >
@@ -2073,8 +2521,21 @@ export default function OrderDetailPage() {
       )}
 
       {/* Docs Checklist Upload Modal */}
-      <Modal open={!!uploadChecklistFor} onClose={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); }} title={uploadChecklistFor ? `Upload ${uploadChecklistFor.label}` : "Upload"} size="sm">
+      <Modal open={!!uploadChecklistFor} onClose={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); setBlNumberInput(""); }} title={uploadChecklistFor ? `Upload ${uploadChecklistFor.label}` : "Upload"} size="sm">
         <form onSubmit={handleChecklistUpload} className="space-y-4">
+          {uploadChecklistFor?.doc_type === "bl" && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">BL Number <span className="text-red-500">*</span></label>
+              <input
+                value={blNumberInput}
+                onChange={(e) => setBlNumberInput(e.target.value)}
+                placeholder="e.g. MEDUMR123456789"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                autoFocus
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Saved to Notes and synced to the linked Shipment.</p>
+            </div>
+          )}
           <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${checklistUploadFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}>
             <input type="file" onChange={(e) => setChecklistUploadFile(e.target.files[0])} className="hidden" />
             {checklistUploadFile ? (
@@ -2090,8 +2551,8 @@ export default function OrderDetailPage() {
             )}
           </label>
           <div className="flex gap-3">
-            <button type="submit" disabled={!checklistUploadFile} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button>
-            <button type="button" onClick={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); }} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={!checklistUploadFile || (uploadChecklistFor?.doc_type === "bl" && !blNumberInput.trim())} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-40">Upload</button>
+            <button type="button" onClick={() => { setUploadChecklistFor(null); setChecklistUploadFile(null); setBlNumberInput(""); }} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
           </div>
         </form>
       </Modal>
@@ -2162,6 +2623,39 @@ export default function OrderDetailPage() {
         onSave={handleSaveQt} onPreview={handlePreviewQt}
         onSend={handleSendQt} sending={qtSending}
       />
+
+      {/* Edit order header — total amount only */}
+      <Modal open={editHeaderOpen} onClose={() => !headerSaving && setEditHeaderOpen(false)} title="Edit Order Details" size="sm">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Total Amount ({order?.currency || "USD"})</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={headerForm.total ?? ""}
+              onChange={(e) => setHeaderForm((f) => ({ ...f, total: e.target.value }))}
+              placeholder="0.00"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">Overrides the auto-computed total. Adding or editing line items will recompute it.</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              disabled={headerSaving}
+              onClick={() => setEditHeaderOpen(false)}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+            >Cancel</button>
+            <button
+              type="button"
+              disabled={headerSaving}
+              onClick={saveHeaderEdits}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >{headerSaving ? "Saving..." : "Save"}</button>
+          </div>
+        </div>
+      </Modal>
 
     </div>
   );

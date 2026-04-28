@@ -58,6 +58,20 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         feedback.save()
         return Response({'status': 'saved'}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'], url_path='mark-firc')
+    def mark_firc(self, request, pk=None):
+        """Mark or unmark the FIRC (Foreign Inward Remittance Certificate) as
+        received. This is the 11th and final step in the order lifecycle and
+        drives the shipment progress to 100%."""
+        from django.utils import timezone
+        order = self.get_object()
+        received = request.data.get('received')
+        if received is None:
+            received = order.firc_received_at is None
+        order.firc_received_at = timezone.now() if received else None
+        order.save(update_fields=['firc_received_at'])
+        return Response({'firc_received_at': order.firc_received_at})
+
     # ── Status Transition ──
     # ── Container Booked: capture shipment fields + transition + sync shipment ──
     @action(detail=True, methods=['post'], url_path='container-booked')
@@ -95,6 +109,7 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 status='pending',
                 delivery_terms=order.delivery_terms or '',
                 freight_type=order.freight_terms or '',
+                country=getattr(order.client, 'country', '') or '',
             )
 
         update_fields = []
@@ -211,13 +226,15 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 k = request.data.get('attachment_kind')
                 if k:
                     kinds = [k]
+            name_prefix = (request.data.get('name_prefix') or '').strip()
             attachments = []
             for idx, f in enumerate(files):
                 kind = kinds[idx] if idx < len(kinds) else 'file'
+                stored_name = f'{name_prefix}{f.name}' if name_prefix else f.name
                 doc = OrderDocument.objects.create(
                     order=order,
                     doc_type='note_attachment',
-                    name=f.name,
+                    name=stored_name,
                     file=f,
                     uploaded_by=request.user,
                 )
@@ -409,12 +426,20 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         doc_file = request.FILES.get('file')
         doc_type = request.data.get('doc_type', 'other')
         name = request.data.get('name', doc_file.name if doc_file else '')
+        order_item_id = request.data.get('order_item_id')
 
         if not doc_file:
             return Response({'error': 'File is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        order_item = None
+        if order_item_id:
+            try:
+                order_item = order.items.get(id=order_item_id)
+            except Exception:
+                order_item = None
+
         doc = OrderDocument.objects.create(
-            order=order, doc_type=doc_type, name=name,
+            order=order, order_item=order_item, doc_type=doc_type, name=name,
             file=doc_file, uploaded_by=request.user,
         )
 
@@ -424,6 +449,16 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             metadata={'filename': name, 'doc_type': doc_type},
             triggered_by=request.user,
         )
+
+        # If a BL document is uploaded together with its number, sync the
+        # number to the linked Shipment so the Shipments page shows it.
+        bl_number = (request.data.get('bl_number') or '').strip()
+        if doc_type == 'bl' and bl_number:
+            try:
+                from orders.workflow_service import sync_shipment_from_order
+                sync_shipment_from_order(order, bl_number=bl_number)
+            except Exception:
+                pass
 
         return Response(OrderDocumentSerializer(doc).data, status=status.HTTP_201_CREATED)
 
@@ -467,18 +502,22 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 pass
 
         # 3. Find the right email thread for this order in priority order:
-        #    a) Any PI for this order whose source_communication is set
-        #    b) Inbound email mentioning a product from this order
-        #    c) Inbound email mentioning the order number
-        #    d) Fallback: most recent inbound from the client
+        #    a) order.source_communication (anchored at order creation)
+        #    b) Any PI for this order whose source_communication is set
+        #    c) Inbound email mentioning a product from this order
+        #    d) Inbound email mentioning the order number
+        #    e) Fallback: most recent inbound from the client
         from django.db.models import Q
         from finance.models import ProformaInvoice
         comm = None
-        pi_with_src = ProformaInvoice.objects.filter(
-            order=order, source_communication__isnull=False,
-        ).order_by('-created_at').first()
-        if pi_with_src and pi_with_src.source_communication_id:
-            comm = Communication.objects.filter(id=pi_with_src.source_communication_id, is_deleted=False).first()
+        if order.source_communication_id:
+            comm = Communication.objects.filter(id=order.source_communication_id, is_deleted=False).first()
+        if not comm:
+            pi_with_src = ProformaInvoice.objects.filter(
+                order=order, source_communication__isnull=False,
+            ).order_by('-created_at').first()
+            if pi_with_src and pi_with_src.source_communication_id:
+                comm = Communication.objects.filter(id=pi_with_src.source_communication_id, is_deleted=False).first()
         if not comm:
             product_names = [it.product_name for it in order.items.all() if it.product_name]
             if product_names:
@@ -501,6 +540,16 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 client=order.client, comm_type='email', is_deleted=False,
             ).order_by('-created_at').first()
 
+        # If we resolved a thread but the order didn't have one anchored,
+        # stamp it now so subsequent stages (transit, delivery, FIRC) reuse
+        # the same thread without re-running the heuristics.
+        if comm and not order.source_communication_id:
+            try:
+                order.source_communication = comm
+                order.save(update_fields=['source_communication'])
+            except Exception:
+                pass
+
         # 4. Build draft body
         product_lines = ', '.join([(it.product_name or '') for it in order.items.all() if it.product_name])
         client_name = order.client.company_name if order.client else 'Valued Customer'
@@ -513,7 +562,7 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             f'<p><strong>{product_lines or "—"}</strong></p>'
             f'{delivery_html}'
             f'<p>Please find attached the supporting documents for your reference: '
-            f'Client Invoice, Client Packing List, COA, MSDS, Insurance, and the factory stuffing photos.</p>'
+            f'Client Invoice, Client Packing List, COA, MSDS, and the factory stuffing photos.</p>'
             f'<p>Please do not hesitate to reach out if you require any further information.</p>'
             f'<p>Best regards,<br/>{getattr(request.user, "full_name", "") or request.user.username}</p>'
         )
@@ -529,31 +578,43 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             if primary and primary.email:
                 to_email = primary.email
 
-        # Create / reuse the draft
+        # Create / reuse the draft. Only reuse a draft we previously stamped
+        # for this order's dispatch — otherwise an unrelated draft (e.g. a
+        # bounce-reply) on the same comm would get hijacked.
+        draft = None
         if comm:
-            draft = EmailDraft.objects.filter(communication=comm, status='draft').order_by('-updated_at').first()
-        else:
-            draft = None
+            for cand in EmailDraft.objects.filter(communication=comm, status='draft').order_by('-updated_at'):
+                actions = (cand.editor_data or {}).get('auto_actions') or []
+                if any(a.get('type') == 'order_transition' and a.get('order_id') == str(order.id) and a.get('to_status') == 'dispatched' for a in actions):
+                    draft = cand
+                    break
         if not draft:
             draft = EmailDraft.objects.create(
                 communication=comm,
                 to_email=to_email or '',
                 subject=ai_subject,
                 body=ai_body,
-                cc='',
-                status='draft',
-                created_by=request.user,
-                edited_by=request.user,
+                cc='', status='draft',
+                created_by=request.user, edited_by=request.user,
             )
-        else:
-            update_fields = ['edited_by']
-            if not (draft.to_email or '').strip() and to_email:
-                draft.to_email = to_email; update_fields.append('to_email')
-            if not (draft.subject or '').strip():
-                draft.subject = ai_subject; update_fields.append('subject')
-            draft.body = ai_body; update_fields.append('body')
-            draft.edited_by = request.user
-            draft.save(update_fields=update_fields)
+        # Always overwrite to/subject/body so the dispatch content is what the
+        # user reviews, not stale text from a prior session.
+        update_fields = ['to_email', 'subject', 'body', 'edited_by']
+        draft.to_email = to_email or draft.to_email
+        draft.subject = ai_subject
+        draft.body = ai_body
+        draft.edited_by = request.user
+        draft.save(update_fields=update_fields)
+
+        # Stamp explicit auto-action so the post-send hook can transition the
+        # order regardless of attachment filenames.
+        ed = dict(draft.editor_data or {})
+        actions = list(ed.get('auto_actions') or [])
+        actions = [a for a in actions if not (a.get('type') == 'order_transition' and a.get('order_id') == str(order.id))]
+        actions.append({'type': 'order_transition', 'order_id': str(order.id), 'to_status': 'dispatched', 'from_status': 'docs_approved'})
+        ed['auto_actions'] = actions
+        draft.editor_data = ed
+        draft.save(update_fields=['editor_data'])
 
         # 5. Attach the dispatch documents — clear any old auto-attached docs
         # with our well-known prefixes so re-running cleanly replaces them.
@@ -584,16 +645,42 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         def _ext_of(doc):
             return (doc.name or doc.file.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
 
+        # Single-doc attachments (one document on the order)
         for doc_type, label in [
             ('client_invoice', 'Client_Invoice'),
             ('client_packing_list', 'Client_Packing_List'),
-            ('coa', 'COA'),
-            ('msds', 'MSDS'),
-            ('insurance', 'Insurance'),
         ]:
             doc = OrderDocument.objects.filter(order=order, doc_type=doc_type, is_deleted=False).order_by('-created_at').first()
             if doc:
                 _attach_doc(doc, f'{label}_{order_no}.{_ext_of(doc)}')
+
+        # Per-product attachments — one COA and one MSDS for every OrderItem.
+        # If an item has its own linked doc that's used; otherwise the
+        # order-level fallback (no order_item) is attached. Filenames are
+        # de-duplicated by sanitizing the product name.
+        def _safe(name):
+            import re
+            return re.sub(r'[^A-Za-z0-9_-]+', '_', (name or 'Product')).strip('_') or 'Product'
+
+        order_level_seen = {'coa': False, 'msds': False}
+        for doc_type, label in [('coa', 'COA'), ('msds', 'MSDS')]:
+            for item in order.items.all():
+                doc = OrderDocument.objects.filter(
+                    order=order, order_item=item, doc_type=doc_type, is_deleted=False,
+                ).order_by('-created_at').first()
+                if not doc:
+                    # Fall back to an order-level (unlinked) doc — but attach it
+                    # only once if there are multiple items.
+                    if order_level_seen[doc_type]:
+                        continue
+                    doc = OrderDocument.objects.filter(
+                        order=order, order_item__isnull=True, doc_type=doc_type, is_deleted=False,
+                    ).order_by('-created_at').first()
+                    if doc:
+                        order_level_seen[doc_type] = True
+                if doc:
+                    fname = f'{label}_{_safe(item.product_name)}_{order_no}.{_ext_of(doc)}'
+                    _attach_doc(doc, fname)
 
         # Factory stuffing photos: any image OrderDocument uploaded between
         # inspection_at and inspection_passed_at.
@@ -652,14 +739,18 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 2. Same thread-resolution algorithm as dispatch
+        # 2. Same thread-resolution algorithm as dispatch — prefer the order's
+        # anchored source communication first.
         from finance.models import ProformaInvoice
         comm = None
-        pi_with_src = ProformaInvoice.objects.filter(
-            order=order, source_communication__isnull=False,
-        ).order_by('-created_at').first()
-        if pi_with_src and pi_with_src.source_communication_id:
-            comm = Communication.objects.filter(id=pi_with_src.source_communication_id, is_deleted=False).first()
+        if order.source_communication_id:
+            comm = Communication.objects.filter(id=order.source_communication_id, is_deleted=False).first()
+        if not comm:
+            pi_with_src = ProformaInvoice.objects.filter(
+                order=order, source_communication__isnull=False,
+            ).order_by('-created_at').first()
+            if pi_with_src and pi_with_src.source_communication_id:
+                comm = Communication.objects.filter(id=pi_with_src.source_communication_id, is_deleted=False).first()
         if not comm:
             product_names = [it.product_name for it in order.items.all() if it.product_name]
             if product_names:
@@ -682,14 +773,61 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 client=order.client, comm_type='email', is_deleted=False,
             ).order_by('-created_at').first()
 
+        # 2.5 Optional estimated delivery time — saved as Note + injected into email
+        delivery_time = (request.data.get('estimated_delivery_time') or '').strip()
+        if delivery_time:
+            try:
+                WorkflowEventLog.objects.create(
+                    order=order, event_type='note',
+                    description=f'Estimated Delivery: {delivery_time}',
+                    metadata={'kind': 'estimated_delivery', 'value': delivery_time},
+                    triggered_by=request.user,
+                )
+            except Exception:
+                pass
+
+        # 2.6 Optional BL Number — saved as Note + injected into email
+        bl_number = (request.data.get('bl_number') or '').strip()
+        if bl_number:
+            try:
+                # Avoid duplicating an identical note created moments earlier
+                already = WorkflowEventLog.objects.filter(
+                    order=order, event_type='note',
+                    description=f'BL Number: {bl_number}',
+                ).exists()
+                if not already:
+                    WorkflowEventLog.objects.create(
+                        order=order, event_type='note',
+                        description=f'BL Number: {bl_number}',
+                        metadata={'kind': 'bl_number', 'value': bl_number},
+                        triggered_by=request.user,
+                    )
+            except Exception:
+                pass
+
+        # 2.7 Sync the linked Shipment record with BL number + estimated arrival
+        try:
+            from orders.workflow_service import sync_shipment_from_order
+            sync_shipment_from_order(
+                order,
+                bl_number=bl_number or None,
+                estimated_arrival=delivery_time or None,
+            )
+        except Exception:
+            pass
+
         # 3. Compose draft
         product_lines = ', '.join([(it.product_name or '') for it in order.items.all() if it.product_name])
         client_name = order.client.company_name if order.client else 'Valued Customer'
+        delivery_html = f'<p><strong>Estimated Delivery:</strong> {delivery_time}</p>' if delivery_time else ''
+        bl_html = f'<p><strong>Bill of Lading No.:</strong> {bl_number}</p>' if bl_number else ''
         ai_subject = f'Re: {comm.subject}' if comm and comm.subject else 'Shipment In Transit Update'
         ai_body = (
             f'<p>Dear {client_name},</p>'
             f'<p>We are pleased to inform you that your shipment '
             f'(<strong>{product_lines or "—"}</strong>) is now <strong>In Transit</strong>.</p>'
+            f'{bl_html}'
+            f'{delivery_html}'
             f'<p>Please find attached the <strong>Bill of Lading (BL)</strong> for your reference. '
             f'Tracking and ETA details are reflected on the BL.</p>'
             f'<p>We will keep you posted on the shipment progress. Please do not hesitate to reach out if you require anything further.</p>'
@@ -707,11 +845,15 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             if primary and primary.email:
                 to_email = primary.email
 
-        # 5. Create / reuse draft
+        # 5. Create / reuse draft. Only reuse a draft we previously stamped
+        # for this order's transit — avoid hijacking an unrelated draft.
+        draft = None
         if comm:
-            draft = EmailDraft.objects.filter(communication=comm, status='draft').order_by('-updated_at').first()
-        else:
-            draft = None
+            for cand in EmailDraft.objects.filter(communication=comm, status='draft').order_by('-updated_at'):
+                actions = (cand.editor_data or {}).get('auto_actions') or []
+                if any(a.get('type') == 'order_transition' and a.get('order_id') == str(order.id) and a.get('to_status') == 'in_transit' for a in actions):
+                    draft = cand
+                    break
         if not draft:
             draft = EmailDraft.objects.create(
                 communication=comm,
@@ -721,15 +863,22 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 cc='', status='draft',
                 created_by=request.user, edited_by=request.user,
             )
-        else:
-            update_fields = ['edited_by']
-            if not (draft.to_email or '').strip() and to_email:
-                draft.to_email = to_email; update_fields.append('to_email')
-            if not (draft.subject or '').strip():
-                draft.subject = ai_subject; update_fields.append('subject')
-            draft.body = ai_body; update_fields.append('body')
-            draft.edited_by = request.user
-            draft.save(update_fields=update_fields)
+        # Always overwrite to/subject/body so the user reviews fresh content.
+        draft.to_email = to_email or draft.to_email
+        draft.subject = ai_subject
+        draft.body = ai_body
+        draft.edited_by = request.user
+        draft.save(update_fields=['to_email', 'subject', 'body', 'edited_by'])
+
+        # Tag the draft with an explicit auto-action: transition to in_transit
+        # when this draft is sent.
+        ed = dict(draft.editor_data or {})
+        actions = list(ed.get('auto_actions') or [])
+        actions = [a for a in actions if not (a.get('type') == 'order_transition' and a.get('order_id') == str(order.id))]
+        actions.append({'type': 'order_transition', 'order_id': str(order.id), 'to_status': 'in_transit', 'from_status': 'dispatched'})
+        ed['auto_actions'] = actions
+        draft.editor_data = ed
+        draft.save(update_fields=['editor_data'])
 
         # 6. Replace any prior transit attachment, then attach the BL only
         TRANSIT_FILENAME_PREFIXES = ('BL_',)

@@ -23,7 +23,9 @@ ALLOWED_TRANSITIONS = {
     'docs_preparing': ['inspection', 'cancelled'],
     'inspection': ['inspection_passed', 'cancelled'],
     'inspection_passed': ['container_booked', 'cancelled'],
-    'container_booked': ['docs_approved', 'packed', 'cancelled'],
+    'container_booked': ['docs_approved', 'cancelled'],
+    # 'packed' is no longer reachable from the UI; kept here for backward
+    # compat in case any historical orders are stuck at that status.
     'packed': ['docs_approved', 'cancelled'],
     'docs_approved': ['dispatched', 'cancelled'],
     'dispatched': ['in_transit'],
@@ -63,7 +65,10 @@ def _all_order_items_have_pif(order):
 
 DEFAULT_READINESS_CHECKLIST = [
     {'label': 'Product', 'checked': False, 'required': True},
-    {'label': 'Bottle', 'checked': False, 'required': True},
+    {'label': 'Containers', 'checked': False, 'required': True},
+    {'label': 'Cotton Box', 'checked': False, 'required': False},
+    {'label': 'Leaflets', 'checked': False, 'required': False},
+    {'label': 'Batch No. Stickers', 'checked': False, 'required': False},
 ]
 
 
@@ -80,12 +85,6 @@ DOCS_APPROVED_REQUIRED_TYPES = (
     'client_packing_list',
     'logistic_invoice',
     'logistic_packing_list',
-    'coa',
-    'msds',
-    'dbk_declaration',
-    'examination_report',
-    'export_declaration',
-    'factory_stuffing',
 )
 
 
@@ -109,7 +108,139 @@ def _has_insurance_doc(order):
     return OrderDocument.objects.filter(order=order, doc_type='insurance', is_deleted=False).exists()
 
 
+def _try_parse_date(text):
+    """Best-effort parser for the user-entered estimated delivery text.
+    Returns a date object or None."""
+    if not text:
+        return None
+    try:
+        from dateutil import parser as _dp
+        dt = _dp.parse(str(text), dayfirst=True, fuzzy=True)
+        return dt.date() if hasattr(dt, 'date') else dt
+    except Exception:
+        return None
+
+
+def sync_shipment_from_order(order, *, bl_number=None, estimated_arrival=None,
+                             dispatch_date=None, actual_arrival=None):
+    """Push order-level info onto the linked Shipment record.
+
+    Only the fields explicitly supplied are touched. After updates, transit
+    days are recomputed as (actual_arrival or estimated_arrival) - dispatch_date.
+    """
+    from shipments.models import Shipment
+    shipment = Shipment.objects.filter(order=order).order_by('-created_at').first()
+    if not shipment:
+        return None
+
+    update_fields = []
+    if bl_number and bl_number != (shipment.bl_number or ''):
+        shipment.bl_number = bl_number
+        update_fields.append('bl_number')
+
+    if estimated_arrival is not None:
+        d = _try_parse_date(estimated_arrival) if not hasattr(estimated_arrival, 'year') else estimated_arrival
+        if d and shipment.estimated_arrival != d:
+            shipment.estimated_arrival = d
+            update_fields.append('estimated_arrival')
+
+    if dispatch_date is not None:
+        d = _try_parse_date(dispatch_date) if not hasattr(dispatch_date, 'year') else dispatch_date
+        if d and shipment.dispatch_date != d:
+            shipment.dispatch_date = d
+            update_fields.append('dispatch_date')
+
+    if actual_arrival is not None:
+        d = _try_parse_date(actual_arrival) if not hasattr(actual_arrival, 'year') else actual_arrival
+        if d and shipment.actual_arrival != d:
+            shipment.actual_arrival = d
+            update_fields.append('actual_arrival')
+
+    # Recompute transit_days when we have the bracketing dates
+    if shipment.dispatch_date:
+        end = shipment.actual_arrival or shipment.estimated_arrival
+        if end:
+            try:
+                days = (end - shipment.dispatch_date).days
+                if days >= 0 and shipment.transit_days != days:
+                    shipment.transit_days = days
+                    update_fields.append('transit_days')
+            except Exception:
+                pass
+
+    if update_fields:
+        shipment.save(update_fields=list(set(update_fields)))
+    return shipment
+
+
+# Map order status -> shipment status. Only the rows that have a meaningful
+# shipment-side equivalent are included; every other order status is left
+# untouched so the user can still edit shipment status manually if needed.
+ORDER_TO_SHIPMENT_STATUS = {
+    'factory_ready': 'factory_ready',
+    'inspection': 'inspection',
+    'inspection_passed': 'inspection_passed',
+    'container_booked': 'container_booked',
+    'packed': 'packed',
+    'dispatched': 'dispatched',
+    'in_transit': 'in_transit',
+    'arrived': 'delivered',
+    'delivered': 'delivered',
+}
+
+
+def _sync_shipment_status(order, new_status):
+    """Mirror an order's workflow status onto the linked Shipment record."""
+    target = ORDER_TO_SHIPMENT_STATUS.get(new_status)
+    if not target:
+        return None
+    from shipments.models import Shipment
+    shipment = Shipment.objects.filter(order=order).order_by('-created_at').first()
+    if not shipment:
+        return None
+    if shipment.status != target:
+        shipment.status = target
+        shipment.save(update_fields=['status'])
+    return shipment
+
+
+def _has_factory_stuffing_photo(order):
+    """True iff at least one image was uploaded (as a Note attachment or
+    OrderDocument) on or after the order entered Under Inspection."""
+    from orders.models import OrderDocument
+    if not order.inspection_at:
+        return False
+    qs = OrderDocument.objects.filter(
+        order=order, is_deleted=False, created_at__gte=order.inspection_at,
+    )
+    for doc in qs:
+        name = (doc.name or '').lower()
+        if any(name.endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+            return True
+    return False
+
+
 TRANSIT_REQUIRED_DOC_TYPES = ('bl', 'shipping_bill', 'schedule_list', 'coo')
+
+# Full set of docs that must be present before the order moves from
+# Documents Approved -> Dispatched. The dispatch email attaches these
+# (CI, CPL, COA, MSDS, Insurance, factory-stuffing photos) and the user
+# wants every document the buyer might expect to be in place before the
+# shipment is sent out. Non-DG remains optional, transit docs (BL etc.)
+# are checked separately at the In Transit gate.
+DISPATCH_REQUIRED_DOC_TYPES = (
+    'client_invoice',
+    'client_packing_list',
+    'logistic_invoice',
+    'logistic_packing_list',
+    'coa',
+    'msds',
+    'dbk_declaration',
+    'examination_report',
+    'export_declaration',
+    'factory_stuffing',
+    'insurance',
+)
 
 
 def _missing_transit_docs(order):
@@ -122,6 +253,45 @@ def _missing_transit_docs(order):
 
 def _has_transit_docs(order):
     return len(_missing_transit_docs(order)) == 0
+
+
+PER_ITEM_DOC_TYPES = ('coa', 'msds')
+
+
+def _missing_per_item_docs(order, doc_type):
+    """For COA/MSDS we need one document per OrderItem. Returns a list of
+    OrderItem PKs that are missing this doc_type."""
+    from orders.models import OrderDocument
+    items = list(order.items.all())
+    if not items:
+        return []
+    # Order-level docs (no order_item link) count toward every item, mainly
+    # for back-compat with older orders where COA/MSDS were uploaded once.
+    order_level_present = OrderDocument.objects.filter(
+        order=order, is_deleted=False, doc_type=doc_type, order_item__isnull=True,
+    ).exists()
+    if order_level_present and len(items) <= 1:
+        return []
+    linked_item_ids = set(OrderDocument.objects.filter(
+        order=order, is_deleted=False, doc_type=doc_type, order_item__isnull=False,
+    ).values_list('order_item_id', flat=True))
+    return [item.id for item in items if item.id not in linked_item_ids]
+
+
+def _missing_dispatch_docs(order):
+    from orders.models import OrderDocument
+    present = set(OrderDocument.objects.filter(
+        order=order, is_deleted=False, doc_type__in=DISPATCH_REQUIRED_DOC_TYPES,
+    ).values_list('doc_type', flat=True))
+    missing = [t for t in DISPATCH_REQUIRED_DOC_TYPES if t not in present and t not in PER_ITEM_DOC_TYPES]
+    for per_item_type in PER_ITEM_DOC_TYPES:
+        if per_item_type in DISPATCH_REQUIRED_DOC_TYPES and _missing_per_item_docs(order, per_item_type):
+            missing.append(per_item_type)
+    return missing
+
+
+def _has_all_dispatch_docs(order):
+    return len(_missing_dispatch_docs(order)) == 0
 
 
 def _readiness_required_complete(order):
@@ -147,19 +317,25 @@ TRANSITION_REQUIREMENTS = {
     },
     'docs_preparing': {
         'check': lambda order: order.status != 'factory_ready' or _readiness_required_complete(order),
-        'message': 'Tick the required readiness items (Product and Bottle) before advancing to Documents Preparing.',
+        'message': 'Tick the required readiness items (Product and Containers) before advancing to Documents Preparing.',
     },
     'inspection': {
         'check': lambda order: order.status != 'docs_preparing' or _docs_approval_ready(order),
         'message': 'Attach all required documents (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List, COA, MSDS, DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing) before advancing.',
     },
     'container_booked': {
-        'check': lambda order: order.status != 'inspection_passed' or _readiness_checklist_complete(order),
-        'message': 'Tick every item in the Product Readiness checklist (Product, Bottle, and any added items) before advancing to Container Booked.',
+        'check': lambda order: order.status != 'inspection_passed' or (
+            _readiness_checklist_complete(order) and _has_factory_stuffing_photo(order)
+        ),
+        'message': 'Tick every item in the Product Readiness checklist AND upload at least one factory-stuffing photo before advancing to Container Booked.',
+    },
+    'docs_approved': {
+        'check': lambda order: _docs_approval_ready(order),
+        'message': 'Generate the required documents (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List) before advancing to Documents Approved.',
     },
     'dispatched': {
-        'check': lambda order: _has_insurance_doc(order),
-        'message': 'Upload the Insurance document before dispatching.',
+        'check': lambda order: _has_all_dispatch_docs(order),
+        'message': 'Every required document (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List, COA, MSDS, DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing, Insurance) must be uploaded before dispatching — the dispatch email goes out with these attachments.',
     },
     'in_transit': {
         'check': lambda order: order.status != 'dispatched' or _has_transit_docs(order),
@@ -169,10 +345,10 @@ TRANSITION_REQUIREMENTS = {
 
 # Statuses that trigger auto-email to client
 # Statuses that trigger an automatic client email on transition.
-# 'dispatched' and 'in_transit' are intentionally NOT in this list — those
-# emails are handled by the dispatch-mail-draft / transit-mail-draft flows
-# which build a proper AI draft on the existing thread for the user to send.
-AUTO_EMAIL_STATUSES = ['inspection_passed', 'arrived']
+# Most stages now build a manual AI draft on the existing thread for the user
+# to review/send (Dispatched, In Transit, Delivery Acknowledgment) — no
+# templated auto-emails. Only 'arrived' still fires a confirmation by default.
+AUTO_EMAIL_STATUSES = ['arrived']
 
 # Status timestamp field mapping
 STATUS_TIMESTAMP_MAP = {
@@ -302,6 +478,23 @@ def transition_order(order, new_status, user, remarks=''):
     if new_status == 'po_received':
         _auto_create_shipment(order, user)
 
+    # 10. Keep the linked Shipment dates in sync with the order workflow
+    try:
+        from datetime import date as _date
+        if new_status == 'dispatched':
+            sync_shipment_from_order(order, dispatch_date=_date.today())
+        elif new_status == 'arrived':
+            sync_shipment_from_order(order, actual_arrival=_date.today())
+    except Exception as _e:
+        logger.warning(f'Failed to sync Shipment dates for {order.order_number}: {_e}')
+
+    # 11. Mirror the order's workflow status onto the linked Shipment so the
+    # Shipments page reflects Dispatched / In Transit / Delivered automatically.
+    try:
+        _sync_shipment_status(order, new_status)
+    except Exception as _e:
+        logger.warning(f'Failed to sync Shipment status for {order.order_number}: {_e}')
+
     logger.info(f'Order {order.order_number}: {old_status} → {new_status} by {user.username}')
     return order
 
@@ -417,25 +610,57 @@ def get_order_timeline(order):
         ts_field = STATUS_TIMESTAMP_MAP.get(s)
         timestamp = getattr(order, ts_field) if ts_field else None
 
+        # `arrived` is the terminal Delivered step — mark it completed
+        # once reached so the timeline shows a green checkmark and the next
+        # focus shifts to Feedback / FIRC.
+        if s == 'arrived':
+            state = 'completed' if status_idx >= i else 'upcoming'
+        else:
+            state = 'completed' if i < status_idx else 'current' if i == status_idx else 'upcoming'
+
         timeline.append({
             'status': s,
             'label': get_status_display(s),
-            'state': 'completed' if i < status_idx else 'current' if i == status_idx else 'upcoming',
+            'state': state,
             'timestamp': timestamp.isoformat() if timestamp else None,
         })
 
-    # Add Feedback as the last step
-    has_feedback = hasattr(order, 'feedback') and order.feedback is not None
+    has_feedback = False
     try:
         has_feedback = order.feedback is not None
     except Exception:
         has_feedback = False
-    feedback_state = 'completed' if has_feedback else ('current' if status_idx >= len(all_statuses) - 1 and order.status == 'arrived' else 'upcoming')
+
+    has_firc = bool(getattr(order, 'firc_received_at', None))
+
+    # Feedback step — completed when feedback is recorded; current when the
+    # order has reached arrived but feedback is still pending.
+    if has_feedback:
+        feedback_state = 'completed'
+    elif order.status == 'arrived':
+        feedback_state = 'current'
+    else:
+        feedback_state = 'upcoming'
     timeline.append({
         'status': 'feedback',
         'label': 'Feedback',
         'state': feedback_state,
         'timestamp': order.feedback.created_at.isoformat() if has_feedback else None,
+    })
+
+    # FIRC — 11th and final step. Current when feedback is in (or order
+    # arrived) but FIRC is still pending; completed once firc_received_at is set.
+    if has_firc:
+        firc_state = 'completed'
+    elif has_feedback:
+        firc_state = 'current'
+    else:
+        firc_state = 'upcoming'
+    timeline.append({
+        'status': 'firc',
+        'label': 'FIRC',
+        'state': firc_state,
+        'timestamp': order.firc_received_at.isoformat() if has_firc and order.firc_received_at else None,
     })
 
     return timeline
@@ -483,6 +708,7 @@ def _auto_create_shipment(order, user):
             freight_type=order.freight_terms or '',
             port_of_loading=port_of_loading,
             port_of_discharge=port_of_discharge,
+            country=getattr(order.client, 'country', '') or '',
         )
         logger.info(f'Auto-created shipment {shipment_number} for order {order.order_number}')
     except Exception as e:

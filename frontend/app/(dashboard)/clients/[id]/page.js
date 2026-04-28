@@ -41,12 +41,12 @@ const TABS = [
 ];
 
 function fmtDate(d) {
-  if (!d) return "\u2014";
-  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; }
+  if (!d) return "—";
+  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; }
 }
 function fmtDateTime(d) {
-  if (!d) return "\u2014";
-  try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "\u2014"; }
+  if (!d) return "—";
+  try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "—"; }
 }
 
 // ── Last Conversation Summary ──
@@ -211,7 +211,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                 }}
               />
             </div>
-            <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "\u2014"}</span></div>
+            <div><span className="text-gray-500">Business Type:</span> <span className="ml-1">{client.business_type || "—"}</span></div>
             <div><span className="text-gray-500">Currency:</span> <span className="ml-1">{client.preferred_currency}</span></div>
             <div>
               <span className="text-gray-500">Account Owner:</span>
@@ -260,7 +260,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                   ))}
                 </select>
               ) : (
-                <span className="ml-1">{client.primary_executive_name || client.executive_name || "\u2014"}</span>
+                <span className="ml-1">{client.primary_executive_name || client.executive_name || "—"}</span>
               )}
             </div>
             <div>
@@ -311,7 +311,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                   ))}
                 </select>
               ) : (
-                <span className="ml-1">{client.shadow_executive_name || "\u2014"}</span>
+                <span className="ml-1">{client.shadow_executive_name || "—"}</span>
               )}
             </div>
             <div className="sm:col-span-2"><span className="text-gray-500">Address:</span>
@@ -388,7 +388,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
                 <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{c.name} {c.is_primary && <span className="text-xs text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">(Primary)</span>}</p>
-                    <p className="text-xs text-gray-500">{c.designation}{c.designation && c.email ? " \u00b7 " : ""}{c.email}</p>
+                    <p className="text-xs text-gray-500">{c.designation}{c.designation && c.email ? " · " : ""}{c.email}</p>
                     <div className="flex gap-3 mt-1 text-xs text-gray-400">
                       {c.phone && <span>Phone: {c.phone}</span>}
                       {c.whatsapp && <span>WA: {c.whatsapp}</span>}
@@ -1175,8 +1175,8 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         </span>
       );
     }},
-    { key: "subject", label: "Subject", render: (row) => <span className="font-medium">{row.subject || "\u2014"}</span> },
-    { key: "external", label: "From/To", render: (row) => <span className="text-sm text-gray-500">{row.external_email || row.external_phone || "\u2014"}</span> },
+    { key: "subject", label: "Subject", render: (row) => <span className="font-medium">{row.subject || "—"}</span> },
+    { key: "external", label: "From/To", render: (row) => <span className="text-sm text-gray-500">{row.external_email || row.external_phone || "—"}</span> },
     { key: "attachments", label: "", render: (row) => row.attachments && row.attachments.length > 0 && (
       <span className="text-xs text-gray-400" title={`${row.attachments.length} attachment(s)`}>
         <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
@@ -1887,8 +1887,8 @@ function TasksTab({ clientId, activeTab, client }) {
         {row.status_note && <p className="text-[10px] text-gray-400 mt-0.5">{row.status_note}</p>}
       </div>
     )},
-    { key: "owner_name", label: "Assigned To", render: (row) => <span className="text-sm">{row.owner_name || "\u2014"}</span> },
-    { key: "creator_name", label: "Assigned By", render: (row) => <span className="text-sm text-gray-500">{row.creator_name || "\u2014"}</span> },
+    { key: "owner_name", label: "Assigned To", render: (row) => <span className="text-sm">{row.owner_name || "—"}</span> },
+    { key: "creator_name", label: "Assigned By", render: (row) => <span className="text-sm text-gray-500">{row.creator_name || "—"}</span> },
     { key: "priority", label: "Priority", render: (row) => <StatusBadge status={row.priority} /> },
     { key: "status", label: "Status", render: (row) => (
       <div onClick={e => e.stopPropagation()}>
@@ -2053,7 +2053,7 @@ function QuotationsTab({ clientId, activeTab }) {
     { key: "product_name", label: "Product", render: (row) => row.product_name || "General" },
     { key: "source", label: "Source", render: (row) => <StatusBadge status={row.source} /> },
     { key: "stage", label: "Stage", render: (row) => <StatusBadge status={row.stage} /> },
-    { key: "expected_value", label: "Value", render: (row) => row.expected_value ? `$${Number(row.expected_value).toLocaleString()}` : "\u2014" },
+    { key: "expected_value", label: "Value", render: (row) => row.expected_value ? `$${Number(row.expected_value).toLocaleString()}` : "—" },
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
   ];
 
@@ -2075,7 +2075,7 @@ function QuotationsTab({ clientId, activeTab }) {
         {row.version > 1 && <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium">v{row.version}</span>}
       </div>
     )},
-    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
   ];
@@ -2084,7 +2084,7 @@ function QuotationsTab({ clientId, activeTab }) {
     { key: "invoice_number", label: "Number", render: (row) => (
       <button onClick={() => row.status === "draft" ? openPI(row) : viewPdf("pi", row.id, row.invoice_number)} className="font-medium text-indigo-600 hover:text-indigo-700">{row.invoice_number}</button>
     )},
-    { key: "total", label: "Value", render: (row) => row.total ? `${row.currency || "USD"} ${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "total", label: "Value", render: (row) => row.total ? `${row.currency || "USD"} ${Number(row.total).toLocaleString()}` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "invoice_date", label: "Date", render: (row) => fmtDate(row.invoice_date) },
   ];
@@ -2194,7 +2194,7 @@ function OrdersTab({ clientId, activeTab }) {
   const { data, loading } = useTabData(clientId, "/orders/", activeTab, "orders");
   const columns = [
     { key: "order_number", label: "Order #", render: (row) => <span className="font-medium">{row.order_number}</span> },
-    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "\u2014" },
+    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "delivery_terms", label: "Terms" },
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
@@ -2208,9 +2208,9 @@ function ShipmentsTab({ clientId, activeTab }) {
   const columns = [
     { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-medium">{row.shipment_number}</span> },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "container_number", label: "Container", render: (row) => row.container_number || "\u2014" },
-    { key: "port_of_loading", label: "Loading Port", render: (row) => row.port_of_loading || "\u2014" },
-    { key: "port_of_discharge", label: "Discharge Port", render: (row) => row.port_of_discharge || "\u2014" },
+    { key: "container_number", label: "Container", render: (row) => row.container_number || "—" },
+    { key: "port_of_loading", label: "Loading Port", render: (row) => row.port_of_loading || "—" },
+    { key: "port_of_discharge", label: "Discharge Port", render: (row) => row.port_of_discharge || "—" },
     { key: "dispatch_date", label: "Dispatch", render: (row) => fmtDate(row.dispatch_date) },
     { key: "estimated_arrival", label: "ETA", render: (row) => fmtDate(row.estimated_arrival) },
   ];
@@ -2234,10 +2234,10 @@ function SamplesTab({ clientId, activeTab }) {
   };
 
   const columns = [
-    { key: "product_name", label: "Product", render: (row) => row.product_name || "\u2014" },
+    { key: "product_name", label: "Product", render: (row) => row.product_name || "—" },
     { key: "quantity", label: "Qty" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "\u2014" },
+    { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "—" },
     { key: "dispatch_date", label: "Dispatched", render: (row) => fmtDate(row.dispatch_date) },
     { key: "actions", label: "", render: (row) => ["delivered", "feedback_pending"].includes(row.status) && (
       <button onClick={(e) => { e.stopPropagation(); setShowFeedback(row.id); }} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Add Feedback</button>
@@ -2296,7 +2296,7 @@ function FinanceTab({ clientId, activeTab }) {
     { key: "currency", label: "Currency" },
     { key: "mode", label: "Mode", render: (row) => <StatusBadge status={row.mode} /> },
     { key: "payment_date", label: "Date", render: (row) => fmtDate(row.payment_date) },
-    { key: "reference", label: "Reference", render: (row) => row.reference || "\u2014" },
+    { key: "reference", label: "Reference", render: (row) => row.reference || "—" },
   ];
 
   return (
@@ -2350,10 +2350,10 @@ function MeetingsTab({ clientId, activeTab }) {
 
   const columns = [
     { key: "platform", label: "Platform", render: (row) => <StatusBadge status={row.platform} /> },
-    { key: "agenda", label: "Agenda", render: (row) => <span className="font-medium">{row.agenda || "\u2014"}</span> },
+    { key: "agenda", label: "Agenda", render: (row) => <span className="font-medium">{row.agenda || "—"}</span> },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "scheduled_at", label: "Scheduled", render: (row) => fmtDateTime(row.scheduled_at) },
-    { key: "duration_minutes", label: "Duration", render: (row) => row.duration_minutes ? `${row.duration_minutes} min` : "\u2014" },
+    { key: "duration_minutes", label: "Duration", render: (row) => row.duration_minutes ? `${row.duration_minutes} min` : "—" },
     { key: "meeting_link", label: "", render: (row) => row.meeting_link && (
       <a href={row.meeting_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Join</a>
     )},
@@ -2534,7 +2534,7 @@ function PriceListTab({ clientId, activeTab }) {
 
   const columns = [
     { key: "product_name", label: "Product Name", render: (row) => <span className="font-medium">{row.product_name}</span> },
-    { key: "client_product_name", label: "Client's Name", render: (row) => row.client_product_name || "—" },
+    { key: "client_product_name", label: "Brand Name", render: (row) => row.client_product_name || "—" },
     { key: "unit_price", label: "Price", render: (row) => <span className="font-semibold text-green-700">{row.currency} {Number(row.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> },
     { key: "unit", label: "Unit" },
     { key: "moq", label: "MOQ", render: (row) => row.moq || "—" },
@@ -2621,7 +2621,8 @@ function PriceListTab({ clientId, activeTab }) {
 }
 
 // ── Purchase History Tab ──
-function PurchaseHistoryTab({ clientId, activeTab }) {
+function PurchaseHistoryTab({ clientId, activeTab, clientCountry }) {
+  const router = useRouter();
   const { data, loading, reload } = useTabData(clientId, "/clients/purchase-history/", activeTab, "purchase_history");
   const [showModal, setShowModal] = useState(false);
   const phUser = useSelector((state) => state.auth.user);
@@ -2675,19 +2676,74 @@ function PurchaseHistoryTab({ clientId, activeTab }) {
 
   const totalValue = data.reduce((sum, r) => sum + (parseFloat(r.total_price) || 0), 0);
 
+  const fmtMonthYear = (d) => {
+    if (!d) return "—";
+    try { return format(new Date(d), "MMM yyyy"); } catch { return "—"; }
+  };
+
+  // Group per-product purchase rows into a single row per invoice/order so the
+  // page reads as an invoice-wise list (one row per Sales Order) instead of
+  // showing every line item separately.
+  const groupedData = (() => {
+    const groups = new Map();
+    for (const r of data) {
+      const key = (r.invoice_number || "").trim() || r.order_number || `__pid_${r.id}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          ids: [],
+          invoice_number: r.invoice_number || "",
+          order_number: r.order_number || "",
+          order: r.order,
+          purchase_date: r.purchase_date,
+          currency: r.currency,
+          status: r.status,
+          unit: r.unit,
+          quantity: 0,
+          unit_price_first: parseFloat(r.unit_price) || 0,
+          mixed_unit: false,
+          mixed_unit_price: false,
+          total_price: 0,
+          line_count: 0,
+        });
+      }
+      const g = groups.get(key);
+      g.ids.push(r.id);
+      g.quantity += parseFloat(r.quantity) || 0;
+      g.total_price += parseFloat(r.total_price) || 0;
+      g.line_count += 1;
+      if (r.unit && g.unit && r.unit !== g.unit) g.mixed_unit = true;
+      const up = parseFloat(r.unit_price) || 0;
+      if (g.unit_price_first && up && up !== g.unit_price_first) g.mixed_unit_price = true;
+      // Keep the most recent purchase_date in the group
+      if (r.purchase_date && (!g.purchase_date || new Date(r.purchase_date) > new Date(g.purchase_date))) {
+        g.purchase_date = r.purchase_date;
+      }
+    }
+    return Array.from(groups.values());
+  })();
+
   const columns = [
-    { key: "purchase_date", label: "Purchase Date", render: (row) => fmtDate(row.purchase_date) },
-    { key: "product_name", label: "Product", render: (row) => <span className="font-medium">{row.product_name}</span> },
-    { key: "quantity", label: "Quantity", render: (row) => `${Number(row.quantity).toLocaleString()} ${row.unit}` },
-    { key: "unit_price", label: "Unit Price", render: (row) => `${row.currency} ${Number(row.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
-    { key: "total_price", label: "Total", render: (row) => <span className="font-semibold text-green-700">{row.currency} {Number(row.total_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> },
-    { key: "invoice_number", label: "Invoice #", render: (row) => row.invoice_number || "—" },
-    { key: "order_number", label: "Order #", render: (row) => row.order_number || "—" },
+    { key: "purchase_date", label: "Purchase Date", render: (row) => fmtMonthYear(row.purchase_date) },
+    { key: "invoice_number", label: "Invoice No", render: (row) => <span className="font-medium">{row.invoice_number || row.order_number || "—"}</span> },
+    { key: "quantity", label: "Quantity", render: (row) => row.mixed_unit ? `${Number(row.quantity).toLocaleString()} (mixed)` : `${Number(row.quantity).toLocaleString()} ${row.unit}` },
+    { key: "unit_price", label: "Unit Price", render: (row) => row.mixed_unit_price ? "—" : `${row.currency} ${Number(row.unit_price_first).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+    { key: "total_price", label: "Invoice Value", render: (row) => <span className="font-semibold text-green-700">{row.currency} {Number(row.total_price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> },
+    { key: "country", label: "Country", render: () => clientCountry || "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     ...(canEdit ? [{ key: "actions", label: "", render: (row) => (
-      <div className="flex gap-1">
-        <button onClick={() => handleEdit(row)} className="px-2 py-1 text-xs text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">Edit</button>
-        <button onClick={() => handleDelete(row.id)} className="px-2 py-1 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100">Delete</button>
+      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={async () => {
+            if (!confirm(`Remove all ${row.line_count} line item${row.line_count > 1 ? "s" : ""} on this invoice?`)) return;
+            try {
+              for (const pid of row.ids) await api.delete(`/clients/purchase-history/${pid}/`);
+              toast.success("Removed");
+              reload();
+            } catch { toast.error("Failed to delete"); }
+          }}
+          className="px-2 py-1 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100"
+        >Delete</button>
       </div>
     )}] : []),
   ];
@@ -2696,12 +2752,22 @@ function PurchaseHistoryTab({ clientId, activeTab }) {
     <>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-sm text-gray-500">{data.length} purchase{data.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-gray-500">{groupedData.length} invoice{groupedData.length !== 1 ? "s" : ""}</p>
           {totalValue > 0 && <p className="text-xs text-gray-400">Total: USD {totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>}
         </div>
-        {canEdit && <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Purchase</button>}
+        <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Purchase History</button>
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No purchase history" emptyDescription="Record purchases for this client" />
+      <DataTable
+        columns={columns}
+        data={groupedData}
+        loading={loading}
+        emptyTitle="No purchase history"
+        emptyDescription="Record purchases for this client"
+        onRowClick={(row) => {
+          const orderId = row.order || row.order_id;
+          if (orderId) router.push(`/orders/${orderId}`);
+        }}
+      />
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditing(null); }} title={editing ? "Edit Purchase" : "Record Purchase"} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -2893,7 +2959,7 @@ export default function ClientDetailPage() {
     <div>
       <PageHeader
         title={client.company_name}
-        subtitle={`${client.country || "\u2014"} \u00b7 ${client.business_type || "\u2014"}`}
+        subtitle={client.business_type || ""}
         action={
           <div className="flex items-center gap-2">
             <AISummaryButton
@@ -2939,7 +3005,7 @@ export default function ClientDetailPage() {
       {activeTab === "finance" && <FinanceTab clientId={id} activeTab={activeTab} />}
       {activeTab === "meetings" && <MeetingsTab clientId={id} activeTab={activeTab} />}
       {activeTab === "price_list" && <PriceListTab clientId={id} activeTab={activeTab} />}
-      {activeTab === "purchase_history" && <PurchaseHistoryTab clientId={id} activeTab={activeTab} />}
+      {activeTab === "purchase_history" && <PurchaseHistoryTab clientId={id} activeTab={activeTab} clientCountry={client.country || ""} />}
       {activeTab === "documents" && <DocumentsTab clientId={id} activeTab={activeTab} />}
     </div>
   );

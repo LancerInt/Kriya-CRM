@@ -9,6 +9,27 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 
+const RETENTION_DAYS = 30;
+
+// Compute the "auto-purge in" countdown live from deleted_at, so the value
+// updates without requiring a page reload.
+function computePurge(deletedAt) {
+  if (!deletedAt) return { label: `${RETENTION_DAYS} days`, daysLeft: RETENTION_DAYS };
+  const purgeAt = new Date(deletedAt).getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const ms = purgeAt - Date.now();
+  if (ms <= 0) return { label: "Purging soon", daysLeft: 0 };
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  let label;
+  if (days >= 2) label = `${days}d ${hours}h`;
+  else if (days === 1) label = `1d ${hours}h`;
+  else if (hours >= 1) label = `${hours}h ${minutes}m`;
+  else label = `${minutes}m`;
+  return { label, daysLeft: days };
+}
+
 export default function RecycleBinPage() {
   const user = useSelector((state) => state.auth.user);
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
@@ -19,6 +40,13 @@ export default function RecycleBinPage() {
   const [archivedSenders, setArchivedSenders] = useState([]);
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Re-render every minute so the auto-purge countdown stays current.
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const handlePreview = async (item) => {
     setPreviewLoading(true);
@@ -143,13 +171,17 @@ export default function RecycleBinPage() {
                     {item.deleted_at ? format(new Date(item.deleted_at), "MMM d, yyyy h:mm a") : "\u2014"}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      item.days_left <= 5 ? "bg-red-50 text-red-700" :
-                      item.days_left <= 15 ? "bg-amber-50 text-amber-700" :
-                      "bg-gray-100 text-gray-600"
-                    }`}>
-                      {item.days_left} day{item.days_left !== 1 ? "s" : ""}
-                    </span>
+                    {(() => {
+                      const { label, daysLeft } = computePurge(item.deleted_at);
+                      const tone = daysLeft <= 5 ? "bg-red-50 text-red-700"
+                        : daysLeft <= 15 ? "bg-amber-50 text-amber-700"
+                        : "bg-gray-100 text-gray-600";
+                      return (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tone}`} title={item.deleted_at ? `Deleted ${format(new Date(item.deleted_at), "MMM d, yyyy h:mm a")}` : ""}>
+                          {label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">

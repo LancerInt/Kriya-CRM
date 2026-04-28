@@ -414,6 +414,8 @@ class ProformaInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             total=pi.total,
             notes=f'Converted from PI {pi.invoice_number}',
             created_by=request.user,
+            # Inherit the inquiry email so order-stage messages stay threaded.
+            source_communication=getattr(pi, 'source_communication', None),
         )
 
         for item in pi.items.all():
@@ -1077,6 +1079,162 @@ class PackingInstructionFormViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+    @action(detail=True, methods=['post'], url_path='replace-pdf')
+    def replace_pdf(self, request, pk=None):
+        """Replace the PIF's PDF with an uploaded file. Mirrors the file into
+        the order's Documents tab, replacing any prior PIF doc with this name."""
+        from django.core.files.base import ContentFile
+        from orders.models import OrderDocument
+        pif = self.get_object()
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'error': 'File is required'}, status=status.HTTP_400_BAD_REQUEST)
+        content = upload.read()
+        ext = (upload.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
+        filename = f'{pif.pif_number}.{ext}'
+        pif.pdf_file.save(filename, ContentFile(content), save=True)
+        # Mirror into Documents tab, replacing any prior entry for this PIF
+        OrderDocument.objects.filter(order=pif.order, doc_type='pif', name__startswith=pif.pif_number).delete()
+        OrderDocument.objects.create(
+            order=pif.order, doc_type='pif', name=filename,
+            file=pif.pdf_file, uploaded_by=request.user,
+        )
+        return Response(PackingInstructionFormSerializer(pif).data)
+
+    @action(detail=False, methods=['post'], url_path='attach-all-to-email')
+    def attach_all_to_email(self, request):
+        """Build / refresh an email draft on the order's email thread with all
+        generated PIFs for that order attached. Mirrors the dispatch / transit
+        flow: stamps `editor_data.auto_actions` so post-send auto-handles, and
+        re-uses any existing draft we previously stamped for this order."""
+        from communications.models import Communication, EmailDraft, DraftAttachment
+        from django.core.files.base import ContentFile
+        from django.db.models import Q
+        from orders.models import Order
+
+        order_id = request.data.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        pifs = list(PackingInstructionForm.objects.filter(order=order).order_by('created_at'))
+        if not pifs:
+            return Response({'error': 'No PIFs generated for this order yet.'}, status=status.HTTP_400_BAD_REQUEST)
+        # All PIFs must have a generated PDF before attaching
+        missing = [p for p in pifs if not p.pdf_file]
+        if missing:
+            return Response({
+                'error': 'Some PIFs have no generated PDF yet — open each and click "Save & Generate PDF" first.',
+                'missing': [str(p.id) for p in missing],
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Resolve the same email thread as dispatch / transit
+        comm = None
+        pi_with_src = ProformaInvoice.objects.filter(
+            order=order, source_communication__isnull=False,
+        ).order_by('-created_at').first()
+        if pi_with_src and pi_with_src.source_communication_id:
+            comm = Communication.objects.filter(id=pi_with_src.source_communication_id, is_deleted=False).first()
+        if not comm:
+            product_names = [it.product_name for it in order.items.all() if it.product_name]
+            if product_names:
+                product_q = Q()
+                for name in product_names:
+                    product_q |= Q(subject__icontains=name) | Q(body__icontains=name)
+                comm = Communication.objects.filter(
+                    client=order.client, comm_type='email', direction='inbound', is_deleted=False,
+                ).filter(product_q).order_by('-created_at').first()
+        if not comm and order.order_number:
+            comm = Communication.objects.filter(
+                client=order.client, comm_type='email', is_deleted=False,
+            ).filter(Q(subject__icontains=order.order_number) | Q(body__icontains=order.order_number)).order_by('-created_at').first()
+        if not comm:
+            comm = Communication.objects.filter(
+                client=order.client, comm_type='email', direction='inbound', is_deleted=False,
+            ).order_by('-created_at').first()
+        if not comm:
+            comm = Communication.objects.filter(
+                client=order.client, comm_type='email', is_deleted=False,
+            ).order_by('-created_at').first()
+
+        client_name = order.client.company_name if order.client else 'Valued Customer'
+        product_lines = ', '.join([(it.product_name or '') for it in order.items.all() if it.product_name])
+        ai_subject = f'Re: {comm.subject}' if comm and comm.subject else 'Packing Instructions Form'
+        ai_body = (
+            f'<p>Dear {client_name},</p>'
+            f'<p>Please find attached the <strong>Packing Instructions Form (PIF)</strong> for your '
+            f'order containing <strong>{product_lines or "—"}</strong>. Kindly review and confirm so we '
+            f'can proceed with production accordingly.</p>'
+            f'<p>Should you require any clarification or changes, please do not hesitate to reach out.</p>'
+            f'<p>Best regards,<br/>{getattr(request.user, "full_name", "") or request.user.username}</p>'
+        )
+
+        # Resolve recipient
+        to_email = ''
+        if comm and getattr(comm, 'external_email', ''):
+            to_email = comm.external_email
+        if not to_email:
+            from clients.models import Contact
+            primary = Contact.objects.filter(client=order.client, is_primary=True).first() \
+                or Contact.objects.filter(client=order.client).first()
+            if primary and primary.email:
+                to_email = primary.email
+
+        # Re-use a draft we previously stamped for THIS order's PIF flow
+        draft = None
+        if comm:
+            for cand in EmailDraft.objects.filter(communication=comm, status='draft').order_by('-updated_at'):
+                actions = (cand.editor_data or {}).get('auto_actions') or []
+                if any(a.get('type') == 'pif_attached' and a.get('order_id') == str(order.id) for a in actions):
+                    draft = cand
+                    break
+        if not draft:
+            draft = EmailDraft.objects.create(
+                communication=comm,
+                to_email=to_email or '',
+                subject=ai_subject,
+                body=ai_body,
+                cc='', status='draft',
+                created_by=request.user, edited_by=request.user,
+            )
+        # Always overwrite content
+        draft.to_email = to_email or draft.to_email
+        draft.subject = ai_subject
+        draft.body = ai_body
+        draft.edited_by = request.user
+        draft.save(update_fields=['to_email', 'subject', 'body', 'edited_by'])
+
+        # Stamp metadata so the post-send hook ignores attachment-name parsing here
+        ed = dict(draft.editor_data or {})
+        actions = list(ed.get('auto_actions') or [])
+        actions = [a for a in actions if not (a.get('type') == 'pif_attached' and a.get('order_id') == str(order.id))]
+        actions.append({'type': 'pif_attached', 'order_id': str(order.id)})
+        ed['auto_actions'] = actions
+        draft.editor_data = ed
+        draft.save(update_fields=['editor_data'])
+
+        # Replace any prior PIF_ attachments and re-attach every PIF
+        DraftAttachment.objects.filter(draft=draft, filename__startswith='PIF_').delete()
+        for pif in pifs:
+            try:
+                pif.pdf_file.open('rb')
+                content = pif.pdf_file.read()
+                pif.pdf_file.close()
+            except Exception:
+                continue
+            filename = f'PIF_{pif.pif_number}.pdf'
+            att = DraftAttachment(draft=draft, filename=filename, file_size=len(content))
+            att.file.save(filename, ContentFile(content), save=True)
+
+        return Response({
+            'draft_id': str(draft.id),
+            'communication_id': str(comm.id) if comm else None,
+            'pif_count': len(pifs),
+        })
 
 
 class ComplianceDocumentViewSet(viewsets.ModelViewSet):

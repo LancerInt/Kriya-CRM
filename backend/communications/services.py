@@ -89,7 +89,12 @@ def get_client_email_recipients(client, source_quotation=None, source_communicat
             is_active=True, role__in=['admin', 'manager']
         ).exclude(email='').values_list('email', flat=True)
     )
+    # Temporary exclusion list — addresses that bounce / aren't deliverable.
+    # Remove from this set when the mailbox is back online.
+    AUTO_CC_EXCLUDE = {'shobana@kriya.com'}
     for em in admin_mgr_emails:
+        if em.lower() in AUTO_CC_EXCLUDE:
+            continue
         if em.lower() != to_email.lower() and em.lower() not in [e.lower() for e in cc_parts]:
             cc_parts.append(em)
 
@@ -138,36 +143,98 @@ class ContactMatcher:
         return None, None
 
 
+_RE_PREFIX_RE = None  # lazy compile
+
+
+def normalize_reply_subject(subject):
+    """Return ``Re: <subject>`` with a single ``Re:`` prefix.
+
+    Strips redundant ``Re:`` / ``RE:`` / ``Re[2]:`` / etc. so we never end up
+    with ``Re: Re: Re: ...``. Falls back to "Re:" if subject is empty.
+    """
+    global _RE_PREFIX_RE
+    if _RE_PREFIX_RE is None:
+        import re as _re
+        _RE_PREFIX_RE = _re.compile(r'^\s*(?:re|fwd?|aw|antw)(?:\s*\[\d+\])?\s*:\s*', _re.IGNORECASE)
+
+    s = (subject or '').strip()
+    while True:
+        new = _RE_PREFIX_RE.sub('', s, count=1).strip()
+        if new == s:
+            break
+        s = new
+    return f'Re: {s}' if s else 'Re:'
+
+
+def _build_references(source):
+    """Build a properly chained References header value from a source
+    Communication. The chain is: existing References + Message-ID, in order,
+    deduplicated, space-separated. Falls back gracefully when fields are
+    missing.
+    """
+    if not source:
+        return ''
+    parts = []
+    seen = set()
+    refs_raw = (getattr(source, 'email_references', '') or '').strip()
+    if refs_raw:
+        for tok in refs_raw.split():
+            tok = tok.strip()
+            if tok and tok not in seen:
+                parts.append(tok)
+                seen.add(tok)
+    msg_id = (getattr(source, 'email_message_id', '') or '').strip()
+    if msg_id and msg_id not in seen:
+        parts.append(msg_id)
+        seen.add(msg_id)
+    return ' '.join(parts)
+
+
 def get_thread_headers(client, source_communication=None):
-    """Find In-Reply-To and References headers to continue an existing email
-    thread with the given client. Looks for the most recent outbound email
-    (quotation/PI reply) to this client.
-    Returns (in_reply_to, references, original_subject) or (None, None, None)."""
+    """Resolve the threading headers for an outbound email.
+
+    Walks (in order):
+      1. ``source_communication`` if provided
+      2. Latest INBOUND email from this client (preserves the customer-started thread)
+      3. Latest OUTBOUND email to this client (so our own follow-ups stay together)
+
+    Returns ``(in_reply_to, references, reply_subject)`` where ``reply_subject``
+    is normalized to start with a single ``Re:``. Returns ``(None, None, None)``
+    when there is no usable thread.
+    """
     from .models import Communication
+
+    candidates = []
+    if source_communication is not None:
+        candidates.append(source_communication)
     try:
-        # Prefer the source communication's thread if available
-        if source_communication and source_communication.email_message_id:
-            return (
-                source_communication.email_message_id,
-                source_communication.email_message_id,
-                source_communication.subject,
-            )
-        # Fall back to most recent outbound email to this client
-        last_outbound = Communication.objects.filter(
-            client=client,
-            direction='outbound',
-            comm_type='email',
-            is_deleted=False,
-            email_message_id__gt='',
-        ).order_by('-created_at').first()
-        if last_outbound and last_outbound.email_message_id:
-            return (
-                last_outbound.email_message_id,
-                last_outbound.email_message_id,
-                last_outbound.subject,
-            )
+        if client is not None:
+            inbound = (Communication.objects
+                       .filter(client=client, direction='inbound', comm_type='email',
+                               is_deleted=False, email_message_id__gt='')
+                       .order_by('-created_at').first())
+            if inbound:
+                candidates.append(inbound)
+            outbound = (Communication.objects
+                        .filter(client=client, direction='outbound', comm_type='email',
+                                is_deleted=False, email_message_id__gt='')
+                        .order_by('-created_at').first())
+            if outbound:
+                candidates.append(outbound)
     except Exception:
         pass
+
+    for src in candidates:
+        if not src:
+            continue
+        msg_id = (getattr(src, 'email_message_id', '') or '').strip()
+        if not msg_id:
+            continue
+        return (
+            msg_id,
+            _build_references(src),
+            normalize_reply_subject(getattr(src, 'subject', '') or ''),
+        )
     return None, None, None
 
 
@@ -217,6 +284,11 @@ class EmailService:
             msg['In-Reply-To'] = in_reply_to
         if references:
             msg['References'] = references
+        # Always assign a Message-ID up front so callers can persist it on the
+        # outbound Communication and continue threading downstream.
+        from email.utils import make_msgid
+        domain = email_account.email.split('@', 1)[-1] if email_account.email else None
+        msg['Message-ID'] = make_msgid(domain=domain)
 
         # HTML body — no related multipart wrapper, no inline images
         msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))
@@ -338,17 +410,40 @@ class EmailService:
 
     @staticmethod
     def _parse_email(raw_email):
-        """Parse raw email bytes into a dict."""
+        """Parse raw email bytes into a dict including file attachments."""
         msg = email.message_from_bytes(raw_email)
 
-        # Get body
+        # Get body and collect attachments (anything with a filename or
+        # explicitly marked Content-Disposition: attachment).
         body = ''
+        attachments = []
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
-                if content_type == 'text/html':
+                disposition = (part.get('Content-Disposition') or '').lower()
+                filename = part.get_filename()
+                if filename:
+                    filename = EmailService._decode_header(filename)
+                # Treat as attachment when filename present OR explicit
+                # disposition. Skip multipart containers.
+                if part.get_content_maintype() == 'multipart':
+                    continue
+                if filename or 'attachment' in disposition:
+                    try:
+                        payload = part.get_payload(decode=True)
+                    except Exception:
+                        payload = None
+                    if payload:
+                        attachments.append({
+                            'filename': filename or 'attachment.bin',
+                            'content': payload,
+                            'mime_type': content_type or 'application/octet-stream',
+                            'size': len(payload),
+                        })
+                    continue
+                # Body parts (no filename / inline)
+                if content_type == 'text/html' and not body:
                     body = part.get_payload(decode=True).decode(errors='replace')
-                    break
                 elif content_type == 'text/plain' and not body:
                     body = part.get_payload(decode=True).decode(errors='replace')
         else:
@@ -379,6 +474,8 @@ class EmailService:
             'date': date,
             'message_id': msg.get('Message-ID', ''),
             'in_reply_to': msg.get('In-Reply-To', ''),
+            'references': (msg.get('References', '') or '').strip(),
+            'attachments': attachments,
         }
 
 

@@ -90,83 +90,132 @@ class CallLogViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             meeting.meeting_link = result.get('join_url', '')
             meeting.save(update_fields=['meeting_link'])
 
-            # Send meeting invite email to client's primary contact
-            email_sent = False
-            try:
-                from communications.models import EmailAccount
-                email_account = EmailAccount.objects.filter(
-                    user=request.user, is_active=True
-                ).first()
-
-                # Get client's primary contact email
-                contact = meeting.client.contacts.filter(
-                    is_deleted=False
-                ).order_by('-is_primary', 'name').first()
-                contact_email = contact.email if contact else None
-
-                if email_account and contact_email:
-                    from communications.services import EmailService
-                    scheduled = meeting.scheduled_at.strftime('%B %d, %Y at %I:%M %p')
-                    platform_name = meeting.get_platform_display()
-                    body_html = f"""
-                    <div style="font-family: Arial, sans-serif; max-width: 600px;">
-                        <h2 style="color: #1e3a5f;">Meeting Invitation</h2>
-                        <p>You are invited to a meeting with <strong>Kriya Biosys Private Limited</strong>.</p>
-                        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
-                            <tr><td style="padding: 8px; color: #666; width: 120px;">Subject</td><td style="padding: 8px; font-weight: bold;">{topic}</td></tr>
-                            <tr style="background: #f9f9f9;"><td style="padding: 8px; color: #666;">Date & Time</td><td style="padding: 8px;">{scheduled}</td></tr>
-                            <tr><td style="padding: 8px; color: #666;">Duration</td><td style="padding: 8px;">{duration} minutes</td></tr>
-                            <tr style="background: #f9f9f9;"><td style="padding: 8px; color: #666;">Platform</td><td style="padding: 8px;">{platform_name}</td></tr>
-                        </table>
-                        <p style="margin: 24px 0;">
-                            <a href="{meeting.meeting_link}" style="background: #1a73e8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                                Join Meeting
-                            </a>
-                        </p>
-                        <p style="color: #666; font-size: 13px;">Meeting link: <a href="{meeting.meeting_link}">{meeting.meeting_link}</a></p>
-                        {f'<p style="color: #666; font-size: 13px;">Agenda: {meeting.agenda}</p>' if meeting.agenda else ''}
-                        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
-                        <p style="color: #999; font-size: 12px;">Sent from Kriya CRM</p>
-                    </div>
-                    """
-                    EmailService.send_email(
-                        email_account=email_account,
-                        to=contact_email,
-                        subject=f'Meeting Invitation: {topic} - {scheduled}',
-                        body_html=body_html,
-                    )
-                    email_sent = True
-                    logger.info(f'Meeting invite sent to {contact_email}')
-
-                    # Save as communication record
-                    from communications.models import Communication
-                    Communication.objects.create(
-                        client=meeting.client,
-                        contact=contact,
-                        user=request.user,
-                        comm_type='email',
-                        direction='outbound',
-                        subject=f'Meeting Invitation: {topic}',
-                        body=body_html,
-                        status='sent',
-                        email_account=email_account,
-                        external_email=contact_email,
-                    )
-            except Exception as e:
-                logger.error(f'Failed to send meeting invite email: {e}')
-
+            # Build a draft email payload — the frontend opens a modal with
+            # this content so the user can review, edit recipients, and choose
+            # when to send.
+            from clients.models import Contact as ClientContact
+            primary = ClientContact.objects.filter(
+                client=meeting.client, is_deleted=False, is_primary=True,
+            ).first() or ClientContact.objects.filter(client=meeting.client, is_deleted=False).first()
+            to_email = primary.email if primary and primary.email else ''
+            cc_emails = list(
+                ClientContact.objects.filter(client=meeting.client, is_deleted=False)
+                .exclude(email='').exclude(id=primary.id if primary else None)
+                .values_list('email', flat=True)
+            )
+            scheduled = meeting.scheduled_at.strftime('%B %d, %Y at %I:%M %p')
+            platform_name = meeting.get_platform_display()
+            body_html = f"""
+            <p>Dear {primary.name if primary and primary.name else 'Sir/Madam'},</p>
+            <p>You are invited to a meeting with <strong>Kriya Biosys Private Limited</strong>.</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+                <tr><td style="padding: 8px; color: #666; width: 120px;">Subject</td><td style="padding: 8px; font-weight: bold;">{topic}</td></tr>
+                <tr style="background: #f9f9f9;"><td style="padding: 8px; color: #666;">Date &amp; Time</td><td style="padding: 8px;">{scheduled}</td></tr>
+                <tr><td style="padding: 8px; color: #666;">Duration</td><td style="padding: 8px;">{duration} minutes</td></tr>
+                <tr style="background: #f9f9f9;"><td style="padding: 8px; color: #666;">Platform</td><td style="padding: 8px;">{platform_name}</td></tr>
+            </table>
+            <p style="margin: 24px 0;">
+                <a href="{meeting.meeting_link}" style="background: #1a73e8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Join Meeting</a>
+            </p>
+            <p style="color: #666; font-size: 13px;">Meeting link: <a href="{meeting.meeting_link}">{meeting.meeting_link}</a></p>
+            {f'<p style="color: #666; font-size: 13px;">Agenda: {meeting.agenda}</p>' if meeting.agenda else ''}
+            <p>Best regards,<br/>{getattr(request.user, 'full_name', '') or request.user.username}</p>
+            """
             return Response({
                 'meeting_link': meeting.meeting_link,
-                'email_sent': email_sent,
+                'email_sent': False,
+                'draft': {
+                    'subject': f'Meeting Invitation: {topic} - {scheduled}',
+                    'to': to_email,
+                    'cc': cc_emails,
+                    'body_html': body_html,
+                },
                 'details': result,
             })
 
         except Exception as e:
             logger.error(f'Failed to generate meeting link: {e}')
+            err_text = str(e)
+            # invalid_grant -> the stored refresh token is dead (user revoked
+            # access, password changed, or token expired after long inactivity).
+            # Wipe the stale token so reconnection from Settings works cleanly,
+            # and return a friendly message instead of the raw OAuth error.
+            if 'invalid_grant' in err_text:
+                try:
+                    if config and config.platform == 'google' and config.google_refresh_token:
+                        config.google_refresh_token = ''
+                        config.save(update_fields=['google_refresh_token'])
+                except Exception:
+                    pass
+                return Response(
+                    {'error': 'Google account session has expired. Go to Settings → Meeting Platforms and click "Connect Google Account" to re-authorize.',
+                     'reconnect_required': True},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             return Response(
-                {'error': f'Failed to create meeting: {str(e)}'},
+                {'error': f'Failed to create meeting: {err_text}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+    @action(detail=True, methods=['post'], url_path='send-invite')
+    def send_invite(self, request, pk=None):
+        """Send the meeting-invite email after the user reviews/edits the draft.
+        Body should contain: subject, to, cc (list or comma-separated string),
+        and body_html.
+        """
+        meeting = self.get_object()
+        if not meeting.meeting_link:
+            return Response({'error': 'Generate the meeting link first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        subject = (request.data.get('subject') or '').strip()
+        body_html = request.data.get('body_html') or request.data.get('body') or ''
+        to_email = (request.data.get('to') or '').strip()
+        cc_raw = request.data.get('cc') or []
+        if isinstance(cc_raw, str):
+            cc_list = [e.strip() for e in cc_raw.split(',') if e.strip()]
+        else:
+            cc_list = [str(e).strip() for e in cc_raw if str(e).strip()]
+
+        if not to_email:
+            return Response({'error': 'Recipient email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not subject:
+            return Response({'error': 'Subject is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from communications.models import EmailAccount
+        email_account = EmailAccount.objects.filter(user=request.user, is_active=True).first()
+        if not email_account:
+            return Response({'error': 'No active email account configured for your user.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from communications.services import EmailService
+            EmailService.send_email(
+                email_account=email_account,
+                to=to_email,
+                subject=subject,
+                body_html=body_html,
+                cc=cc_list or None,
+            )
+            from communications.models import Communication
+            from clients.models import Contact as ClientContact
+            primary = ClientContact.objects.filter(client=meeting.client, email=to_email).first()
+            Communication.objects.create(
+                client=meeting.client,
+                contact=primary,
+                user=request.user,
+                comm_type='email',
+                direction='outbound',
+                subject=subject,
+                body=body_html,
+                status='sent',
+                email_account=email_account,
+                external_email=to_email,
+            )
+            logger.info(f'Meeting invite sent to {to_email} (cc={cc_list})')
+            return Response({'sent': True, 'to': to_email, 'cc': cc_list})
+        except Exception as e:
+            logger.exception(f'Failed to send meeting invite: {e}')
+            return Response({'error': f'Failed to send: {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class MeetingPlatformConfigViewSet(viewsets.ModelViewSet):

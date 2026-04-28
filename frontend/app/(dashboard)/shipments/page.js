@@ -91,13 +91,54 @@ export default function ShipmentsPage() {
     }
   };
 
+  // Order status -> overall progress %. FIRC (11th step) overrides to 100%.
+  const ORDER_STATUS_PROGRESS = {
+    pif_sent: 9,
+    factory_ready: 18,
+    docs_preparing: 27,
+    inspection: 36,
+    inspection_passed: 50,
+    container_booked: 60,
+    docs_approved: 70,
+    dispatched: 75,
+    in_transit: 80,
+    arrived: 90,
+    delivered: 90,
+  };
+  const computeProgress = (row) => {
+    if (row.order_firc_received_at) return 100;
+    return ORDER_STATUS_PROGRESS[row.order_status] ?? 0;
+  };
+
   const columns = [
     { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-medium text-gray-900">{row.shipment_number}</span> },
-    { key: "client_name", label: "Account", render: (row) => row.client_name || "\u2014" },
-    { key: "order_number", label: "Order #", render: (row) => row.order_number || "\u2014" },
+    { key: "client_name", label: "Account", render: (row) => row.client_name || "—" },
+    { key: "country", label: "Country", render: (row) => row.country || "—" },
+    { key: "order_number", label: "Order #", render: (row) => row.order_number || "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "port_of_loading", label: "Port of Loading", render: (row) => row.port_of_loading || "\u2014" },
-    { key: "dispatch_date", label: "Dispatch Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "\u2014" },
+    { key: "port_of_loading", label: "Port of Loading", render: (row) => row.port_of_loading || "—" },
+    { key: "dispatch_date", label: "Dispatch Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
+    {
+      key: "progress",
+      label: "Progress",
+      render: (row) => {
+        const pct = computeProgress(row);
+        const orderId = row.order_id || row.order;
+        const handleClick = (e) => {
+          e.stopPropagation();
+          if (orderId) router.push(`/orders/${orderId}`);
+        };
+        const barColor = pct >= 100 ? "bg-emerald-500" : pct >= 75 ? "bg-indigo-500" : pct >= 36 ? "bg-amber-500" : "bg-rose-400";
+        return (
+          <button onClick={handleClick} title={orderId ? "Open Sales Order" : "No linked order"} className="flex items-center gap-2 group min-w-[140px]">
+            <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-xs font-semibold text-gray-700 group-hover:text-indigo-600 tabular-nums">{pct}%</span>
+          </button>
+        );
+      },
+    },
   ];
 
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
