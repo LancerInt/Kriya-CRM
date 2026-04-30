@@ -138,10 +138,63 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         tracking_number = (request.data.get('tracking_number') or '').strip()
         courier_details = (request.data.get('courier_details') or '').strip()
 
-        if target == 'prepared':
+        # Step-by-step gate: target must be the immediate next step in the
+        # workflow for this sample type. Skipping is rejected.
+        # Free   : requested → prepared → dispatched → delivered → feedback_pending → feedback_received
+        # Paid   : requested → replied → prepared → payment_received → dispatched → delivered → feedback_pending → feedback_received
+        if sample.sample_type == 'paid':
+            chain = ['requested', 'replied', 'prepared', 'payment_received',
+                     'dispatched', 'delivered', 'feedback_pending', 'feedback_received']
+        else:
+            chain = ['requested', 'prepared', 'dispatched', 'delivered',
+                     'feedback_pending', 'feedback_received']
+        try:
+            cur_idx = chain.index(sample.status)
+            tgt_idx = chain.index(target)
+        except ValueError:
+            return Response(
+                {'error': f'Unknown target "{target}" for this sample type.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Only allow forward by exactly one step (feedback_received from
+        # feedback_pending is part of the chain too, so it works).
+        if tgt_idx != cur_idx + 1:
+            human = chain[cur_idx + 1] if cur_idx + 1 < len(chain) else 'feedback'
+            return Response(
+                {'error': f'Cannot jump to "{target}" — please advance step by step. Next allowed: "{human}".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if target == 'replied':
+            sample.status = Sample.Status.REPLIED
+            if not sample.replied_at:
+                sample.replied_at = _tz.now()
+        elif target == 'prepared':
             sample.status = Sample.Status.PREPARED
             sample.prepared_at = _tz.now()
+        elif target == 'payment_received':
+            sample.status = Sample.Status.PAYMENT_RECEIVED
+            sample.payment_received_at = _tz.now()
         elif target == 'dispatched':
+            # Paid samples: enforce Payment Received + FIRC confirmation at
+            # the dispatch boundary. The frontend renders the FIRC checkbox
+            # at this stage; clients must POST firc_received=true (or have
+            # firc_received_at already populated) to advance.
+            if sample.sample_type == 'paid':
+                if not sample.payment_received_at:
+                    return Response(
+                        {'error': 'Payment must be received before dispatching a paid sample.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                firc_flag = request.data.get('firc_received')
+                if firc_flag is True or str(firc_flag).lower() in ('true', '1', 'yes'):
+                    if not sample.firc_received_at:
+                        sample.firc_received_at = _tz.now()
+                if not sample.firc_received_at:
+                    return Response(
+                        {'error': 'FIRC must be confirmed before dispatching a paid sample.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             sample.status = Sample.Status.DISPATCHED
             if tracking_number:
                 sample.tracking_number = tracking_number
@@ -154,6 +207,8 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             sample.delivered_at = _tz.now()
         elif target == 'feedback_pending':
             sample.status = Sample.Status.FEEDBACK_PENDING
+        elif target == 'feedback_received':
+            sample.status = Sample.Status.FEEDBACK_RECEIVED
         else:
             return Response({'error': f'Unknown target: {target}'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -209,8 +264,8 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        order = ['requested', 'prepared', 'dispatched', 'delivered',
-                 'feedback_pending', 'feedback_received']
+        order = ['requested', 'replied', 'prepared', 'payment_received',
+                 'dispatched', 'delivered', 'feedback_pending', 'feedback_received']
         try:
             cur_idx = order.index(sample.status)
         except ValueError:
@@ -252,25 +307,37 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='timeline')
     def timeline(self, request, pk=None):
-        """Return the 6-step Sample workflow timeline for the stepper UI.
+        """Return the Sample workflow timeline for the stepper UI.
 
-        Steps:
-            1. Mail Received  - completed when source_communication is set
-            2. Reply Mail     - completed when replied_at is set
-            3. Prepared       - completed when status >= prepared
-            4. Dispatched     - completed when status >= dispatched
-            5. Delivered      - completed when status >= delivered
-            6. Feedback       - completed when feedback record exists
+        Free samples (6 steps):
+            1. Mail Received → 2. Reply Mail → 3. Prepared → 4. Dispatched
+            → 5. Delivered → 6. Feedback
+
+        Paid samples (7 steps):
+            1. Mail Received → 2. Reply Mail → 3. Prepared → 4. Payment Received
+            → 5. Dispatched (with FIRC) → 6. Delivered → 7. Feedback
         """
         sample = self.get_object()
+        is_paid = sample.sample_type == 'paid'
 
-        # Status ordering for the >= comparisons
-        order = ['requested', 'prepared', 'dispatched', 'delivered',
-                 'feedback_pending', 'feedback_received']
+        # Use the chain that matches the sample type — same chain the
+        # serializer enforces step-by-step transitions on.
+        if is_paid:
+            chain = ['requested', 'replied', 'prepared', 'payment_received',
+                     'dispatched', 'delivered', 'feedback_pending', 'feedback_received']
+        else:
+            chain = ['requested', 'prepared', 'dispatched', 'delivered',
+                     'feedback_pending', 'feedback_received']
         try:
-            cur_idx = order.index(sample.status)
+            cur_idx = chain.index(sample.status)
         except ValueError:
             cur_idx = 0
+
+        def _passed(stage):
+            try:
+                return cur_idx >= chain.index(stage)
+            except ValueError:
+                return False
 
         has_feedback = hasattr(sample, 'feedback') and sample.feedback is not None
 
@@ -287,34 +354,48 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             {
                 'key': 'reply_mail',
                 'label': 'Reply Mail',
-                'completed': bool(sample.replied_at),
+                # Free samples track this purely by replied_at (since "replied"
+                # isn't a status). Paid samples advance the status to "replied"
+                # so the chain index also satisfies it.
+                'completed': bool(sample.replied_at) or (is_paid and _passed('replied')),
                 'timestamp': sample.replied_at,
             },
             {
                 'key': 'prepared',
                 'label': 'Prepared',
-                'completed': cur_idx >= order.index('prepared'),
+                'completed': _passed('prepared'),
                 'timestamp': sample.prepared_at,
             },
-            {
-                'key': 'dispatched',
-                'label': 'Dispatched',
-                'completed': cur_idx >= order.index('dispatched'),
-                'timestamp': sample.dispatch_date,
-            },
-            {
-                'key': 'delivered',
-                'label': 'Delivered',
-                'completed': cur_idx >= order.index('delivered'),
-                'timestamp': sample.delivered_at,
-            },
-            {
-                'key': 'feedback',
-                'label': 'Feedback',
-                'completed': has_feedback,
-                'timestamp': sample.feedback.created_at if has_feedback else None,
-            },
         ]
+
+        if is_paid:
+            steps.append({
+                'key': 'payment_received',
+                'label': 'Payment Received',
+                'completed': _passed('payment_received'),
+                'timestamp': sample.payment_received_at,
+            })
+
+        steps.append({
+            'key': 'dispatched',
+            'label': 'Dispatched (FIRC)' if is_paid else 'Dispatched',
+            'completed': _passed('dispatched'),
+            'timestamp': sample.dispatch_date,
+            'firc_received': bool(sample.firc_received_at) if is_paid else None,
+        })
+        steps.append({
+            'key': 'delivered',
+            'label': 'Delivered',
+            'completed': _passed('delivered'),
+            'timestamp': sample.delivered_at,
+        })
+        steps.append({
+            'key': 'feedback',
+            'label': 'Feedback',
+            'completed': has_feedback,
+            'timestamp': sample.feedback.created_at if has_feedback else None,
+        })
+
         # Mark the first incomplete step as "current"
         for s in steps:
             s['state'] = 'completed' if s['completed'] else 'pending'

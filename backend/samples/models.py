@@ -4,12 +4,18 @@ from common.models import TimeStampedModel
 
 class Sample(TimeStampedModel):
     class Status(models.TextChoices):
-        REQUESTED = 'requested', 'Requested'
+        REQUESTED = 'requested', 'Mail Received'
+        REPLIED = 'replied', 'Reply Sent'
         PREPARED = 'prepared', 'Prepared'
+        PAYMENT_RECEIVED = 'payment_received', 'Payment Received'
         DISPATCHED = 'dispatched', 'Dispatched'
         DELIVERED = 'delivered', 'Delivered'
         FEEDBACK_PENDING = 'feedback_pending', 'Feedback Pending'
         FEEDBACK_RECEIVED = 'feedback_received', 'Feedback Received'
+
+    class SampleType(models.TextChoices):
+        FREE = 'free', 'Free Sample'
+        PAID = 'paid', 'Paid Sample'
 
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='samples')
     product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
@@ -25,6 +31,18 @@ class Sample(TimeStampedModel):
     courier_details = models.CharField(max_length=255, blank=True)
     tracking_number = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.REQUESTED)
+    # Paid samples follow a longer flow: Mail Received → Reply → Prepared →
+    # Payment Received → Dispatched (with FIRC) → Delivered → Feedback.
+    # Free samples skip the Reply / Payment / FIRC stages.
+    sample_type = models.CharField(
+        max_length=10, choices=SampleType.choices, blank=True, default='',
+        help_text='Free samples skip the reply/payment stages; paid samples include them and FIRC.',
+    )
+    # Once an executive picks Free or Paid, the type is locked — accidental
+    # mid-flight switches between paid/free are not allowed.
+    sample_type_locked = models.BooleanField(default=False)
+    payment_received_at = models.DateTimeField(null=True, blank=True)
+    firc_received_at = models.DateTimeField(null=True, blank=True, help_text='FIRC received for paid samples — recorded at Dispatched stage.')
     notes = models.TextField(blank=True)
     source_communication = models.ForeignKey(
         'communications.Communication', on_delete=models.SET_NULL, null=True, blank=True,

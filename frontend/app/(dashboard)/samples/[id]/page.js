@@ -85,6 +85,8 @@ export default function SampleDetailPage() {
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [courierDetails, setCourierDetails] = useState("");
+  // FIRC confirmation — required at the Dispatch boundary for paid samples.
+  const [dispatchFircConfirmed, setDispatchFircConfirmed] = useState(false);
   const [sampleDocs, setSampleDocs] = useState([]);
   const [showCOAEditor, setShowCOAEditor] = useState(false);
   const [showMSDSEditor, setShowMSDSEditor] = useState(false);
@@ -270,13 +272,23 @@ export default function SampleDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (!sample) return null;
 
+  const isPaidSample = sample.sample_type === "paid";
+
   // Determine which next-step button to show based on current status
   const nextAction = (() => {
     if (sample.feedback) return null;
     switch (sample.status) {
       case "requested":
         return { target: "prepared", label: "→ Mark Prepared", color: "bg-amber-600 hover:bg-amber-700" };
+      case "replied":
+        return { target: "prepared", label: "→ Mark Prepared", color: "bg-amber-600 hover:bg-amber-700" };
       case "prepared":
+        // Paid samples need Payment Received before Dispatch
+        if (isPaidSample) {
+          return { target: "payment_received", label: "→ Mark Payment Received", color: "bg-purple-600 hover:bg-purple-700" };
+        }
+        return { target: "dispatched", label: "→ Mark Dispatched", color: "bg-blue-600 hover:bg-blue-700", needsForm: true };
+      case "payment_received":
         return { target: "dispatched", label: "→ Mark Dispatched", color: "bg-blue-600 hover:bg-blue-700", needsForm: true };
       case "dispatched":
         return { target: "delivered", label: "→ Mark Delivered", color: "bg-green-600 hover:bg-green-700" };
@@ -383,13 +395,20 @@ export default function SampleDetailPage() {
             router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`);
           } else if (step.key === "feedback") {
             if (!sample.feedback) setShowFeedbackModal(true);
-          } else if (step.key === "prepared" && sample.status === "requested") {
+          } else if (step.key === "prepared" && (sample.status === "requested" || sample.status === "replied")) {
             if (!allItemsChecked) {
               toast.error("Please check all products in the Requested Products list before marking as Prepared");
               return;
             }
             advance("prepared");
-          } else if (step.key === "dispatched" && sample.status === "prepared") {
+          } else if (step.key === "payment_received" && isPaidSample && sample.status === "prepared") {
+            advance("payment_received");
+          } else if (step.key === "dispatched" && (sample.status === "prepared" || sample.status === "payment_received")) {
+            // Paid samples must record Payment Received before Dispatch.
+            if (isPaidSample && sample.status === "prepared") {
+              toast.error("Mark Payment Received before dispatching a paid sample.");
+              return;
+            }
             setShowDispatchModal(true);
           } else if (step.key === "delivered" && sample.status === "dispatched") {
             advance("delivered");
@@ -402,7 +421,7 @@ export default function SampleDetailPage() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <h3 className="font-semibold text-gray-800">Requested Products ({itemsLocal.length})</h3>
-            {sample.status === "requested" && itemsLocal.length > 0 && (
+            {(sample.status === "requested" || sample.status === "replied") && itemsLocal.length > 0 && (
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${allItemsChecked ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
                 {checkedItems.size} of {itemsLocal.length} ready
               </span>
@@ -421,7 +440,7 @@ export default function SampleDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">
-                {sample.status === "requested" && <th className="pb-2 pr-2 w-8">
+                {(sample.status === "requested" || sample.status === "replied") && <th className="pb-2 pr-2 w-8">
                   <input
                     type="checkbox"
                     checked={allItemsChecked}
@@ -442,7 +461,7 @@ export default function SampleDetailPage() {
             <tbody>
               {itemsLocal.map((item, i) => (
                 <tr key={item.id || i} className={`border-b border-gray-100 last:border-0 ${checkedItems.has(i) ? "bg-green-50/50" : ""}`}>
-                  {sample.status === "requested" && (
+                  {(sample.status === "requested" || sample.status === "replied") && (
                     <td className="py-2 pr-2">
                       <input
                         type="checkbox"
@@ -798,6 +817,22 @@ export default function SampleDetailPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
+          {/* FIRC checkbox — mandatory for Paid samples before Dispatch. */}
+          {isPaidSample && (
+            <label className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer ${dispatchFircConfirmed ? "bg-emerald-50 border-emerald-300" : "bg-amber-50 border-amber-300"}`}>
+              <input
+                type="checkbox"
+                checked={dispatchFircConfirmed || !!sample.firc_received_at}
+                onChange={(e) => setDispatchFircConfirmed(e.target.checked)}
+                disabled={!!sample.firc_received_at}
+                className="mt-0.5 w-4 h-4 accent-emerald-600"
+              />
+              <span className="text-xs">
+                <span className="font-semibold block">FIRC received (required for paid samples)</span>
+                <span className="text-gray-600">Foreign Inward Remittance Certificate confirmed by the bank. Cannot dispatch without this.</span>
+              </span>
+            </label>
+          )}
           {/* Generate COA / MSDS — attached to dispatch email and saved as sample documents */}
           <div className="border-t border-gray-200 pt-3">
             <p className="text-xs text-gray-500 mb-2">Generate documents to attach with dispatch email:</p>
@@ -833,8 +868,16 @@ export default function SampleDetailPage() {
             </button>
             <button
               onClick={() => {
+                if (isPaidSample && !sample.firc_received_at && !dispatchFircConfirmed) {
+                  toast.error("FIRC must be confirmed before dispatching a paid sample.");
+                  return;
+                }
                 if (sample.source_communication && !confirm("You are dispatching WITHOUT notifying the client via email.\n\nAre you sure? You can still notify them later from the sample page.")) return;
-                advance("dispatched", { tracking_number: trackingNumber, courier_details: courierDetails });
+                advance("dispatched", {
+                  tracking_number: trackingNumber,
+                  courier_details: courierDetails,
+                  firc_received: isPaidSample ? (dispatchFircConfirmed || !!sample.firc_received_at) : undefined,
+                });
               }}
               disabled={advancing}
               className="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-lg hover:bg-gray-600 disabled:opacity-50 whitespace-nowrap"

@@ -753,25 +753,45 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         except Exception as e:
             _log.warning(f'Could not stamp Sample replied_at for sent draft {draft.id}: {e}')
 
-        # Stamp dispatch_notified_at on any dispatched samples linked to this
-        # email that haven't been notified yet — covers the case where the
-        # executive clicked "Confirm Dispatch" without "Notify Client" and
-        # later sent the email manually.
+        # Sample-related side-effects of a draft send.
+        #
+        # IMPORTANT: do NOT advance Sample.status from this hook. Sample
+        # progression (Reply Mail → Prepared → [Payment Received] →
+        # Dispatched → Delivered → Feedback) is enforced step-by-step by
+        # samples/serializers.py and the /samples/{id}/advance/ endpoint.
+        # Auto-flipping status here was bypassing that gate and causing the
+        # "Reply Mail → Dispatched" jump.
+        #
+        # We do two things only:
+        #   1. Stamp ``replied_at`` on samples linked to this email so the
+        #      Reply Mail step in the timeline shows ✓.
+        #   2. If the sample is already in ``dispatched`` (set explicitly by
+        #      the user via the stepper) and ``dispatch_notified_at`` is
+        #      empty, stamp the notification timestamp. No status change.
         try:
             from samples.models import Sample
             from django.utils import timezone as _tz
-            from datetime import date as _date
-            # Mark prepared samples as dispatched when dispatch email is sent
+
             Sample.objects.filter(
                 source_communication=draft.communication,
                 is_deleted=False,
-                status__in=['prepared', 'requested'],
-            ).update(
-                status='dispatched',
-                dispatch_date=_date.today(),
-                dispatch_notified_at=_tz.now(),
+                replied_at__isnull=True,
+            ).update(replied_at=_tz.now())
+
+            # For paid samples that are still at "requested", advance to
+            # "replied" — but ONLY one step, never further. Free samples have
+            # no "replied" status; their replied_at flag is enough.
+            paid_to_replied = Sample.objects.filter(
+                source_communication=draft.communication,
+                is_deleted=False,
+                sample_type='paid',
+                status='requested',
             )
-            # Stamp dispatch_notified_at on already-dispatched samples
+            for s in paid_to_replied:
+                s.status = 'replied'
+                s.save(update_fields=['status'])
+
+            # Notification timestamp on already-dispatched samples.
             Sample.objects.filter(
                 source_communication=draft.communication,
                 is_deleted=False,
@@ -779,7 +799,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
                 dispatch_notified_at__isnull=True,
             ).update(dispatch_notified_at=_tz.now())
         except Exception as e:
-            _log.warning(f'Could not stamp Sample dispatch status: {e}')
+            _log.warning(f'Could not stamp Sample reply/dispatch metadata: {e}')
 
         # Create outgoing Communication record — store the body that was
         # actually sent (with the signature appended) so the thread view
