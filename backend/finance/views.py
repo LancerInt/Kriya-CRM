@@ -793,7 +793,7 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'country_of_origin', 'country_of_final_destination',
             'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
             'final_destination', 'pre_carriage_by', 'place_of_receipt',
-            'terms_of_delivery', 'payment_terms',
+            'terms_of_delivery', 'terms_of_trade', 'payment_terms',
             'currency', 'exchange_rate', 'batch_no', 'freight', 'insurance',
             'total_fob_usd', 'total_fob_inr', 'freight_inr', 'insurance_inr',
             'total_invoice_usd', 'total_invoice_inr',
@@ -831,7 +831,19 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 )
             ci.total_fob_usd = total
             ci.total_invoice_usd = total + float(ci.freight or 0) + float(ci.insurance or 0)
+        # Keep the deprecated mirror in sync — both fields hold the same
+        # value so older readers (PDFs, exports) keep working until fully
+        # migrated to terms_of_trade.
+        if 'terms_of_trade' in data:
+            ci.payment_terms = ci.terms_of_trade
+        elif 'payment_terms' in data:
+            ci.terms_of_trade = ci.payment_terms
         ci.save()
+        # Push CI's terms_of_trade back to the source Order so the Payment
+        # Tracking card on the order reflects whatever is in the CI.
+        if ci.order_id and ci.terms_of_trade and ci.terms_of_trade != (ci.order.payment_terms or ''):
+            ci.order.payment_terms = ci.terms_of_trade
+            ci.order.save(update_fields=['payment_terms'])
         return Response(CommercialInvoiceSerializer(ci).data)
 
     @action(detail=False, methods=['post'], url_path='create-from-order')
@@ -848,6 +860,31 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
         from .ci_service import create_ci_from_order
         ci = create_ci_from_order(order, request.user)
+        # Mirror the CI total into Finance > Payments as a placeholder
+        # entry so the receivable shows up in the payments list. The
+        # reference string carries the CI number so the row is linkable
+        # back to the invoice. Idempotent — re-running won't duplicate.
+        try:
+            from .models import Payment
+            from datetime import date
+            ci_total = ci.total_invoice_usd or ci.grand_total_inr or 0
+            ref = f'CI {ci.invoice_number}'
+            if ci_total and not Payment.objects.filter(reference=ref).exists():
+                Payment.objects.create(
+                    invoice=None,
+                    client=ci.client,
+                    amount=ci_total,
+                    currency=ci.currency or 'USD',
+                    payment_date=date.today(),
+                    mode=Payment.Mode.TT,
+                    reference=ref,
+                    notes=f'Auto-created from Commercial Invoice {ci.invoice_number}',
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f'Could not auto-create Payment for CI {ci.id}: {e}'
+            )
         return Response(CommercialInvoiceSerializer(ci).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='generate-pdf')
@@ -1079,6 +1116,49 @@ class PackingInstructionFormViewSet(viewsets.ModelViewSet):
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+    @action(detail=False, methods=['post'], url_path='upload-for-order-item')
+    def upload_for_order_item(self, request):
+        """Attach a pre-existing PIF PDF to an order line in one shot.
+
+        Body (multipart): order_item_id, file
+        Creates the PIF row if missing, stores the uploaded file as its
+        ``pdf_file`` (so ``has_pdf=True`` and the workflow gate is satisfied),
+        and mirrors the file into the order's Documents tab.
+        """
+        from django.core.files.base import ContentFile
+        from orders.models import OrderItem, OrderDocument
+        order_item_id = request.data.get('order_item_id')
+        upload = request.FILES.get('file')
+        if not order_item_id:
+            return Response({'error': 'order_item_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not upload:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            oi = OrderItem.objects.select_related('order', 'order__client').get(id=order_item_id)
+        except OrderItem.DoesNotExist:
+            return Response({'error': 'Order item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        pif = PackingInstructionForm.objects.filter(order_item=oi).first()
+        if not pif:
+            from .pif_service import create_pif_from_order_item
+            pif = create_pif_from_order_item(oi, request.user)
+
+        content = upload.read()
+        ext = (upload.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
+        filename = f'{pif.pif_number}.{ext}'
+        pif.pdf_file.save(filename, ContentFile(content), save=True)
+
+        # Mirror into the order's Documents tab; replace any prior PIF doc
+        # for this PIF number so re-uploading is idempotent.
+        OrderDocument.objects.filter(
+            order=pif.order, doc_type='pif', name__startswith=pif.pif_number,
+        ).delete()
+        OrderDocument.objects.create(
+            order=pif.order, doc_type='pif', name=filename,
+            file=pif.pdf_file, uploaded_by=request.user,
+        )
+        return Response(PackingInstructionFormSerializer(pif).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='replace-pdf')
     def replace_pdf(self, request, pk=None):

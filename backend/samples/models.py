@@ -17,6 +17,7 @@ class Sample(TimeStampedModel):
         FREE = 'free', 'Free Sample'
         PAID = 'paid', 'Paid Sample'
 
+    sample_number = models.CharField(max_length=20, unique=True, blank=True, default='', db_index=True, help_text='Human-readable shipment number, e.g. SMP-00001')
     client = models.ForeignKey('clients.Client', on_delete=models.CASCADE, related_name='samples')
     product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
     product_name = models.CharField(max_length=255, blank=True)
@@ -28,6 +29,7 @@ class Sample(TimeStampedModel):
     dispatch_date = models.DateField(null=True, blank=True)
     dispatch_notified_at = models.DateTimeField(null=True, blank=True, help_text='When the client was notified about dispatch via email')
     delivered_at = models.DateTimeField(null=True, blank=True)
+    feedback_reminder_sent_at = models.DateTimeField(null=True, blank=True, help_text='When the post-delivery feedback reminder was sent to the executive/admin/manager')
     courier_details = models.CharField(max_length=255, blank=True)
     tracking_number = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.REQUESTED)

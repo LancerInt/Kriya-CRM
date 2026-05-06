@@ -17,13 +17,17 @@ class NotificationViewSet(viewsets.ModelViewSet):
         try:
             from django.core.cache import cache
             if cache.add('order-reminder-tick', '1', timeout=60):
-                from orders.tasks import check_delivery_reminders, check_cro_reminders
+                from orders.tasks import check_delivery_reminders, check_cro_reminders, check_transit_doc_reminders
                 try:
                     check_delivery_reminders()
                 except Exception:
                     pass
                 try:
                     check_cro_reminders()
+                except Exception:
+                    pass
+                try:
+                    check_transit_doc_reminders()
                 except Exception:
                     pass
         except Exception:

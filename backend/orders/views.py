@@ -22,7 +22,24 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         return Order.objects.filter(is_deleted=False).select_related('client', 'created_by', 'quotation').prefetch_related('items')
 
     def perform_create(self, serializer):
-        order = serializer.save(created_by=self.request.user)
+        # Auto-generate the next ORD-NNNNN number. order_number is read-only
+        # on the serializer, so the frontend never sends one; we mint it here.
+        # Use the highest existing zero-padded number rather than count() so
+        # gaps from soft-deletes don't cause collisions.
+        from django.db.models import Max
+        existing = Order.objects.filter(
+            order_number__regex=r'^ORD-\d+$',
+        ).aggregate(m=Max('order_number'))['m'] or 'ORD-00000'
+        try:
+            next_n = int(existing.split('-', 1)[1]) + 1
+        except (IndexError, ValueError):
+            next_n = Order.objects.count() + 1
+        # Defensive: walk forward if the candidate is somehow already taken
+        while Order.objects.filter(order_number=f'ORD-{next_n:05d}').exists():
+            next_n += 1
+        order_number = f'ORD-{next_n:05d}'
+
+        order = serializer.save(created_by=self.request.user, order_number=order_number)
         notify(
             title=f'New order: {order.order_number}',
             message=f'{self.request.user.full_name} created order for {order.client.company_name}.',
@@ -34,6 +51,7 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     def add_item(self, request, pk=None):
         """Add a line item to an order."""
         from .models import OrderItem
+        from .serializers import OrderItemSerializer
         order = self.get_object()
         item = OrderItem.objects.create(
             order=order,
@@ -57,6 +75,61 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         feedback.bulk_order_interest = request.data.get('bulk_order_interest', feedback.bulk_order_interest)
         feedback.save()
         return Response({'status': 'saved'}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='set-payment-phase')
+    def set_payment_phase(self, request, pk=None):
+        """Toggle whether the advance or balance payment is required
+        Before or After Dispatch. Body: {which: 'advance'|'balance',
+        is_before_dispatch: bool}. Drives the dispatch gate."""
+        order = self.get_object()
+        which = request.data.get('which')
+        flag = bool(request.data.get('is_before_dispatch'))
+        if which == 'advance':
+            order.advance_is_before_dispatch = flag
+            order.save(update_fields=['advance_is_before_dispatch'])
+        elif which == 'balance':
+            order.balance_is_before_dispatch = flag
+            order.save(update_fields=['balance_is_before_dispatch'])
+        else:
+            return Response(
+                {'error': "which must be 'advance' or 'balance'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({
+            'advance_is_before_dispatch': order.advance_is_before_dispatch,
+            'balance_is_before_dispatch': order.balance_is_before_dispatch,
+        })
+
+    @action(detail=True, methods=['post'], url_path='mark-advance-payment')
+    def mark_advance_payment(self, request, pk=None):
+        """Mark or unmark the advance portion of the payment as received.
+        Required before dispatch when the order's payment_terms call for an
+        advance (e.g. "50% advance D/A 60 days")."""
+        from django.utils import timezone
+        order = self.get_object()
+        received = request.data.get('received')
+        if received is None:
+            received = order.advance_payment_received_at is None
+        order.advance_payment_received_at = timezone.now() if received else None
+        order.save(update_fields=['advance_payment_received_at'])
+        return Response({'advance_payment_received_at': order.advance_payment_received_at})
+
+    @action(detail=True, methods=['post'], url_path='mark-balance-payment')
+    def mark_balance_payment(self, request, pk=None):
+        """Mark or unmark the balance portion (e.g. D/A 60 days after
+        dispatch) as received. Clears the pending balance reminder."""
+        from django.utils import timezone
+        order = self.get_object()
+        received = request.data.get('received')
+        if received is None:
+            received = order.balance_payment_received_at is None
+        order.balance_payment_received_at = timezone.now() if received else None
+        # Reset the reminder slot so a future toggle-back-off followed by a
+        # new due date can re-arm the 10-day nudge.
+        if received:
+            order.balance_reminder_sent_at = None
+        order.save(update_fields=['balance_payment_received_at', 'balance_reminder_sent_at'])
+        return Response({'balance_payment_received_at': order.balance_payment_received_at})
 
     @action(detail=True, methods=['post'], url_path='mark-firc')
     def mark_firc(self, request, pk=None):
@@ -488,6 +561,21 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         if not OrderDocument.objects.filter(order=order, doc_type='insurance', is_deleted=False).exists():
             return Response({'error': 'Upload Insurance document first.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 2. Before-dispatch payment gate — every payment row the executive
+        # has categorized as "Before Dispatch" must be ticked first.
+        from .payment_terms import before_dispatch_outstanding, parse_payment_terms
+        if before_dispatch_outstanding(order):
+            parsed = parse_payment_terms(order.payment_terms)
+            outstanding = []
+            if parsed['has_advance'] and order.advance_is_before_dispatch and not order.advance_payment_received_at:
+                outstanding.append(f'Advance ({parsed["advance_pct"]}%)')
+            if parsed['has_balance'] and order.balance_is_before_dispatch and not order.balance_payment_received_at:
+                outstanding.append(f'Balance ({parsed["balance_pct"]}%)')
+            return Response(
+                {'error': f'Tick the following payment(s) marked as Before Dispatch before sending the dispatch email: {", ".join(outstanding)}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         delivery_time = (request.data.get('estimated_delivery_time') or '').strip()
         # 2. Save delivery time as a Note (best-effort)
         if delivery_time:
@@ -828,8 +916,8 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             f'(<strong>{product_lines or "—"}</strong>) is now <strong>In Transit</strong>.</p>'
             f'{bl_html}'
             f'{delivery_html}'
-            f'<p>Please find attached the <strong>Bill of Lading (BL)</strong> for your reference. '
-            f'Tracking and ETA details are reflected on the BL.</p>'
+            f'<p>Please find attached the <strong>Bill of Lading (BL)</strong>, <strong>Certificate of Origin (COO)</strong> '
+            f'and <strong>Schedule List</strong> for your reference. Tracking and ETA details are reflected on the BL.</p>'
             f'<p>We will keep you posted on the shipment progress. Please do not hesitate to reach out if you require anything further.</p>'
             f'<p>Best regards,<br/>{getattr(request.user, "full_name", "") or request.user.username}</p>'
         )
@@ -880,25 +968,40 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         draft.editor_data = ed
         draft.save(update_fields=['editor_data'])
 
-        # 6. Replace any prior transit attachment, then attach the BL only
-        TRANSIT_FILENAME_PREFIXES = ('BL_',)
+        # 6. Replace any prior transit attachments, then attach BL, COO and
+        # Schedule List on the in-transit draft so the customer receives all
+        # the shipment-tracking documents in one email.
+        TRANSIT_FILENAME_PREFIXES = ('BL_', 'COO_', 'Schedule_List_', 'Shipping_Bill_')
         for prefix in TRANSIT_FILENAME_PREFIXES:
             DraftAttachment.objects.filter(draft=draft, filename__startswith=prefix).delete()
 
         order_no = order.order_number or 'order'
-        bl_doc = OrderDocument.objects.filter(order=order, doc_type='bl', is_deleted=False).order_by('-created_at').first()
-        if bl_doc and bl_doc.file:
+
+        def _attach_transit_doc(doc_type, label):
+            doc = OrderDocument.objects.filter(
+                order=order, doc_type=doc_type, is_deleted=False,
+            ).order_by('-created_at').first()
+            if not doc or not doc.file:
+                return
             try:
-                bl_doc.file.open('rb')
-                content = bl_doc.file.read()
-                bl_doc.file.close()
+                doc.file.open('rb')
+                content = doc.file.read()
+                doc.file.close()
             except Exception:
-                content = None
-            if content:
-                ext = (bl_doc.name or bl_doc.file.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
-                filename = f'BL_{order_no}.{ext}'
-                att = DraftAttachment(draft=draft, filename=filename, file_size=len(content))
-                att.file.save(filename, ContentFile(content), save=True)
+                return
+            if not content:
+                return
+            ext = (doc.name or doc.file.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
+            filename = f'{label}_{order_no}.{ext}'
+            att = DraftAttachment(draft=draft, filename=filename, file_size=len(content))
+            att.file.save(filename, ContentFile(content), save=True)
+
+        for doc_type, label in [
+            ('bl', 'BL'),
+            ('coo', 'COO'),
+            ('schedule_list', 'Schedule_List'),
+        ]:
+            _attach_transit_doc(doc_type, label)
 
         # NOTE: Order is NOT transitioned here — only when the draft is sent.
         return Response({

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import api from "@/lib/axios";
@@ -11,6 +11,8 @@ import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
+import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
+import { confirmDialog } from "@/lib/confirm";
 
 function fmtDate(d) {
   if (!d) return "";
@@ -88,6 +90,17 @@ export default function SampleDetailPage() {
   // FIRC confirmation — required at the Dispatch boundary for paid samples.
   const [dispatchFircConfirmed, setDispatchFircConfirmed] = useState(false);
   const [sampleDocs, setSampleDocs] = useState([]);
+  // Dispatch modal — upload local files / pick from app's Documents library
+  // (both attach to the dispatch email along with COA/MSDS).
+  const [uploadType, setUploadType] = useState("packing_photo");
+  const [showAppPicker, setShowAppPicker] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  // Delivery notes — free-form note entry tied to the dispatch flow.
+  // Saved as timestamped entries appended to sample.notes; no Delivered /
+  // Undelivered distinction.
+  const [deliveryNoteDraft, setDeliveryNoteDraft] = useState("");
+  const [savingDelivery, setSavingDelivery] = useState(false);
   const [showCOAEditor, setShowCOAEditor] = useState(false);
   const [showMSDSEditor, setShowMSDSEditor] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -134,6 +147,97 @@ export default function SampleDetailPage() {
     }
   };
 
+  // Refresh just the sample's documents list — used after upload / COA /
+  // MSDS generation so the "Ready to attach" list updates WITHOUT resetting
+  // the user's in-progress tracking number / courier details inputs.
+  const refreshSampleDocs = async () => {
+    try {
+      const r = await api.get(`/samples/${id}/documents/`);
+      setSampleDocs(Array.isArray(r.data) ? r.data : (r.data.results || []));
+      setSample((prev) => prev ? { ...prev, documents: Array.isArray(r.data) ? r.data : (r.data.results || []) } : prev);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  // Upload a file (from device or app library) as a SampleDocument so it
+  // gets attached to the dispatch email alongside COA/MSDS. Packing photos
+  // are stored as doc_type='other' with a "Packing Photo - " name prefix
+  // (the SampleDocument model only has coa/msds/other choices).
+  const uploadSampleDoc = async (file, filename, docType) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const baseName = filename || file.name;
+      const isPackingPhoto = docType === "packing_photo";
+      const displayName = isPackingPhoto && !baseName.toLowerCase().startsWith("packing photo")
+        ? `Packing Photo - ${baseName}`
+        : baseName;
+      const fd = new FormData();
+      fd.append("file", file, baseName);
+      fd.append("doc_type", isPackingPhoto ? "other" : (docType || "other"));
+      fd.append("name", displayName);
+      await api.post(`/samples/${id}/documents/`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success(`${displayName} attached`);
+      await refreshSampleDocs();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Upload failed"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleLocalFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) await uploadSampleDoc(file, file.name, uploadType);
+    e.target.value = "";
+  };
+
+  // Split sample.notes into "regular" lines and parsed delivery notes so
+  // the latter can render as their own visual card instead of being mixed
+  // into the generic Notes blob.
+  const { regularNotes, deliveryEntries } = (() => {
+    const raw = (sample?.notes || "").split(/\r?\n/);
+    const regular = [];
+    const entries = [];
+    for (const line of raw) {
+      const m = line.match(/^\[Delivery\]\s*([^:]+?)(?::\s*(.*))?$/);
+      if (m) {
+        entries.push({
+          date: (m[1] || "").trim(),
+          text: (m[2] || "").trim(),
+        });
+      } else if (line.trim()) {
+        regular.push(line);
+      }
+    }
+    return { regularNotes: regular.join("\n"), deliveryEntries: entries };
+  })();
+
+  const saveDeliveryNote = async () => {
+    const trimmed = (deliveryNoteDraft || "").trim();
+    if (!trimmed) {
+      toast.error("Please type a note before saving.");
+      return;
+    }
+    setSavingDelivery(true);
+    try {
+      const stamp = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      const noteEntry = `[Delivery] ${stamp}: ${trimmed}`;
+      const merged = sample?.notes ? `${sample.notes}\n${noteEntry}` : noteEntry;
+      await api.patch(`/samples/${id}/`, { notes: merged });
+      toast.success("Note saved");
+      setDeliveryNoteDraft("");
+      await loadSample();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to save note"));
+    } finally {
+      setSavingDelivery(false);
+    }
+  };
+
   // Items list editing helpers (multiple products per sample)
   const itemsDirty = JSON.stringify(itemsLocal) !== JSON.stringify(sample?.items || []);
   const addItem = () => setItemsLocal((prev) => [...prev, { product_name: "", client_product_name: "", quantity: "" }]);
@@ -166,6 +270,7 @@ export default function SampleDetailPage() {
   };
 
   useEffect(() => { loadSample(); }, [id]);
+
 
   // Reload sample data when the tab becomes visible again — covers the case
   // where the user navigated to the email composition page, sent the email,
@@ -256,10 +361,8 @@ export default function SampleDetailPage() {
   const submitFeedback = async (e) => {
     e.preventDefault();
     try {
-      await api.post(`/samples/${id}/add_feedback/`, {
-        ...feedbackForm,
-        rating: Number(feedbackForm.rating),
-      });
+      const { rating: _r, ...rest } = feedbackForm;
+      await api.post(`/samples/${id}/add_feedback/`, rest);
       toast.success("Feedback recorded");
       setShowFeedbackModal(false);
       setFeedbackForm({ rating: "5", comments: "", issues: "", bulk_order_interest: false });
@@ -391,8 +494,15 @@ export default function SampleDetailPage() {
       <StatusStepper
         timeline={timeline}
         onStepClick={(step) => {
-          if ((step.key === "mail_received" || step.key === "reply_mail") && sample.source_communication && sample.client) {
-            router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`);
+          if ((step.key === "mail_received" || step.key === "reply_mail") && sample.client) {
+            // If the sample was auto-created from an inbound email, jump
+            // straight to that thread's draft. Otherwise (manually-created
+            // samples) open a fresh compose to the client's primary contact.
+            if (sample.source_communication) {
+              router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`);
+            } else {
+              router.push(`/clients/${sample.client}?openCompose=1&linkSampleId=${sample.id}`);
+            }
           } else if (step.key === "feedback") {
             if (!sample.feedback) setShowFeedbackModal(true);
           } else if (step.key === "prepared" && (sample.status === "requested" || sample.status === "replied")) {
@@ -531,6 +641,45 @@ export default function SampleDetailPage() {
         )}
       </div>
 
+      {/* Delivery Notes — appears once the dispatch mail has gone out
+          (status = dispatched or further). Free-form note entry that gets
+          appended with a date stamp; previous notes show as a list above
+          the input. */}
+      {["dispatched", "delivered", "feedback_pending", "feedback_received"].includes(sample.status) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+          <h3 className="font-semibold text-gray-800 mb-1">Delivery Notes</h3>
+          <p className="text-xs text-gray-500 mb-4">Log courier updates, client feedback, or any delivery issue.</p>
+          {deliveryEntries.length > 0 && (
+            <ul className="space-y-2 mb-4">
+              {deliveryEntries.map((entry, idx) => (
+                <li key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
+                  <div className="flex-1 min-w-0">
+                    {entry.date && <span className="text-xs font-medium text-gray-500">{entry.date}</span>}
+                    {entry.text && <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap">{entry.text}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <textarea
+            value={deliveryNoteDraft}
+            onChange={(e) => setDeliveryNoteDraft(e.target.value)}
+            rows={3}
+            placeholder="Type a delivery note and click Save..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+          />
+          <div className="flex justify-end mt-2">
+            <button
+              onClick={saveDeliveryNote}
+              disabled={savingDelivery || !deliveryNoteDraft.trim()}
+              className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {savingDelivery ? "Saving..." : "Save Note"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Details grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -656,10 +805,10 @@ export default function SampleDetailPage() {
                   <dd className="text-gray-700 text-right">{sample.courier_details || "—"}</dd>
                 </div>
               </dl>
-              {sample.notes && (
+              {regularNotes && (
                 <div className="mt-4 pt-4 border-t border-gray-100">
                   <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Notes</h4>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{sample.notes}</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{regularNotes}</p>
                 </div>
               )}
             </>
@@ -704,7 +853,7 @@ export default function SampleDetailPage() {
                   {doc.uploaded_by_name && <span>{doc.uploaded_by_name}</span>}
                   {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
                     <button onClick={async () => {
-                      if (!confirm("Delete this document?")) return;
+                      if (!(await confirmDialog("Delete this document?"))) return;
                       try { await api.delete(`/samples/${id}/documents/${doc.id}/`); toast.success("Deleted"); loadSample(); } catch { toast.error("Failed to delete"); }
                     }} className="text-red-400 hover:text-red-600">Delete</button>
                   )}
@@ -722,12 +871,6 @@ export default function SampleDetailPage() {
         <div className="mt-6 bg-white rounded-xl border border-gray-200 p-6">
           <h3 className="font-semibold mb-4 text-gray-800">Client Feedback</h3>
           <div className="space-y-2 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-500">Rating:</span>
-              <span className="font-bold text-fuchsia-700">
-                {sample.feedback.rating ? `${sample.feedback.rating}/5` : "—"}
-              </span>
-            </div>
             {sample.feedback.comments && (
               <div>
                 <span className="text-gray-500 block text-xs">Comments</span>
@@ -823,7 +966,19 @@ export default function SampleDetailPage() {
               <input
                 type="checkbox"
                 checked={dispatchFircConfirmed || !!sample.firc_received_at}
-                onChange={(e) => setDispatchFircConfirmed(e.target.checked)}
+                onChange={async (e) => {
+                  if (!e.target.checked) {
+                    setDispatchFircConfirmed(false);
+                    return;
+                  }
+                  const ok = await confirmDialog({
+                    title: "Confirm FIRC received",
+                    message: "Has the bank confirmed the Foreign Inward Remittance Certificate for this paid sample?",
+                    confirmText: "Confirm",
+                    cancelText: "Cancel",
+                  });
+                  if (ok) setDispatchFircConfirmed(true);
+                }}
                 disabled={!!sample.firc_received_at}
                 className="mt-0.5 w-4 h-4 accent-emerald-600"
               />
@@ -833,19 +988,44 @@ export default function SampleDetailPage() {
               </span>
             </label>
           )}
-          {/* Generate COA / MSDS — attached to dispatch email and saved as sample documents */}
+          {/* Generate / Upload COA, MSDS — attached to dispatch email and saved as sample documents */}
           <div className="border-t border-gray-200 pt-3">
-            <p className="text-xs text-gray-500 mb-2">Generate documents to attach with dispatch email:</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => { setShowDispatchModal(false); setShowCOAEditor(true); }}
+            <p className="text-xs text-gray-500 mb-2">Generate or upload documents to attach with dispatch email:</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setShowCOAEditor(true)}
                 className="px-3 py-1.5 text-xs font-medium rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 flex items-center gap-1">
                 📋 Create COA
               </button>
-              <button type="button" onClick={() => { setShowDispatchModal(false); setShowMSDSEditor(true); }}
+              <button type="button" onClick={() => setShowMSDSEditor(true)}
                 className="px-3 py-1.5 text-xs font-medium rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 flex items-center gap-1">
                 📄 Create MSDS
               </button>
             </div>
+            {/* Packing Photos — upload from device OR pick from app's Documents library */}
+            <div className="mt-3 border border-amber-200 rounded-lg p-2 bg-amber-50/40">
+              <p className="text-[11px] font-semibold text-amber-700 mb-1">Packing Photos</p>
+              <div className="flex gap-1">
+                <button type="button" disabled={uploading}
+                  onClick={() => { setUploadType("packing_photo"); fileInputRef.current?.click(); }}
+                  className="flex-1 px-2 py-1 text-[11px] font-medium rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                  title="Upload from your computer">
+                  💻 Device
+                </button>
+                <button type="button" disabled={uploading}
+                  onClick={() => { setUploadType("packing_photo"); setShowAppPicker(true); }}
+                  className="flex-1 px-2 py-1 text-[11px] font-medium rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                  title="Pick from CRM Documents library">
+                  📁 App
+                </button>
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleLocalFile}
+              accept="image/*,.pdf"
+            />
             {sampleDocs.length > 0 && (
               <div className="mt-2 space-y-1">
                 {sampleDocs.map(d => (
@@ -867,12 +1047,12 @@ export default function SampleDetailPage() {
               Cancel
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (isPaidSample && !sample.firc_received_at && !dispatchFircConfirmed) {
                   toast.error("FIRC must be confirmed before dispatching a paid sample.");
                   return;
                 }
-                if (sample.source_communication && !confirm("You are dispatching WITHOUT notifying the client via email.\n\nAre you sure? You can still notify them later from the sample page.")) return;
+                if (sample.source_communication && !(await confirmDialog("You are dispatching WITHOUT notifying the client via email.\n\nAre you sure? You can still notify them later from the sample page."))) return;
                 advance("dispatched", {
                   tracking_number: trackingNumber,
                   courier_details: courierDetails,
@@ -886,26 +1066,36 @@ export default function SampleDetailPage() {
             </button>
             {sample.source_communication && (
               <button
-                onClick={async () => {
-                  // Save tracking info first without changing status
-                  try {
-                    await api.patch(`/samples/${sample.id}/`, {
+                onClick={() => {
+                  if (isPaidSample && !sample.firc_received_at && !dispatchFircConfirmed) {
+                    toast.error("FIRC must be confirmed before dispatching a paid sample.");
+                    return;
+                  }
+                  // Advance to "dispatched" with FIRC + tracking + courier in
+                  // one shot, then jump to the AI draft to send the email.
+                  // The advance endpoint validates the chain step, stamps
+                  // dispatch_date, and persists tracking/courier.
+                  advance(
+                    "dispatched",
+                    {
                       tracking_number: trackingNumber,
                       courier_details: courierDetails,
-                    });
-                  } catch {}
-                  setShowDispatchModal(false);
-                  // Navigate to client page with draft + document attachments
-                  const params = new URLSearchParams();
-                  params.set("openDraftFor", sample.source_communication);
-                  params.set("dispatchSampleId", sample.id);
-                  if (sampleDocs.length > 0) {
-                    params.set("attachDocs", sampleDocs.map(d => d.file).join(","));
-                  }
-                  router.push(`/clients/${sample.client}?${params.toString()}`);
+                      firc_received: isPaidSample ? (dispatchFircConfirmed || !!sample.firc_received_at) : undefined,
+                    },
+                    () => {
+                      const params = new URLSearchParams();
+                      params.set("openDraftFor", sample.source_communication);
+                      params.set("dispatchSampleId", sample.id);
+                      if (sampleDocs.length > 0) {
+                        params.set("attachDocs", sampleDocs.map(d => d.file).join(","));
+                      }
+                      router.push(`/clients/${sample.client}?${params.toString()}`);
+                    }
+                  );
                 }}
-                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 whitespace-nowrap flex items-center gap-1"
-                title="Save tracking details and compose dispatch email with COA/MSDS attached. Status changes only when email is sent."
+                disabled={advancing}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
+                title="Mark as dispatched and compose the dispatch email with attachments."
               >
                 💬 Dispatch & Notify Client
               </button>
@@ -937,7 +1127,7 @@ export default function SampleDetailPage() {
             await api.post(`/samples/${id}/documents/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
             toast.success("COA generated and saved");
             setShowCOAEditor(false);
-            loadSample();
+            refreshSampleDocs();
           } catch { toast.error("Failed to generate COA"); }
         }}
       />
@@ -959,10 +1149,22 @@ export default function SampleDetailPage() {
             await api.post(`/samples/${id}/documents/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
             toast.success("MSDS generated and saved");
             setShowMSDSEditor(false);
-            loadSample();
+            refreshSampleDocs();
           } catch { toast.error("Failed to generate MSDS"); }
         }}
       />
+
+      {/* App-library picker — pick an existing CRM document and attach it
+          as a SampleDocument so it rides along with the dispatch email. */}
+      {showAppPicker && (
+        <DocLibraryPicker
+          onPickFile={async (file, filename) => {
+            await uploadSampleDoc(file, filename, uploadType);
+            setShowAppPicker(false);
+          }}
+          onClose={() => setShowAppPicker(false)}
+        />
+      )}
 
       {/* Feedback Modal */}
       <Modal

@@ -111,13 +111,12 @@ export default function ShipmentsPage() {
   };
 
   const columns = [
-    { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-medium text-gray-900">{row.shipment_number}</span> },
+    { key: "order_number", label: "Order #", render: (row) => <span className="font-medium text-gray-900">{row.order_number || "—"}</span> },
     { key: "client_name", label: "Account", render: (row) => row.client_name || "—" },
     { key: "country", label: "Country", render: (row) => row.country || "—" },
-    { key: "order_number", label: "Order #", render: (row) => row.order_number || "—" },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "port_of_loading", label: "Port of Loading", render: (row) => row.port_of_loading || "—" },
-    { key: "dispatch_date", label: "Dispatch Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
+    { key: "port_of_discharge", label: "Port of Discharge", render: (row) => row.port_of_discharge || "—" },
+    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     {
       key: "progress",
       label: "Progress",
@@ -139,6 +138,7 @@ export default function ShipmentsPage() {
         );
       },
     },
+    { key: "dispatch_date", label: "Dispatch Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
   ];
 
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";

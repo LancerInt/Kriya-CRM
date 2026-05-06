@@ -15,6 +15,7 @@ import api from "@/lib/axios";
 import AISummaryButton from "@/components/ai/AISummaryButton";
 import { getErrorMessage } from "@/lib/errorHandler";
 import SearchableSelect from "@/components/ui/SearchableSelect";
+import { confirmDialog } from "@/lib/confirm";
 
 const CLASSIFICATION_COLORS = {
   promotion: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", icon: "%" },
@@ -301,7 +302,7 @@ export default function CommunicationsPage() {
 
   const handleBulkArchive = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Archive ${selectedIds.size} selected message${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    if (!(await confirmDialog(`Archive ${selectedIds.size} selected message${selectedIds.size > 1 ? "s" : ""}?`))) return;
     try {
       await Promise.all([...selectedIds].map((id) => api.delete(`/communications/${id}/`)));
       toast.success(`${selectedIds.size} message${selectedIds.size > 1 ? "s" : ""} archived`);

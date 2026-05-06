@@ -37,6 +37,7 @@ import DataTable from "@/components/ui/DataTable";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { confirmDialog } from "@/lib/confirm";
 
 const emptyForm = { name: "", hsn_code: "", category: "", active_ingredient: "", concentration: "", description: "", base_price: "", currency: "USD", unit: "MT", client_brand_names: "" };
 
@@ -96,7 +97,7 @@ export default function ProductsPage() {
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
-    if (!confirm("Delete this product?")) return;
+    if (!(await confirmDialog("Delete this product?"))) return;
     try {
       await api.delete(`/products/${id}/`);
       toast.success("Product deleted");

@@ -11,6 +11,7 @@ import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import PdfViewer from "@/components/ui/PdfViewer";
+import { confirmDialog } from "@/lib/confirm";
 
 export default function ProformaInvoicesPage() {
   const router = useRouter();
@@ -65,7 +66,7 @@ export default function ProformaInvoicesPage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} proforma invoice${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    if (!(await confirmDialog(`Delete ${selectedIds.size} proforma invoice${selectedIds.size > 1 ? "s" : ""}?`))) return;
     try {
       await Promise.all([...selectedIds].map((id) => api.delete(`/finance/pi/${id}/`)));
       toast.success(`${selectedIds.size} PI${selectedIds.size > 1 ? "s" : ""} deleted`);
@@ -188,7 +189,7 @@ export default function ProformaInvoicesPage() {
     // even if the user clicked Revise on an older row in the chain.
     // Count only sent versions for display
     const sentCount = (piData._allVersions || [piData]).filter(v => v.status === "sent").length || 1;
-    if (!confirm(`Create a new version after V${sentCount}?\n\nThe previous version will be kept intact and the new V${sentCount + 1} will open in the editor.`)) return;
+    if (!(await confirmDialog(`Create a new version after V${sentCount}?\n\nThe previous version will be kept intact and the new V${sentCount + 1} will open in the editor.`))) return;
     try {
       const res = await api.post(`/finance/pi/${piData.id}/revise/`);
       toast.success(`Revision V${res.data.version} created`);

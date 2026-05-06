@@ -203,6 +203,9 @@ export default function SamplesPage() {
   };
 
   const columns = [
+    { key: "sample_number", label: "Shipment No", render: (row) => (
+      <span className="font-medium text-gray-900">{row.sample_number || "—"}</span>
+    )},
     { key: "product_name", label: "Product", render: (row) => {
       const names = productNames(row);
       if (names.length === 0) return <span className="text-gray-400">—</span>;
@@ -356,18 +359,24 @@ export default function SamplesPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
               <input type="date" value={form.dispatch_date} onChange={(e) => setForm({ ...form, dispatch_date: e.target.value })} className={inputClass} />
             </div>
-            <SearchableSelect
-              label="Status"
-              value={form.status}
-              onChange={(v) => setForm({ ...form, status: v || "requested" })}
-              options={form.sample_type === "paid" ? PAID_STATUS_OPTIONS : FREE_STATUS_OPTIONS}
-              placeholder="Select Status"
-              searchable={false}
-            />
+            {/* Status / Tracking / Courier / Notes are only relevant once
+                the sample is being managed (Edit modal). On New Sample
+                they're hidden — the new sample defaults to "Mail Received"
+                and the rest get filled in as the user advances stages. */}
+            {editingSample && (
+              <SearchableSelect
+                label="Status"
+                value={form.status}
+                onChange={(v) => setForm({ ...form, status: v || "requested" })}
+                options={form.sample_type === "paid" ? PAID_STATUS_OPTIONS : FREE_STATUS_OPTIONS}
+                placeholder="Select Status"
+                searchable={false}
+              />
+            )}
           </div>
 
-          {/* FIRC checkbox — only meaningful for Paid samples on Dispatched stage */}
-          {form.sample_type === "paid" && form.status === "dispatched" && (
+          {/* FIRC checkbox — only meaningful for Paid samples on Dispatched stage (Edit only) */}
+          {editingSample && form.sample_type === "paid" && form.status === "dispatched" && (
             <label className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg cursor-pointer">
               <input
                 type="checkbox"
@@ -378,20 +387,24 @@ export default function SamplesPage() {
               <span className="text-sm text-indigo-800">FIRC received (Foreign Inward Remittance Certificate)</span>
             </label>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tracking Number</label>
-              <input value={form.tracking_number} onChange={(e) => setForm({ ...form, tracking_number: e.target.value })} className={inputClass} />
+          {editingSample && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tracking Number</label>
+                <input value={form.tracking_number} onChange={(e) => setForm({ ...form, tracking_number: e.target.value })} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Courier Details</label>
+                <input value={form.courier_details} onChange={(e) => setForm({ ...form, courier_details: e.target.value })} className={inputClass} />
+              </div>
             </div>
+          )}
+          {editingSample && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Courier Details</label>
-              <input value={form.courier_details} onChange={(e) => setForm({ ...form, courier_details: e.target.value })} className={inputClass} />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className={inputClass} />
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className={inputClass} />
-          </div>
+          )}
           <div className="flex gap-3 pt-2">
             <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
               {editingSample ? "Save Changes" : "Create Sample"}

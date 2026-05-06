@@ -8,6 +8,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { confirmDialog } from "@/lib/confirm";
 
 function EmailAccountsTab() {
   const [accounts, setAccounts] = useState([]);
@@ -51,7 +52,7 @@ function EmailAccountsTab() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this email account?")) return;
+    if (!(await confirmDialog("Delete this email account?"))) return;
     try {
       await api.delete(`/communications/email-accounts/${id}/`);
       toast.success("Email account deleted");
@@ -224,7 +225,7 @@ function WhatsAppConfigTab() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this WhatsApp config?")) return;
+    if (!(await confirmDialog("Delete this WhatsApp config?"))) return;
     try {
       await api.delete(`/communications/whatsapp-configs/${id}/`);
       toast.success("WhatsApp config deleted");
@@ -438,7 +439,7 @@ function MeetingPlatformsTab() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this platform config?")) return;
+    if (!(await confirmDialog("Delete this platform config?"))) return;
     try {
       await api.delete(`/meetings/platform-configs/${id}/`);
       toast.success("Config deleted");
@@ -625,7 +626,7 @@ function AIConfigTab() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this AI config?")) return;
+    if (!(await confirmDialog("Delete this AI config?"))) return;
     try { await api.delete(`/agents/configs/${id}/`); toast.success("Deleted"); loadConfigs(); }
     catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
@@ -870,7 +871,7 @@ function UserManagementTab() {
 
   const handleToggleActive = async (user) => {
     const action = user.is_active ? "deactivate" : "reactivate";
-    if (user.is_active && !confirm(`Deactivate ${user.first_name} ${user.last_name}?\n\nThey will no longer be able to log in, but all their data (emails, tasks, quotations, etc.) will remain intact.`)) return;
+    if (user.is_active && !(await confirmDialog(`Deactivate ${user.first_name} ${user.last_name}?\n\nThey will no longer be able to log in, but all their data (emails, tasks, quotations, etc.) will remain intact.`))) return;
     try {
       await api.post(`/auth/users/${user.id}/${action}/`);
       toast.success(user.is_active ? "User deactivated — login blocked, data preserved" : "User reactivated");
@@ -1008,7 +1009,7 @@ function ShadowAssignmentsTab() {
   };
 
   const handleRemove = async (executiveId, shadowId) => {
-    if (!confirm("Remove this shadow assignment?")) return;
+    if (!(await confirmDialog("Remove this shadow assignment?"))) return;
     try {
       await api.post(`/auth/users/${executiveId}/remove-shadow/`, { shadow_id: shadowId });
       toast.success("Shadow removed");

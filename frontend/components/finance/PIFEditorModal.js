@@ -372,6 +372,37 @@ export function PIFListModal({ open, onClose, orderId, onAllReady }) {
                       <button onClick={() => setEditing(it)} className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
                         {state === "missing" ? "Create" : state === "draft" ? "Edit & Generate" : "Edit"}
                       </button>
+                      {/* Attach option — upload a pre-existing PIF PDF directly.
+                          Creates the PIF row if missing, otherwise replaces it. */}
+                      {state !== "ready" && (
+                        <button
+                          onClick={() => {
+                            const input = document.createElement("input");
+                            input.type = "file";
+                            input.accept = "application/pdf,image/*";
+                            input.onchange = async () => {
+                              const f = input.files?.[0];
+                              if (!f) return;
+                              const fd = new FormData();
+                              fd.append("file", f);
+                              try {
+                                if (it.pif_id) {
+                                  await api.post(`/finance/pif/${it.pif_id}/replace-pdf/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+                                } else {
+                                  fd.append("order_item_id", it.order_item_id);
+                                  await api.post(`/finance/pif/upload-for-order-item/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+                                }
+                                toast.success("PIF attached");
+                                load();
+                              } catch { toast.error("Failed to attach PIF"); }
+                            };
+                            input.click();
+                          }}
+                          className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                        >
+                          Attach
+                        </button>
+                      )}
                       {state === "ready" && it.pif_id && (
                         <button
                           onClick={() => {

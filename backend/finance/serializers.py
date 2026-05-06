@@ -36,15 +36,123 @@ class InvoiceCreateSerializer(serializers.ModelSerializer):
 
 class PaymentSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='client.company_name', read_only=True, default='')
+    order_id = serializers.SerializerMethodField()
+    order_number = serializers.SerializerMethodField()
+    payment_breakdown = serializers.SerializerMethodField()
+
     class Meta:
         model = Payment
         fields = '__all__'
         read_only_fields = ['id']
 
+    # Payments auto-created from a CommercialInvoice carry a reference of
+    # the form "CI <invoice_number>". Resolve that back to the source CI
+    # to surface the linked Order in the Payments list.
+    def _resolved_ci(self, obj):
+        if getattr(self, '_ci_cache_obj', None) is obj and hasattr(self, '_ci_cache_value'):
+            return self._ci_cache_value
+        ci = None
+        ref = (obj.reference or '').strip()
+        if ref.upper().startswith('CI '):
+            from .models import CommercialInvoice
+            ci = CommercialInvoice.objects.filter(invoice_number=ref[3:].strip()).select_related('order').first()
+        self._ci_cache_obj = obj
+        self._ci_cache_value = ci
+        return ci
+
+    def get_order_id(self, obj):
+        ci = self._resolved_ci(obj)
+        return str(ci.order_id) if ci and ci.order_id else None
+
+    def get_order_number(self, obj):
+        ci = self._resolved_ci(obj)
+        return ci.order.order_number if ci and ci.order_id else ''
+
+    def get_payment_breakdown(self, obj):
+        """Split the Payment amount into Advance / Balance based on the
+        linked Order's payment terms (e.g. "50% advance D/A 30 days").
+        Returns null when the linked order has no advance terms — the
+        Payments row then just shows the plain total."""
+        ci = self._resolved_ci(obj)
+        if not ci or not ci.order_id:
+            return None
+        from orders.payment_terms import parse_payment_terms
+        order = ci.order
+        parsed = parse_payment_terms(order.payment_terms)
+        if not parsed['has_advance'] and not parsed['has_balance']:
+            return None
+        try:
+            total = float(obj.amount or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if not total:
+            return None
+        advance_amt = round(total * parsed['advance_pct'] / 100, 2) if parsed['has_advance'] else 0
+        balance_amt = round(total - advance_amt, 2) if parsed['has_balance'] else 0
+        return {
+            'advance_pct': parsed['advance_pct'],
+            'balance_pct': parsed['balance_pct'],
+            'advance_amount': advance_amt,
+            'balance_amount': balance_amt,
+            'advance_received': bool(order.advance_payment_received_at),
+            'balance_received': bool(order.balance_payment_received_at),
+        }
+
 class FIRCRecordSerializer(serializers.ModelSerializer):
+    source_kind = serializers.SerializerMethodField()
+    source_label = serializers.SerializerMethodField()
+    source_id = serializers.SerializerMethodField()
+    client_name = serializers.SerializerMethodField()
+    amount = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+
     class Meta:
         model = FIRCRecord
         fields = '__all__'
+
+    def get_source_kind(self, obj):
+        if obj.order_id:
+            return 'order'
+        if obj.sample_id:
+            return 'sample'
+        if obj.payment_id:
+            return 'payment'
+        return ''
+
+    def get_source_label(self, obj):
+        if obj.order_id:
+            return obj.order.order_number
+        if obj.sample_id:
+            return obj.sample.sample_number or ''
+        if obj.payment_id and obj.payment.reference:
+            return obj.payment.reference
+        return ''
+
+    def get_source_id(self, obj):
+        return str(obj.order_id or obj.sample_id or obj.payment_id or '')
+
+    def get_client_name(self, obj):
+        if obj.order_id and obj.order.client_id:
+            return obj.order.client.company_name
+        if obj.sample_id and obj.sample.client_id:
+            return obj.sample.client.company_name
+        if obj.payment_id and obj.payment.client_id:
+            return obj.payment.client.company_name
+        return ''
+
+    def get_amount(self, obj):
+        if obj.order_id and obj.order.total is not None:
+            return float(obj.order.total)
+        if obj.payment_id:
+            return float(obj.payment.amount or 0)
+        return None
+
+    def get_currency(self, obj):
+        if obj.order_id:
+            return obj.order.currency or 'USD'
+        if obj.payment_id:
+            return obj.payment.currency or 'USD'
+        return 'USD'
 
 class GSTRecordSerializer(serializers.ModelSerializer):
     class Meta:

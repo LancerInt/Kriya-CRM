@@ -61,6 +61,73 @@ def check_cro_reminders():
     return {'sent': sent}
 
 
+@shared_task(name='orders.check_transit_doc_reminders')
+def check_transit_doc_reminders():
+    """
+    Nudge users every 2 hours to upload the transit documents (BL, Shipping
+    Bill, Schedule List, COO) once an order is at Dispatched. Stops as soon
+    as all four are attached.
+
+    The 2h cool-down is enforced per-order via
+    ``Order.last_transit_reminder_at``. Scheduled to run every 30 min by
+    Celery Beat (see config/celery.py); also piggybacked on the unread-count
+    poll in notifications/views.py for environments running without Beat.
+    """
+    from orders.models import Order, OrderDocument
+    from notifications.helpers import notify
+
+    REQUIRED = {
+        'bl': 'BL (Bill of Lading)',
+        'shipping_bill': 'Shipping Bill',
+        'schedule_list': 'Schedule List',
+        'coo': 'COO (Certificate of Origin)',
+    }
+
+    now = timezone.now()
+    threshold = now - timedelta(hours=2)
+
+    qs = Order.objects.filter(status='dispatched', is_deleted=False).select_related('client')
+    sent = 0
+
+    for order in qs:
+        present = set(
+            OrderDocument.objects
+            .filter(order=order, is_deleted=False, doc_type__in=REQUIRED.keys())
+            .values_list('doc_type', flat=True)
+        )
+        missing = [REQUIRED[k] for k in REQUIRED if k not in present]
+        if not missing:
+            continue
+
+        # Respect the 2h cool-down
+        if order.last_transit_reminder_at and order.last_transit_reminder_at > threshold:
+            continue
+        # Don't fire until at least 2 hours have passed since the order was
+        # dispatched.
+        if order.dispatched_at and order.dispatched_at > threshold:
+            continue
+
+        notify(
+            title=f'Transit docs pending for {order.order_number}',
+            message=(
+                f'Order {order.order_number} ({order.client.company_name}) has been at '
+                f'Dispatched for at least 2 hours and the following transit document(s) '
+                f'are still not attached: {", ".join(missing)}. Please upload them so the '
+                f'order can advance to In Transit.'
+            ),
+            notification_type='reminder',
+            link=f'/orders/{order.id}',
+            client=order.client,
+        )
+
+        order.last_transit_reminder_at = now
+        order.save(update_fields=['last_transit_reminder_at'])
+        sent += 1
+
+    logger.info(f'Transit-doc reminder task: sent {sent} notifications')
+    return {'sent': sent}
+
+
 # ─────────── Delivery acknowledgment reminder ───────────
 # TESTING MODE: trigger 3 minutes after the order enters In Transit.
 # PRODUCTION MODE: trigger 3 days before the estimated delivery date.
@@ -260,4 +327,89 @@ def check_delivery_reminders():
         sent += 1
 
     logger.info(f'Delivery reminder task: prepared {sent} drafts')
+    return {'sent': sent}
+
+
+@shared_task(name='orders.check_balance_payment_reminders')
+def check_balance_payment_reminders():
+    """
+    Fire a reminder 10 days before the balance payment is due (e.g.
+    "D/A 60 days" balance due 50 days after dispatch). The reminder
+    targets the assigned executive + admin/manager via notify(); per-order
+    cool-down is enforced through `balance_reminder_sent_at`.
+
+    Scheduled daily (early morning IST). Skips orders that:
+      - have no payment terms with a balance
+      - haven't dispatched yet
+      - already received the balance
+      - already had a reminder fired
+    """
+    from datetime import date
+    from orders.models import Order
+    from orders.payment_terms import (
+        compute_balance_due_date, compute_advance_due_date, parse_payment_terms,
+    )
+    from notifications.helpers import notify
+
+    today = date.today()
+    qs = (
+        Order.objects.filter(is_deleted=False)
+        .exclude(dispatched_at__isnull=True)
+        .select_related('client')
+    )
+    sent = 0
+
+    for order in qs:
+        # Reuse one shared reminder slot (`balance_reminder_sent_at`) for
+        # whichever row is After Dispatch. Either row, but not both, will
+        # have a due date at any given time for a typical export deal.
+        if order.balance_reminder_sent_at:
+            continue
+
+        parsed = parse_payment_terms(order.payment_terms)
+        candidates = []
+        # Balance row when it's After Dispatch and unpaid
+        if parsed['has_balance'] and not order.balance_is_before_dispatch and not order.balance_payment_received_at:
+            due = compute_balance_due_date(order)
+            if due:
+                candidates.append(('Balance', parsed['balance_pct'], due))
+        # Advance row when it's After Dispatch and unpaid
+        if parsed['has_advance'] and not order.advance_is_before_dispatch and not order.advance_payment_received_at:
+            due = compute_advance_due_date(order)
+            if due:
+                candidates.append(('Advance', parsed['advance_pct'], due))
+
+        if not candidates:
+            continue
+
+        # Fire on the earliest still-pending payment first.
+        candidates.sort(key=lambda c: c[2])
+        label, pct, due = candidates[0]
+        days_until_due = (due - today).days
+        if days_until_due > 10:
+            continue
+
+        client_name = order.client.company_name if order.client else 'Unknown client'
+        title = (
+            f'{label} payment ({pct}%) due in {days_until_due} day(s): {order.order_number}'
+            if days_until_due >= 0
+            else f'{label} payment ({pct}%) overdue ({-days_until_due} day(s)): {order.order_number}'
+        )
+        notify(
+            title=title,
+            message=(
+                f'Order {order.order_number} for {client_name} has a {label.lower()} '
+                f'payment due on {due.isoformat()} (terms: "{order.payment_terms}"). '
+                f'Confirm with the client and mark it received.'
+            ),
+            notification_type='reminder',
+            link=f'/orders/{order.id}',
+            client=order.client,
+            extra_users=[order.created_by] if order.created_by else None,
+        )
+        order.balance_reminder_sent_at = timezone.now()
+        order.save(update_fields=['balance_reminder_sent_at'])
+        sent += 1
+
+    logger.info(f'Payment reminder task: fired {sent} reminders')
     return {'sent': sent}

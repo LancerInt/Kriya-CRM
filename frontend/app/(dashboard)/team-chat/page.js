@@ -5,6 +5,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { confirmDialog } from "@/lib/confirm";
 
 const BACKEND_URL = "http://localhost:8000";
 const fileUrl = (path) => {
@@ -373,7 +374,7 @@ export default function TeamChatPage() {
   const handleDeleteRoom = async (room, e) => {
     e.stopPropagation();
     if (room.is_general) { toast.error("Cannot delete the General room"); return; }
-    if (!confirm(`Delete #${room.name}? All messages will be lost.`)) return;
+    if (!(await confirmDialog(`Delete #${room.name}? All messages will be lost.`))) return;
     try {
       await api.delete(`/chat/rooms/${room.id}/`);
       setRooms((prev) => prev.filter((r) => r.id !== room.id));
@@ -400,7 +401,7 @@ export default function TeamChatPage() {
 
   const handleDeleteMsg = async (msgId) => {
     setContextMenu(null);
-    if (!confirm("Delete this message?")) return;
+    if (!(await confirmDialog("Delete this message?"))) return;
     try {
       await api.delete(`/chat/messages/${msgId}/`);
       setMessages((prev) => prev.filter((m) => m.id !== msgId));

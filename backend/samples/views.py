@@ -219,6 +219,18 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             notification_type='system', link=f'/samples/{sample.id}',
             actor=request.user, client=sample.client,
         )
+        # Schedule the post-delivery feedback reminder. Fires after the
+        # configured delay (5 min for testing) and only if the sample is
+        # still sitting at 'delivered' — i.e. nobody has logged feedback yet.
+        if target == 'delivered':
+            try:
+                from .tasks import schedule_sample_feedback_reminder
+                schedule_sample_feedback_reminder(sample.id)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f'Could not schedule feedback reminder for sample {sample.id}: {e}'
+                )
         return Response(SampleSerializer(sample).data)
 
     @action(detail=True, methods=['post'], url_path='revert')

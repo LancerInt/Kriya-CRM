@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import ModernSelect from "@/components/ui/ModernSelect";
+import { confirmDialog } from "@/lib/confirm";
 
 export default function TasksPage() {
   const dispatch = useDispatch();
@@ -22,7 +23,7 @@ export default function TasksPage() {
   const [viewTask, setViewTask] = useState(null);
 
   const handleDelete = async (taskId) => {
-    if (!confirm("Delete this task? It will be moved to the recycle bin.")) return;
+    if (!(await confirmDialog("Delete this task? It will be moved to the recycle bin."))) return;
     try {
       await api.delete(`/tasks/${taskId}/`);
       toast.success("Task deleted");

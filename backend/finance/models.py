@@ -78,7 +78,12 @@ class FIRCRecord(TimeStampedModel):
         PENDING = 'pending', 'Pending'
         RECEIVED = 'received', 'Received'
 
-    payment = models.OneToOneField(Payment, on_delete=models.CASCADE, related_name='firc')
+    # Either of these (or none) anchors the record. Auto-created when a
+    # user ticks FIRC on a Sample or an Order; the legacy `payment` FK
+    # stays for older flows that recorded FIRC directly against a Payment.
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, null=True, blank=True, related_name='firc_records')
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='firc_records')
+    sample = models.ForeignKey('samples.Sample', on_delete=models.CASCADE, null=True, blank=True, related_name='firc_records')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     document = models.FileField(upload_to='firc/%Y/%m/', null=True, blank=True)
     received_date = models.DateField(null=True, blank=True)
@@ -270,7 +275,12 @@ class CommercialInvoice(TimeStampedModel):
     pre_carriage_by = models.CharField(max_length=100, blank=True)
     place_of_receipt = models.CharField(max_length=100, blank=True)
     terms_of_delivery = models.CharField(max_length=100, blank=True, help_text='e.g. FOB - Chennai Port')
-    payment_terms = models.CharField(max_length=255, blank=True, help_text='e.g. D/A 30 Days')
+    # Renamed from payment_terms — same field, label aligned with PI's
+    # `terms_of_trade`. Drives the order's Payment Tracking card whenever
+    # the CI is updated. payment_terms kept as a soft-deprecated mirror
+    # so older API clients/PDF templates still resolve a value.
+    terms_of_trade = models.CharField(max_length=255, blank=True, help_text='e.g. D/A 30 Days')
+    payment_terms = models.CharField(max_length=255, blank=True, help_text='[deprecated] mirror of terms_of_trade')
 
     # ── Totals (dual currency) ──
     currency = models.CharField(max_length=3, default='USD')

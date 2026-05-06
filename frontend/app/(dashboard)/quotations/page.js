@@ -10,6 +10,7 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import PdfViewer from "@/components/ui/PdfViewer";
+import { confirmDialog } from "@/lib/confirm";
 
 /**
  * Quotations list page — every quotation row (draft, sent, approved, etc.)
@@ -58,7 +59,7 @@ export default function QuotationsPage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} quotation${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    if (!(await confirmDialog(`Delete ${selectedIds.size} quotation${selectedIds.size > 1 ? "s" : ""}?`))) return;
     try {
       await Promise.all([...selectedIds].map((id) => api.delete(`/quotations/quotations/${id}/`)));
       toast.success(`${selectedIds.size} quotation${selectedIds.size > 1 ? "s" : ""} deleted`);
@@ -114,7 +115,7 @@ export default function QuotationsPage() {
   };
 
   const handleRevise = async (q) => {
-    if (!confirm(`Create a new version of ${q.quotation_number}?\n\nThe original will be kept and a new V${(q.version || 1) + 1} will be opened in the editor.`)) return;
+    if (!(await confirmDialog(`Create a new version of ${q.quotation_number}?\n\nThe original will be kept and a new V${(q.version || 1) + 1} will be opened in the editor.`))) return;
     try {
       const res = await api.post(`/quotations/quotations/${q.id}/revise/`);
       toast.success(`Revision V${res.data.version} created`);

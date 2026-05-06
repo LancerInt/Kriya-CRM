@@ -333,7 +333,7 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
                 </tr>
                 <tr>
                   <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Terms of Trade</span></td>
-                  <td className="border border-gray-400 p-0"><input value={ciForm.payment_terms || ""} onChange={(e) => setCiForm({ ...ciForm, payment_terms: e.target.value })} className={ic} /></td>
+                  <td className="border border-gray-400 p-0"><input value={ciForm.terms_of_trade ?? ciForm.payment_terms ?? ""} onChange={(e) => setCiForm({ ...ciForm, terms_of_trade: e.target.value, payment_terms: e.target.value })} placeholder='e.g. "50% advance D/A 60 days"' className={ic} /></td>
                 </tr>
                 <tr>
                   <td className="border border-gray-400 p-0 font-bold"><span className="px-1">Buyer Reference</span></td>

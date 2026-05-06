@@ -5,6 +5,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import { confirmDialog } from "@/lib/confirm";
 
 // ---------------------------------------------------------------------------
 // Thinking indicator — cycles through short messages
@@ -260,7 +261,7 @@ export default function AIPage() {
   };
 
   const handleDeleteMessage = async (msgId) => {
-    if (!confirm("Delete this message?")) return;
+    if (!(await confirmDialog("Delete this message?"))) return;
     try {
       await api.delete(`/agents/messages/${msgId}/`);
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
@@ -271,7 +272,7 @@ export default function AIPage() {
 
   const handleDeleteConv = async (id, e) => {
     e.stopPropagation();
-    if (!confirm("Delete this conversation?")) return;
+    if (!(await confirmDialog("Delete this conversation?"))) return;
     try {
       await api.delete(`/agents/conversations/${id}/`);
       if (activeConv?.id === id) { setActiveConv(null); setMessages([]); }

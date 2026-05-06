@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 import Modal from "@/components/ui/Modal";
+import { confirmDialog } from "@/lib/confirm";
 
 const FILE_ICONS = { pdf: "📄", doc: "📝", docx: "📝", xls: "📊", xlsx: "📊", csv: "📊", ppt: "📑", pptx: "📑", jpg: "🖼️", jpeg: "🖼️", png: "🖼️", gif: "🖼️", zip: "📦", rar: "📦", txt: "📃" };
 const getIcon = (name) => FILE_ICONS[(name || "").split(".").pop()?.toLowerCase()] || "📎";
@@ -118,7 +119,7 @@ export default function DocumentsPage() {
   };
 
   const handleDeleteFolder = async (id) => {
-    if (!confirm("Delete this folder and all its contents?")) return;
+    if (!(await confirmDialog("Delete this folder and all its contents?"))) return;
     try { await api.delete(`/documents/folders/${id}/`); loadContents(currentFolder); toast.success("Folder deleted"); }
     catch { toast.error("Failed to delete"); }
   };
@@ -139,7 +140,7 @@ export default function DocumentsPage() {
   };
 
   const handleDeleteFile = async (id) => {
-    if (!confirm("Delete this file?")) return;
+    if (!(await confirmDialog("Delete this file?"))) return;
     try { await api.delete(`/documents/${id}/`); loadContents(currentFolder); loadAllFiles(); toast.success("Deleted"); }
     catch { toast.error("Failed to delete"); }
   };
@@ -161,7 +162,7 @@ export default function DocumentsPage() {
       ? folders.find(f => f.id === id)
       : files.find(f => f.id === id);
     if (current?.visibility === "private" && value === "public") {
-      if (!confirm("This will make it visible to everyone in the organization. Are you sure you want to make it public?")) {
+      if (!(await confirmDialog("This will make it visible to everyone in the organization. Are you sure you want to make it public?"))) {
         setOpenMenu(null);
         return;
       }

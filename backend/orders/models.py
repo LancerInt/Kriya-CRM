@@ -14,7 +14,7 @@ class Order(TimeStampedModel):
         FACTORY_READY = 'factory_ready', 'Product Readiness'
         CONTAINER_BOOKED = 'container_booked', 'Container Booked'
         INSPECTION = 'inspection', 'Under Inspection'
-        INSPECTION_PASSED = 'inspection_passed', 'Inspection Passed'
+        INSPECTION_PASSED = 'inspection_passed', 'Inspection Status'
         DISPATCHED = 'dispatched', 'Dispatched'
         IN_TRANSIT = 'in_transit', 'In Transit'
         ARRIVED = 'arrived', 'Delivered'
@@ -50,6 +50,9 @@ class Order(TimeStampedModel):
 
     # CRO (Container Release Order) reminder tracking — nudged every 2h after Container Booked
     last_cro_reminder_at = models.DateTimeField(null=True, blank=True)
+    # Transit-document reminders (BL, Shipping Bill, Schedule List, COO) —
+    # nudged every 2h after Dispatched until all four are uploaded.
+    last_transit_reminder_at = models.DateTimeField(null=True, blank=True)
 
     # Delivery acknowledgment reminder — fired once before estimated delivery
     delivery_reminder_sent_at = models.DateTimeField(null=True, blank=True)
@@ -72,6 +75,19 @@ class Order(TimeStampedModel):
     # FIRC (Foreign Inward Remittance Certificate) — final 11th step,
     # marked after delivery + feedback. Drives the shipment progress to 100%.
     firc_received_at = models.DateTimeField(null=True, blank=True)
+
+    # Payment tracking — derived from payment_terms (e.g.
+    # "50% advance D/A 60 days"). The advance portion is paid before
+    # dispatch; the balance falls due `balance_due_days` after the
+    # dispatched_at timestamp. Reminders fire 10 days before due.
+    advance_payment_received_at = models.DateTimeField(null=True, blank=True)
+    balance_payment_received_at = models.DateTimeField(null=True, blank=True)
+    balance_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    # Per-payment phase overrides — the parser suggests defaults (advance
+    # before, balance after) but the executive can flip either side via the
+    # Payment Tracking card. The dispatch gate honors these choices.
+    advance_is_before_dispatch = models.BooleanField(default=True)
+    balance_is_before_dispatch = models.BooleanField(default=False)
 
     # Source email thread — used by the email service to keep all order-stage
     # emails (PI, Sales Order, dispatch, transit, delivery) threaded with the

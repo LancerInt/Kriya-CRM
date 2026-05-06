@@ -9,6 +9,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import SearchableSelect from "@/components/ui/SearchableSelect";
+import { confirmDialog } from "@/lib/confirm";
 
 const stages = [
   { key: "inquiry", label: "New Lead", color: "bg-purple-500" },
@@ -45,7 +46,7 @@ export default function PipelinePage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this lead?")) return;
+    if (!(await confirmDialog("Delete this lead?"))) return;
     try {
       const { default: api } = await import("@/lib/axios");
       await api.delete(`/quotations/inquiries/${id}/`);

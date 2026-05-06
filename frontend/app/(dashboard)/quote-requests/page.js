@@ -10,6 +10,7 @@ import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import PdfViewer from "@/components/ui/PdfViewer";
+import { confirmDialog } from "@/lib/confirm";
 
 function ConfidenceBadge({ value }) {
   const pct = Math.round(value * 100);
@@ -93,7 +94,7 @@ export default function QuoteRequestsPage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} selected inquiry${selectedIds.size > 1 ? "s" : ""}?`)) return;
+    if (!(await confirmDialog(`Delete ${selectedIds.size} selected inquiry${selectedIds.size > 1 ? "s" : ""}?`))) return;
     try {
       await Promise.all([...selectedIds].map((id) => api.delete(`/communications/quote-requests/${id}/`)));
       toast.success(`${selectedIds.size} inquiry${selectedIds.size > 1 ? "s" : ""} deleted`);
@@ -232,7 +233,7 @@ export default function QuoteRequestsPage() {
     const latest = versions.length
       ? versions.reduce((a, b) => ((a.version || 1) >= (b.version || 1) ? a : b))
       : { id: qr.linked_quotation, version: qr.linked_quotation_version || 1 };
-    if (!confirm(`Create a new version after V${latest.version}?\n\nThe previous version will be kept and the new V${(latest.version || 1) + 1} will open in the editor.`)) return;
+    if (!(await confirmDialog(`Create a new version after V${latest.version}?\n\nThe previous version will be kept and the new V${(latest.version || 1) + 1} will open in the editor.`))) return;
     try {
       const res = await api.post(`/quotations/quotations/${latest.id}/revise/`);
       toast.success(`Revision V${res.data.version} created`);

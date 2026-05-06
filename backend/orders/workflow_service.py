@@ -66,7 +66,7 @@ def _all_order_items_have_pif(order):
 DEFAULT_READINESS_CHECKLIST = [
     {'label': 'Product', 'checked': False, 'required': True},
     {'label': 'Containers', 'checked': False, 'required': True},
-    {'label': 'Cotton Box', 'checked': False, 'required': False},
+    {'label': 'Corton Box', 'checked': False, 'required': False},
     {'label': 'Leaflets', 'checked': False, 'required': False},
     {'label': 'Batch No. Stickers', 'checked': False, 'required': False},
 ]
@@ -204,6 +204,14 @@ def _sync_shipment_status(order, new_status):
     return shipment
 
 
+def _has_cro_doc(order):
+    """True iff a Container Release Order (CRO) has been uploaded."""
+    from orders.models import OrderDocument
+    return OrderDocument.objects.filter(
+        order=order, doc_type='cro', is_deleted=False,
+    ).exists()
+
+
 def _has_factory_stuffing_photo(order):
     """True iff at least one image was uploaded (as a Note attachment or
     OrderDocument) on or after the order entered Under Inspection."""
@@ -294,6 +302,15 @@ def _has_all_dispatch_docs(order):
     return len(_missing_dispatch_docs(order)) == 0
 
 
+def _advance_outstanding(order):
+    """Block dispatch when any payment the user has categorized as
+    "Before Dispatch" is still unticked. Honors per-row phase overrides
+    so the executive can move the advance to "After Dispatch" (or the
+    balance to "Before Dispatch") as the deal demands."""
+    from .payment_terms import before_dispatch_outstanding
+    return before_dispatch_outstanding(order)
+
+
 def _readiness_required_complete(order):
     """True iff every REQUIRED item (Product, Bottle, etc.) in the checklist is checked.
     If the checklist is empty we treat the defaults (Product, Bottle) as not yet met."""
@@ -330,12 +347,14 @@ TRANSITION_REQUIREMENTS = {
         'message': 'Tick every item in the Product Readiness checklist AND upload at least one factory-stuffing photo before advancing to Container Booked.',
     },
     'docs_approved': {
-        'check': lambda order: _docs_approval_ready(order),
-        'message': 'Generate the required documents (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List) before advancing to Documents Approved.',
+        'check': lambda order: _docs_approval_ready(order) and (
+            order.status != 'container_booked' or _has_cro_doc(order)
+        ),
+        'message': 'Upload the CRO (Container Release Order) and ensure all required documents (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List) are generated before advancing to Documents Approved.',
     },
     'dispatched': {
-        'check': lambda order: _has_all_dispatch_docs(order),
-        'message': 'Every required document (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List, COA, MSDS, DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing, Insurance) must be uploaded before dispatching — the dispatch email goes out with these attachments.',
+        'check': lambda order: _has_all_dispatch_docs(order) and not _advance_outstanding(order),
+        'message': 'Two gates before dispatch: (1) every required document (Client Invoice, Client Packing List, Logistic Invoice, Logistic Packing List, COA, MSDS, DBK Declaration, Examination Report, Export Declaration Form, Factory Stuffing, Insurance) must be uploaded; (2) the advance payment specified in the order\'s payment terms must be marked as received.',
     },
     'in_transit': {
         'check': lambda order: order.status != 'dispatched' or _has_transit_docs(order),
@@ -442,6 +461,10 @@ def transition_order(order, new_status, user, remarks=''):
     # Reset CRO reminder clock whenever we enter Container Booked
     if new_status == 'container_booked':
         order.last_cro_reminder_at = None
+    # Reset transit-doc reminder clock whenever we enter Dispatched so the
+    # first reminder fires 2 hours later, not immediately.
+    if new_status == 'dispatched':
+        order.last_transit_reminder_at = None
 
     order.save()
 

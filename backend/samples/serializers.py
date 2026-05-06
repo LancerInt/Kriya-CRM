@@ -30,13 +30,13 @@ class SampleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Sample
-        fields = ['id', 'client', 'client_name', 'product', 'product_name', 'client_product_name',
+        fields = ['id', 'sample_number', 'client', 'client_name', 'product', 'product_name', 'client_product_name',
                   'quantity', 'replied_at', 'prepared_at', 'dispatch_date', 'dispatch_notified_at',
                   'delivered_at', 'courier_details', 'tracking_number', 'status',
                   'sample_type', 'sample_type_locked', 'payment_received_at', 'firc_received_at',
                   'notes', 'source_communication', 'created_by', 'feedback',
                   'items', 'documents', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_by', 'sample_type_locked']
+        read_only_fields = ['id', 'sample_number', 'created_by', 'sample_type_locked']
 
     # Status chains by sample type. Status must move forward by exactly one
     # step at a time — bypassing intermediate stages (e.g. replied →
@@ -96,10 +96,34 @@ class SampleSerializer(serializers.ModelSerializer):
         # If the creator explicitly set a sample_type, lock it on creation.
         if validated_data.get('sample_type'):
             validated_data['sample_type_locked'] = True
+        # Auto-generate the next SMP-NNNNN. Use MAX of existing numbers
+        # + 1 so we never collide even if an old sample was deleted.
+        from django.db.models import Max
+        existing_max = 0
+        for n in Sample.objects.exclude(sample_number='').values_list('sample_number', flat=True):
+            try:
+                tail = int(str(n).split('-')[-1])
+                if tail > existing_max:
+                    existing_max = tail
+            except (ValueError, IndexError):
+                pass
+        validated_data['sample_number'] = f'SMP-{existing_max + 1:05d}'
         sample = super().create(validated_data)
         if items_data:
             for item in items_data:
                 SampleItem.objects.create(sample=sample, **item)
+        # The legacy "+ New Sample" form posts the product on the Sample
+        # itself (product / product_name / quantity) and does NOT send an
+        # `items` array. Mirror those legacy fields into a SampleItem so
+        # the Requested Products list on the detail page is populated.
+        if not items_data and (sample.product_id or sample.product_name):
+            SampleItem.objects.create(
+                sample=sample,
+                product=sample.product,
+                product_name=sample.product_name or '',
+                client_product_name=sample.client_product_name or '',
+                quantity=sample.quantity or '',
+            )
         return sample
 
     def update(self, instance, validated_data):
@@ -109,6 +133,18 @@ class SampleSerializer(serializers.ModelSerializer):
         new_type = validated_data.get('sample_type')
         if new_type and not instance.sample_type_locked:
             validated_data['sample_type_locked'] = True
+
+        # When source_communication is set for the first time (manual sample
+        # whose Reply Mail just opened a fresh thread), stamp replied_at and —
+        # for paid samples sitting at requested — advance to replied so the
+        # timeline reflects that the first email went out.
+        new_source = validated_data.get('source_communication')
+        if new_source and not instance.source_communication:
+            from django.utils import timezone as _tz
+            if not instance.replied_at:
+                validated_data['replied_at'] = _tz.now()
+            if instance.sample_type == 'paid' and instance.status == 'requested':
+                validated_data['status'] = 'replied'
 
         # When status advances via PATCH, stamp the matching timestamp so the
         # timeline shows the right dates and downstream gates work.

@@ -74,7 +74,7 @@ const labelMap = {
   docs_approved: "Docs Approved",
   factory_ready: "Product Readiness",
   container_booked: "Container Booked",
-  inspection_passed: "Inspection Passed",
+  inspection_passed: "Inspection Status",
   in_transit: "In Transit",
   in_progress: "In Progress",
   order_confirmed: "Closed Won",

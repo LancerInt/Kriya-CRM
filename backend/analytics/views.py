@@ -145,11 +145,13 @@ def dashboard_stats(request):
     }
 
     # ── Admin/manager-only tiles ──────────────────────────────────────────
-    # Pending orders = anything not yet delivered or cancelled.
+    # Pending orders = anything still in CRM's responsibility window.
+    # Once the order moves to In Transit (or beyond), tracking is on the
+    # carrier — we no longer count it as pending on the dashboard.
     # Pending samples = anything before feedback_received (still in flight).
     if not is_executive:
         stats['pending_orders'] = Order.objects.exclude(
-            status__in=['delivered', 'cancelled']
+            status__in=['in_transit', 'arrived', 'delivered', 'customs', 'cancelled']
         ).count()
         stats['pending_samples'] = Sample.objects.exclude(
             status__in=['feedback_received']

@@ -24,6 +24,7 @@ import RichTextEditor from "@/components/ui/RichTextEditor";
 import DocLibraryPickerShared from "@/components/ui/DocLibraryPicker";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
+import { confirmDialog } from "@/lib/confirm";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -132,7 +133,7 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
   };
 
   const handleDeleteContact = async (contactId) => {
-    if (!confirm("Delete this contact?")) return;
+    if (!(await confirmDialog("Delete this contact?"))) return;
     try {
       await api.delete(`/clients/contacts/${contactId}/`);
       toast.success("Contact deleted");
@@ -226,11 +227,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
 
                     let confirmed = false;
                     if (!client.primary_executive && newId) {
-                      confirmed = confirm(`Assign ${newName} as account owner for ${client.company_name}?`);
+                      confirmed = (await confirmDialog(`Assign ${newName} as account owner for ${client.company_name}?`));
                     } else if (client.primary_executive && newId && client.primary_executive !== newId) {
-                      confirmed = confirm(`Transfer account owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE primary access to ${client.company_name}\n• ${newName} will GAIN primary access to ${client.company_name}`);
+                      confirmed = (await confirmDialog(`Transfer account owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE primary access to ${client.company_name}\n• ${newName} will GAIN primary access to ${client.company_name}`));
                     } else if (client.primary_executive && !newId) {
-                      confirmed = confirm(`Remove ${oldName} as account owner?\n\n${oldName} will lose primary access to ${client.company_name}.`);
+                      confirmed = (await confirmDialog(`Remove ${oldName} as account owner?\n\n${oldName} will lose primary access to ${client.company_name}.`));
                     } else {
                       confirmed = true;
                     }
@@ -277,11 +278,11 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
 
                     let confirmed = false;
                     if (!client.shadow_executive && newId) {
-                      confirmed = confirm(`Assign ${newName} as secondary owner?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`);
+                      confirmed = (await confirmDialog(`Assign ${newName} as secondary owner?\n\nThis will share ${client.company_name}'s details (communications, orders, tasks, etc.) with ${newName}.`));
                     } else if (client.shadow_executive && newId && client.shadow_executive !== newId) {
-                      confirmed = confirm(`Transfer secondary owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`);
+                      confirmed = (await confirmDialog(`Transfer secondary owner from ${oldName} to ${newName}?\n\n• ${oldName} will LOSE access to ${client.company_name}'s data\n• ${newName} will GAIN access to ${client.company_name}'s data\n• All shadow client details will be moved`));
                     } else if (client.shadow_executive && !newId) {
-                      confirmed = confirm(`Remove ${oldName} as secondary owner?\n\n${oldName} will lose access to ${client.company_name}'s data.`);
+                      confirmed = (await confirmDialog(`Remove ${oldName} as secondary owner?\n\n${oldName} will lose access to ${client.company_name}'s data.`));
                     } else {
                       confirmed = true;
                     }
@@ -595,6 +596,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const { data, loading, reload } = useTabData(clientId, "/communications/", activeTab, "communications");
   const [showModal, setShowModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [linkSampleId, setLinkSampleId] = useState(null);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [selectedComm, setSelectedComm] = useState(null);
   const [showDraftModal, setShowDraftModal] = useState(false);
@@ -761,6 +763,16 @@ function CommunicationsTab({ clientId, activeTab, client }) {
     if (autoOpenedRef.current) return;
     const commId = searchParams.get("openDraftFor");
     const piId = searchParams.get("openPI");
+    const openCompose = searchParams.get("openCompose");
+    // Manually-created samples have no source communication — sample page
+    // sends ?openCompose=1 so the user can write a fresh reply.
+    if (openCompose === "1") {
+      autoOpenedRef.current = true;
+      const sid = searchParams.get("linkSampleId");
+      if (sid) setLinkSampleId(sid);
+      setShowEmailModal(true);
+      return;
+    }
     if (!commId && !piId) return;
     if (showDraftModal) return;
     autoOpenedRef.current = true;
@@ -834,7 +846,11 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         const dispatchSampleId = searchParams.get("dispatchSampleId");
         if (dispatchSampleId) {
           try {
-            const sr = await api.get(`/samples/${dispatchSampleId}/`);
+            // Bust caches — the dispatch modal just PATCHed tracking +
+            // courier; we need the freshly-saved values, not a stale copy.
+            const sr = await api.get(`/samples/${dispatchSampleId}/`, {
+              params: { _t: Date.now() },
+            });
             const s = sr.data || {};
             const items = Array.isArray(s.items) ? s.items.filter(it => it.product_name || it.client_product_name) : [];
             // Build a label that lists ALL requested products if there are
@@ -877,13 +893,18 @@ function CommunicationsTab({ clientId, activeTab, client }) {
             // Always render every key field — when a value is missing, show
             // a placeholder so the executive sees the line and fills it in
             // before sending. This is especially important for Airway Bill No.
+            // Dispatch date defaults to today: at draft-build time the
+            // backend hasn't stamped dispatch_date yet (that happens when
+            // the email is actually sent), but the dispatch is happening
+            // today from the user's perspective.
+            const dispatchDateText = (() => {
+              const raw = s.dispatch_date ? new Date(s.dispatch_date) : new Date();
+              return raw.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+            })();
             const detailBits = [];
-            if (items.length <= 1) {
-              detailBits.push(`<li><strong>Quantity:</strong> ${s.quantity || "—"}</li>`);
-            }
             detailBits.push(`<li><strong>Courier:</strong> ${courier || "—"}</li>`);
             detailBits.push(`<li><strong>Airway Bill No:</strong> ${tracking || "—"}</li>`);
-            detailBits.push(`<li><strong>Dispatch Date:</strong> ${s.dispatch_date || "—"}</li>`);
+            detailBits.push(`<li><strong>Dispatch Date:</strong> ${dispatchDateText}</li>`);
             detailBits.push(`<li><strong>Estimated Time of Arrival (ETA):</strong> ${etaText || "—"}</li>`);
             lines.push(`<p>Shipment details:</p><ul>${detailBits.join("")}</ul>`);
             lines.push(
@@ -948,7 +969,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [regenerating, setRegenerating] = useState(false);
   const handleRegenerateDraft = async () => {
     if (!draft) return;
-    if (!confirm("Regenerate this draft? Your current edits will be replaced with a fresh AI reply.")) return;
+    if (!(await confirmDialog("Regenerate this draft? Your current edits will be replaced with a fresh AI reply."))) return;
     setRegenerating(true);
     try {
       const res = await api.post(`/communications/drafts/${draft.id}/regenerate/`);
@@ -1033,6 +1054,10 @@ function CommunicationsTab({ clientId, activeTab, client }) {
       setShowDraftModal(false);
       setDraftAttachments([]);
 
+      // If this draft was opened from a sample's dispatch flow, after the
+      // mail goes out we route back to the sample so the executive can
+      // immediately record the delivery outcome (Delivered / Undelivered).
+      const dispatchSampleId = searchParams.get("dispatchSampleId");
       sendWithUndo(
         async () => {
           // Draft send endpoint includes ALL saved attachments (DB + just-uploaded)
@@ -1040,7 +1065,12 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         },
         {
           preview: { to: draft.to_email, cc: draftForm.cc, subject: draftForm.subject, body: draftForm.body },
-          onSent: () => reload(),
+          onSent: () => {
+            reload();
+            if (dispatchSampleId) {
+              router.push(`/samples/${dispatchSampleId}?openDelivery=1`);
+            }
+          },
           onError: (err) => toast.error(getErrorMessage(err, "Failed to send")),
         }
       );
@@ -1052,7 +1082,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   };
 
   const handleDiscardDraft = async () => {
-    if (!confirm("Discard this draft?")) return;
+    if (!(await confirmDialog("Discard this draft?"))) return;
     try {
       await api.post(`/communications/drafts/${draft.id}/discard/`);
       toast.success("Draft discarded");
@@ -1232,7 +1262,7 @@ function CommunicationsTab({ clientId, activeTab, client }) {
         }
         return true;
       })} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
-      <ComposeEmailModal open={showEmailModal} onClose={() => setShowEmailModal(false)} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} onSent={reload} />
+      <ComposeEmailModal open={showEmailModal} onClose={() => { setShowEmailModal(false); setLinkSampleId(null); }} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} linkSampleId={linkSampleId} onSent={reload} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} clientId={clientId} contactPhone={contactPhone} onSent={reload} />
 
       {/* Communication Detail Modal */}
@@ -2527,7 +2557,7 @@ function PriceListTab({ clientId, activeTab }) {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Remove this price entry?")) return;
+    if (!(await confirmDialog("Remove this price entry?"))) return;
     try { await api.delete(`/clients/price-list/${id}/`); toast.success("Removed"); reload(); }
     catch { toast.error("Failed to delete"); }
   };
@@ -2669,7 +2699,7 @@ function PurchaseHistoryTab({ clientId, activeTab, clientCountry }) {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Remove this purchase record?")) return;
+    if (!(await confirmDialog("Remove this purchase record?"))) return;
     try { await api.delete(`/clients/purchase-history/${id}/`); toast.success("Removed"); reload(); }
     catch { toast.error("Failed to delete"); }
   };
@@ -2735,7 +2765,7 @@ function PurchaseHistoryTab({ clientId, activeTab, clientCountry }) {
       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={async () => {
-            if (!confirm(`Remove all ${row.line_count} line item${row.line_count > 1 ? "s" : ""} on this invoice?`)) return;
+            if (!(await confirmDialog(`Remove all ${row.line_count} line item${row.line_count > 1 ? "s" : ""} on this invoice?`))) return;
             try {
               for (const pid of row.ids) await api.delete(`/clients/purchase-history/${pid}/`);
               toast.success("Removed");
@@ -2933,7 +2963,7 @@ export default function ClientDetailPage() {
   // or ?openPI=<pi_id> (Proforma Invoices "Edit & Send"), start on the
   // Communications tab so CommunicationsTab can auto-open the AI Draft modal.
   const [activeTab, setActiveTab] = useState(
-    searchParams.get("openDraftFor") || searchParams.get("openPI") ? "communications" : "overview"
+    searchParams.get("openDraftFor") || searchParams.get("openPI") || searchParams.get("openCompose") ? "communications" : "overview"
   );
 
   const loadClient = useCallback(() => {

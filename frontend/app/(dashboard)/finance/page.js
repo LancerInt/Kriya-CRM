@@ -12,7 +12,7 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 
-const TABS = ["Dashboard", "Invoices", "Payments", "FIRC", "GST"];
+const TABS = ["Dashboard", "Invoices", "Payments", "FIRC"];
 
 const initialInvoiceForm = { client: "", order: "", invoice_type: "proforma", currency: "USD", subtotal: "", tax: "", due_date: "", notes: "" };
 const initialPaymentForm = { client: "", invoice: "", amount: "", currency: "USD", payment_date: "", mode: "TT", reference: "", notes: "" };
@@ -85,8 +85,26 @@ export default function FinancePage() {
     setLoading(true);
     try {
       if (activeTab === "Invoices") {
-        const res = await api.get("/finance/invoices/");
-        setInvoices(res.data.results || res.data);
+        // Show Client (Commercial) Invoices here — Proforma Invoices live
+        // in their own page. The CI model stores client_company_name as a
+        // snapshot taken at creation, but we prefer the live client name
+        // off the FK so a later client rename in the sales order surfaces
+        // here automatically. Falls back to the snapshot if the FK is gone.
+        const [ciRes, clientsRes] = await Promise.all([
+          api.get("/finance/ci/"),
+          api.get("/clients/", { params: { page_size: 1000 } }).catch(() => ({ data: { results: [] } })),
+        ]);
+        const cis = ciRes.data.results || ciRes.data;
+        const clientList = clientsRes.data.results || clientsRes.data || [];
+        const clientById = new Map(clientList.map(c => [c.id, c.company_name]));
+        const normalized = (cis || []).map(ci => ({
+          ...ci,
+          client_name: clientById.get(ci.client) || ci.client_company_name || "",
+          invoice_type: "commercial",
+          total: ci.total_invoice_usd || ci.grand_total_inr || 0,
+          due_date: ci.invoice_date || null,
+        }));
+        setInvoices(normalized);
       } else if (activeTab === "Payments") {
         const res = await api.get("/finance/payments/");
         setPayments(res.data.results || res.data);
@@ -175,26 +193,96 @@ export default function FinancePage() {
   const invoiceColumns = [
     { key: "invoice_number", label: "Invoice #", render: (row) => <span className="font-medium">{row.invoice_number || `INV-${row.id?.slice(0, 8)}`}</span> },
     { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
-    { key: "invoice_type", label: "Type", render: (row) => <StatusBadge status={row.invoice_type} /> },
+    { key: "invoice_type", label: "Type", render: () => <StatusBadge status="Client Invoice" /> },
     { key: "currency", label: "Currency", render: (row) => row.currency || "USD" },
     { key: "total", label: "Total", render: (row) => row.total ? `${Number(row.total).toLocaleString()}` : "\u2014" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "due_date", label: "Due Date", render: (row) => row.due_date ? format(new Date(row.due_date), "MMM d, yyyy") : "\u2014" },
+    { key: "due_date", label: "Invoice Date", render: (row) => row.due_date ? format(new Date(row.due_date), "MMM d, yyyy") : "\u2014" },
   ];
 
   const paymentColumns = [
-    { key: "client_name", label: "Client", render: (row) => row.client_name || "\u2014" },
-    { key: "amount", label: "Amount", render: (row) => row.amount ? `${Number(row.amount).toLocaleString()}` : "\u2014" },
+    { key: "client_name", label: "Client", render: (row) => row.client_name || "—" },
+    { key: "amount", label: "Amount", render: (row) => {
+      if (!row.amount) return "—";
+      const total = Number(row.amount).toLocaleString();
+      const b = row.payment_breakdown;
+      if (!b || (!b.advance_pct && !b.balance_pct)) {
+        return <span className="font-semibold text-gray-900">{total}</span>;
+      }
+      const advanceTotal = Number(b.advance_amount || 0);
+      const balanceTotal = Number(b.balance_amount || 0);
+      const grandTotal = advanceTotal + balanceTotal;
+      const advanceWidth = grandTotal > 0 ? (advanceTotal / grandTotal) * 100 : 0;
+      const balanceWidth = 100 - advanceWidth;
+      // Pill colors — emerald when received, amber for advance pending,
+      // slate for balance pending.
+      const advClass = b.advance_received
+        ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+        : "bg-amber-50 text-amber-800 border-amber-200";
+      const balClass = b.balance_received
+        ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+        : "bg-slate-50 text-slate-700 border-slate-200";
+      return (
+        <div className="space-y-1.5 min-w-[180px]">
+          <div className="font-semibold text-gray-900">{total}</div>
+          {/* segmented progress bar — shows split + paid state */}
+          <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden flex">
+            {b.advance_pct > 0 && (
+              <div
+                className={b.advance_received ? "bg-emerald-500" : "bg-amber-400"}
+                style={{ width: `${advanceWidth}%` }}
+                title={`Advance ${b.advance_pct}%`}
+              />
+            )}
+            {b.balance_pct > 0 && (
+              <div
+                className={b.balance_received ? "bg-emerald-500" : "bg-slate-300"}
+                style={{ width: `${balanceWidth}%` }}
+                title={`Balance ${b.balance_pct}%`}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {b.advance_pct > 0 && (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-medium ${advClass}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${b.advance_received ? "bg-emerald-500" : "bg-amber-400"}`} />
+                Adv {b.advance_pct}% · {Number(b.advance_amount).toLocaleString()}
+              </span>
+            )}
+            {b.balance_pct > 0 && (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-medium ${balClass}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${b.balance_received ? "bg-emerald-500" : "bg-slate-400"}`} />
+                Bal {b.balance_pct}% · {Number(b.balance_amount).toLocaleString()}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    } },
     { key: "currency", label: "Currency", render: (row) => row.currency || "USD" },
-    { key: "mode", label: "Mode", render: (row) => row.mode || "\u2014" },
-    { key: "payment_date", label: "Date", render: (row) => row.payment_date ? format(new Date(row.payment_date), "MMM d, yyyy") : "\u2014" },
-    { key: "reference", label: "Reference", render: (row) => row.reference || "\u2014" },
+    { key: "order_number", label: "Order #", render: (row) => row.order_number ? <span className="font-medium text-blue-700">{row.order_number}</span> : "—" },
+    { key: "payment_date", label: "Date", render: (row) => row.payment_date ? format(new Date(row.payment_date), "MMM d, yyyy") : "—" },
   ];
 
   const fircColumns = [
-    { key: "payment_reference", label: "Payment Ref", render: (row) => row.payment_reference || row.payment_detail?.reference || `PAY-${row.payment?.toString().slice(0, 8) || row.id?.slice(0, 8)}` },
+    { key: "source_label", label: "Source", render: (row) => {
+      if (!row.source_label) return "—";
+      const kindBadge = row.source_kind === "order"
+        ? <span className="text-[10px] uppercase tracking-wide font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Order</span>
+        : row.source_kind === "sample"
+          ? <span className="text-[10px] uppercase tracking-wide font-semibold text-fuchsia-700 bg-fuchsia-50 px-1.5 py-0.5 rounded">Sample</span>
+          : <span className="text-[10px] uppercase tracking-wide font-semibold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">Payment</span>;
+      return (
+        <div className="flex items-center gap-2">
+          {kindBadge}
+          <span className="font-medium">{row.source_label}</span>
+        </div>
+      );
+    }},
+    { key: "client_name", label: "Client", render: (row) => row.client_name || "—" },
+    { key: "amount", label: "Amount", render: (row) => row.amount != null ? `${row.currency || "USD"} ${Number(row.amount).toLocaleString()}` : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "received_date", label: "Received Date", render: (row) => row.received_date ? format(new Date(row.received_date), "MMM d, yyyy") : "\u2014" },
+    { key: "received_date", label: "Received Date", render: (row) => row.received_date ? format(new Date(row.received_date), "MMM d, yyyy") : "—" },
   ];
 
   const gstColumns = [
@@ -205,12 +293,10 @@ export default function FinancePage() {
   ];
 
   const getActionButton = () => {
+    // Client Invoices are created from the Sales Order page only — no
+    // standalone "+ New Invoice" entry point on this tab.
     if (activeTab === "Invoices") {
-      return (
-        <button onClick={() => setShowInvoiceModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-          + New Invoice
-        </button>
-      );
+      return null;
     }
     if (activeTab === "Payments") {
       return (
@@ -249,7 +335,7 @@ export default function FinancePage() {
         subtitle={
           activeTab === "Dashboard"
             ? "Track revenue, payments, receivables, and financial performance across clients."
-            : "Invoices, payments, FIRC and GST records"
+            : "Invoices, payments, and FIRC records"
         }
         action={getActionButton()}
       />
@@ -272,10 +358,10 @@ export default function FinancePage() {
       {/* Tab Content */}
       {activeTab === "Dashboard" && <FinanceDashboard />}
       {activeTab === "Invoices" && (
-        <DataTable columns={invoiceColumns} data={invoices} loading={loading} emptyTitle="No invoices yet" emptyDescription="Create your first invoice to get started" onRowClick={(row) => router.push(`/finance/invoices/${row.id}`)} />
+        <DataTable columns={invoiceColumns} data={invoices} loading={loading} emptyTitle="No client invoices yet" emptyDescription="Client Invoices are created from the Sales Order page." onRowClick={(row) => row.order ? router.push(`/orders/${row.order}`) : null} />
       )}
       {activeTab === "Payments" && (
-        <DataTable columns={paymentColumns} data={payments} loading={loading} emptyTitle="No payments yet" emptyDescription="Record your first payment" />
+        <DataTable columns={paymentColumns} data={payments} loading={loading} emptyTitle="No payments yet" emptyDescription="Record your first payment" onRowClick={(row) => row.order_id ? router.push(`/orders/${row.order_id}`) : null} />
       )}
       {activeTab === "FIRC" && (
         <DataTable columns={fircColumns} data={fircs} loading={loading} emptyTitle="No FIRC records" emptyDescription="Add your first FIRC record" />

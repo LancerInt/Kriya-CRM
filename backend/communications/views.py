@@ -1533,22 +1533,31 @@ def generate_coa_pdf_view(request):
     # Save to the order's Documents tab if order_id provided
     order_id = data.get('order_id')
     order_item_id = data.get('order_item_id')
+    # Optional audience scope: 'both' (default — covers Client+Logistic),
+    # 'client' or 'logistic'. The frontend asks the user before generating.
+    scope = (data.get('scope') or 'both').strip().lower()
+    if scope not in ('both', 'client', 'logistic'):
+        scope = 'both'
     if order_id:
         try:
             from orders.models import Order, OrderDocument, OrderItem
             order = Order.objects.get(id=order_id)
             product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
-            filename = f'COA_{product_name}.pdf'
+            scope_suffix = '' if scope == 'both' else f'_{scope.capitalize()}'
+            filename = f'COA_{product_name}{scope_suffix}.pdf'
             order_item = None
             if order_item_id:
                 try:
                     order_item = OrderItem.objects.get(id=order_item_id, order=order)
                 except OrderItem.DoesNotExist:
                     order_item = None
+            # Only replace docs of the same scope so a "client" generate
+            # doesn't wipe out the existing "logistic" doc (and vice versa).
+            scope_filter = filename
             if order_item:
-                OrderDocument.objects.filter(order=order, doc_type='coa', order_item=order_item, is_deleted=False).delete()
+                OrderDocument.objects.filter(order=order, doc_type='coa', order_item=order_item, name=scope_filter, is_deleted=False).delete()
             else:
-                OrderDocument.objects.filter(order=order, doc_type='coa', order_item__isnull=True, is_deleted=False).delete()
+                OrderDocument.objects.filter(order=order, doc_type='coa', order_item__isnull=True, name=scope_filter, is_deleted=False).delete()
             OrderDocument.objects.create(
                 order=order, order_item=order_item, doc_type='coa', name=filename,
                 file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,
@@ -1836,12 +1845,16 @@ def generate_msds_pdf_view(request):
 
     order_id = data.get('order_id')
     order_item_id = data.get('order_item_id')
+    scope = (data.get('scope') or 'both').strip().lower()
+    if scope not in ('both', 'client', 'logistic'):
+        scope = 'both'
     if order_id:
         try:
             from orders.models import Order, OrderDocument, OrderItem
             order = Order.objects.get(id=order_id)
             product_name = (data.get('product_name', 'Product') or 'Product').replace(' ', '_')
-            filename = f'MSDS_{product_name}.pdf'
+            scope_suffix = '' if scope == 'both' else f'_{scope.capitalize()}'
+            filename = f'MSDS_{product_name}{scope_suffix}.pdf'
             order_item = None
             if order_item_id:
                 try:
@@ -1849,9 +1862,9 @@ def generate_msds_pdf_view(request):
                 except OrderItem.DoesNotExist:
                     order_item = None
             if order_item:
-                OrderDocument.objects.filter(order=order, doc_type='msds', order_item=order_item, is_deleted=False).delete()
+                OrderDocument.objects.filter(order=order, doc_type='msds', order_item=order_item, name=filename, is_deleted=False).delete()
             else:
-                OrderDocument.objects.filter(order=order, doc_type='msds', order_item__isnull=True, is_deleted=False).delete()
+                OrderDocument.objects.filter(order=order, doc_type='msds', order_item__isnull=True, name=filename, is_deleted=False).delete()
             OrderDocument.objects.create(
                 order=order, order_item=order_item, doc_type='msds', name=filename,
                 file=ContentFile(pdf_bytes, name=filename), uploaded_by=request.user,

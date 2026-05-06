@@ -75,6 +75,7 @@ def create_ci_from_order(order, user):
         country_of_origin='India',
         country_of_final_destination=client.country or '',
         terms_of_delivery=f'{order.delivery_terms} - Chennai / Tuticorin Port' if order.delivery_terms else '',
+        terms_of_trade=order.payment_terms or '',
         payment_terms=order.payment_terms or '',
 
         # Totals
@@ -353,7 +354,7 @@ def generate_ci_pdf(ci):
          Paragraph('<b>IFSC Code</b>', lb), Paragraph(bkv("IFSC Code"), vl)],
         [Paragraph('<b>Incoterms</b>', lb), Paragraph(sv(ci.terms_of_delivery), vl),
          Paragraph('<b>Swift Code</b>', lb), Paragraph(bkv("Swift Code"), vl)],
-        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(sv(ci.payment_terms), vl),
+        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(sv(ci.terms_of_trade or ci.payment_terms), vl),
          Paragraph('<b>A/C No.</b>', lb), Paragraph(bkv("A/C No"), vl)],
         [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(sv(ci.buyer_order_no), vl),
          Paragraph('<b>A/C Type</b>', lb), Paragraph(bkv("A/C Type"), vl)],
@@ -610,7 +611,7 @@ def send_ci_email(ci, user):
         <table style="width:100%;border-collapse:collapse;margin:16px 0;">
             <tr><td style="padding:6px;color:#666;">Invoice Number</td><td style="padding:6px;font-weight:bold;">{ci.invoice_number}</td></tr>
             <tr><td style="padding:6px;color:#666;">Total ({ci.currency})</td><td style="padding:6px;font-weight:bold;">{ci.currency} {ci.total_invoice_usd:,.2f}</td></tr>
-            <tr><td style="padding:6px;color:#666;">Terms</td><td style="padding:6px;">{ci.payment_terms}</td></tr>
+            <tr><td style="padding:6px;color:#666;">Terms</td><td style="padding:6px;">{ci.terms_of_trade or ci.payment_terms}</td></tr>
         </table>
         <p>Please review and confirm. Looking forward to your response.</p>
         <p>Best regards,<br/><b>Kriya Biosys Private Limited</b><br/><i>"Go Organic! Save Planet!"</i></p>

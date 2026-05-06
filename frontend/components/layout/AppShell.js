@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import GlobalTooltip from "@/components/ui/GlobalTooltip";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { fetchMe } from "@/store/slices/authSlice";
 
 export default function AppShell({ children }) {
@@ -41,6 +42,8 @@ export default function AppShell({ children }) {
       </div>
       {/* Global modern tooltip — replaces every native title= popup */}
       <GlobalTooltip />
+      {/* Global in-app confirm dialog — replaces every native window.confirm */}
+      <ConfirmDialog />
     </div>
   );
 }

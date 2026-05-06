@@ -19,6 +19,7 @@ import PackingListEditorModal from "@/components/finance/PackingListEditorModal"
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 import ComplianceDocEditorModal from "@/components/finance/ComplianceDocEditorModal";
+import { confirmDialog } from "@/lib/confirm";
 
 function fmtDate(d) { if (!d) return "—"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
@@ -131,8 +132,11 @@ export default function OrderDetailPage() {
   const [checklistUploadFile, setChecklistUploadFile] = useState(null);
   const [blNumberInput, setBlNumberInput] = useState("");
   const [packingListType, setPackingListType] = useState(null); // "client" | "logistic" | null
-  const [coaEditorFor, setCoaEditorFor] = useState(null); // { orderItemId, productName } | null
-  const [msdsEditorFor, setMsdsEditorFor] = useState(null); // { orderItemId, productName } | null
+  const [coaEditorFor, setCoaEditorFor] = useState(null); // { orderItemId, productName, scope } | null
+  const [msdsEditorFor, setMsdsEditorFor] = useState(null); // { orderItemId, productName, scope } | null
+  // Scope chooser — opens before the COA/MSDS editor. Asks the user whether
+  // the same doc is for both Client+Logistic or separate per audience.
+  const [scopeAskFor, setScopeAskFor] = useState(null); // { kind: 'coa'|'msds', orderItemId, productName, side: 'client'|'logistic' }
   const [complianceDocType, setComplianceDocType] = useState(null); // examination_report|dbk_declaration|export_declaration|factory_stuffing
   const [showInspectionModal, setShowInspectionModal] = useState(false);
   const [showStuffingPhotoModal, setShowStuffingPhotoModal] = useState(false);
@@ -190,7 +194,10 @@ export default function OrderDetailPage() {
 
   const openHeaderEditor = () => {
     if (!order) return;
-    setHeaderForm({ total: order.total != null ? String(order.total) : "" });
+    setHeaderForm({
+      total: order.total != null ? String(order.total) : "",
+      payment_terms: order.payment_terms || "",
+    });
     setEditHeaderOpen(true);
   };
 
@@ -198,15 +205,23 @@ export default function OrderDetailPage() {
     if (!order) return;
     setHeaderSaving(true);
     try {
-      const next = headerForm.total === "" || headerForm.total == null ? null : Number(headerForm.total);
-      if (next != null && Number.isFinite(next) && next !== Number(order.total)) {
-        await api.patch(`/orders/${id}/`, { total: next });
+      const patch = {};
+      const nextTotal = headerForm.total === "" || headerForm.total == null ? null : Number(headerForm.total);
+      if (nextTotal != null && Number.isFinite(nextTotal) && nextTotal !== Number(order.total)) {
+        patch.total = nextTotal;
       }
-      toast.success("Order total updated");
+      const nextTerms = (headerForm.payment_terms || "").trim();
+      if (nextTerms !== (order.payment_terms || "")) {
+        patch.payment_terms = nextTerms;
+      }
+      if (Object.keys(patch).length > 0) {
+        await api.patch(`/orders/${id}/`, patch);
+      }
+      toast.success("Order updated");
       setEditHeaderOpen(false);
       loadOrder();
     } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to update order total"));
+      toast.error(getErrorMessage(err, "Failed to update order"));
     } finally {
       setHeaderSaving(false);
     }
@@ -232,7 +247,7 @@ export default function OrderDetailPage() {
   const DEFAULT_CHECKLIST = [
     { label: "Product", checked: false, required: true },
     { label: "Containers", checked: false, required: true },
-    { label: "Cotton Box", checked: false, required: false },
+    { label: "Corton Box", checked: false, required: false },
     { label: "Leaflets", checked: false, required: false },
     { label: "Batch No. Stickers", checked: false, required: false },
   ];
@@ -280,29 +295,43 @@ export default function OrderDetailPage() {
   // COA and MSDS expand into one row per OrderItem (so a 2-product order
   // requires 2 COAs and 2 MSDSes). All other doc types are single rows.
   const orderItems = order?.items || [];
+  // ``groups`` controls which heading the row renders under: 'client',
+  // 'logistic', or both. COA + MSDS appear in both groups (per spec).
   const DOCS_APPROVAL_CHECKLIST = [
-    { doc_type: "client_invoice", label: "Client Invoice", action: "generate-ci" },
-    { doc_type: "client_packing_list", label: "Client Packing List", action: "generate-cpl" },
-    { doc_type: "logistic_invoice", label: "Logistic Invoice", action: "generate-li" },
-    { doc_type: "logistic_packing_list", label: "Logistic Packing List", action: "generate-lpl" },
+    { doc_type: "client_invoice", label: "Client Invoice", action: "generate-ci", groups: ["client"] },
+    { doc_type: "client_packing_list", label: "Client Packing List", action: "generate-cpl", groups: ["client"] },
+    { doc_type: "logistic_invoice", label: "Logistic Invoice", action: "generate-li", groups: ["logistic"] },
+    { doc_type: "logistic_packing_list", label: "Logistic Packing List", action: "generate-lpl", groups: ["logistic"] },
     ...(orderItems.length > 0
-      ? orderItems.map((it) => ({ doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`}`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name }))
-      : [{ doc_type: "coa", label: "COA", action: "generate-coa", optional: true }]),
+      ? orderItems.map((it) => ({ doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`}`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }))
+      : [{ doc_type: "coa", label: "COA", action: "generate-coa", optional: true, groups: ["client", "logistic"] }]),
     ...(orderItems.length > 0
-      ? orderItems.map((it) => ({ doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`}`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name }))
-      : [{ doc_type: "msds", label: "MSDS", action: "generate-msds", optional: true }]),
-    { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk", optional: true },
-    { doc_type: "examination_report", label: "Examination Report", action: "generate-exam", optional: true },
-    { doc_type: "export_declaration", label: "Export Declaration Form", action: "generate-exportdecl", optional: true },
-    { doc_type: "factory_stuffing", label: "Factory Stuffing", action: "generate-factorystuffing", optional: true },
-    { doc_type: "non_dg_declaration", label: "Non-DG Declaration", action: "generate-nondg", optional: true },
+      ? orderItems.map((it) => ({ doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`}`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }))
+      : [{ doc_type: "msds", label: "MSDS", action: "generate-msds", optional: true, groups: ["client", "logistic"] }]),
+    // Helper used by the per-side renderer to resolve scope-aware presence.
+    { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk", optional: true, groups: ["logistic"] },
+    { doc_type: "examination_report", label: "Examination Report", action: "generate-exam", optional: true, groups: ["logistic"] },
+    { doc_type: "export_declaration", label: "Export Declaration Form", action: "generate-exportdecl", optional: true, groups: ["logistic"] },
+    { doc_type: "factory_stuffing", label: "Factory Stuffing", action: "generate-factorystuffing", optional: true, groups: ["logistic"] },
+    { doc_type: "non_dg_declaration", label: "Non-DG Declaration", action: "generate-nondg", optional: true, groups: ["logistic"] },
   ];
-  const hasDoc = (docType) => orderDocs.some((d) => d.doc_type === docType);
-  const hasDocForItem = (docType, itemId) => {
-    if (!itemId) return hasDoc(docType);
-    return orderDocs.some((d) => d.doc_type === docType && (d.order_item === itemId || d.order_item === null));
+  // Scope helpers — COA / MSDS may be split into Client-only and
+  // Logistic-only documents (or shared "both"). Filename suffixes mark
+  // the audience: "_Client", "_Logistic", or no suffix (= both).
+  const docMatchesScope = (doc, scope) => {
+    const n = doc.name || "";
+    if (scope === "client") return /_Client\.[^.]+$/i.test(n) || (!/_Client\.|_Logistic\./i.test(n));
+    if (scope === "logistic") return /_Logistic\.[^.]+$/i.test(n) || (!/_Client\.|_Logistic\./i.test(n));
+    return true;
   };
-  const isRowPresent = (row) => (row.order_item_id ? hasDocForItem(row.doc_type, row.order_item_id) : hasDoc(row.doc_type));
+  const hasDoc = (docType, scope = null) => orderDocs.some((d) => d.doc_type === docType && (!scope || docMatchesScope(d, scope)));
+  const hasDocForItem = (docType, itemId, scope = null) => {
+    if (!itemId) return hasDoc(docType, scope);
+    return orderDocs.some((d) => d.doc_type === docType
+      && (d.order_item === itemId || d.order_item === null)
+      && (!scope || docMatchesScope(d, scope)));
+  };
+  const isRowPresent = (row) => (row.order_item_id ? hasDocForItem(row.doc_type, row.order_item_id, row.scope) : hasDoc(row.doc_type, row.scope));
   const requiredChecklistRows = DOCS_APPROVAL_CHECKLIST.filter((r) => !r.optional);
   const docsApprovalReady = requiredChecklistRows.every(isRowPresent);
   const docsMissingCount = requiredChecklistRows.filter((r) => !isRowPresent(r)).length;
@@ -527,7 +556,7 @@ export default function OrderDetailPage() {
   };
 
   const handleRevert = async () => {
-    if (!confirm(`Revert order to "${order.revert_to?.label}"? This will undo the current stage.`)) return;
+    if (!(await confirmDialog(`Revert order to "${order.revert_to?.label}"? This will undo the current stage.`))) return;
     setTransitioning(true);
     try {
       await api.post(`/orders/${id}/revert/`, { remarks });
@@ -1101,7 +1130,7 @@ export default function OrderDetailPage() {
               {checklist.map((it, idx) => (
                 <label key={idx} className="flex items-center gap-2 px-2 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
                   <input type="checkbox" checked={!!it.checked} onChange={() => toggleChecklistItem(idx)} className="w-4 h-4 accent-indigo-600" />
-                  <span className={`text-sm flex-1 ${it.checked ? "text-gray-500 line-through" : "text-gray-800"}`}>{it.label}</span>
+                  <span className={`text-sm flex-1 ${it.checked ? "text-emerald-700 font-medium" : "text-gray-800"}`}>{it.label}</span>
                   {it.required ? (
                     <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Required</span>
                   ) : (
@@ -1195,37 +1224,27 @@ export default function OrderDetailPage() {
               );
             })()}
 
-            {["docs_approved", "dispatched", "in_transit"].includes(order.status) && (() => {
-              const insurancePresent = hasDoc("insurance");
-              return (
-                <div className={`flex items-center justify-between p-3 border rounded-lg mb-3 ${insurancePresent ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${insurancePresent ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{insurancePresent ? "✓" : "○"}</span>
-                    <span className={`text-sm font-medium ${insurancePresent ? "text-emerald-800" : "text-amber-900"}`}>Insurance</span>
-                    <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
-                    <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5">Required for Dispatch</span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {insurancePresent && (
-                      <button onClick={() => viewOrderDoc("insurance")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
-                    )}
-                    <button onClick={() => { setUploadChecklistFor({ doc_type: "insurance", label: "Insurance" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
-                      {insurancePresent ? "Replace" : "Upload"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Insurance is rendered inside the Logistic group below. */}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {DOCS_APPROVAL_CHECKLIST.map((row, rIdx) => {
-                const present = isRowPresent(row);
-                const rowKey = `${row.doc_type}-${row.order_item_id || rIdx}`;
+            {(() => {
+              // Per-section tone — Client stays emerald, Logistic uses amber.
+              const TONE = {
+                emerald: { bgPresent: "bg-emerald-50", borderPresent: "border-emerald-200", dotPresent: "bg-emerald-500", textPresent: "text-emerald-800" },
+                amber: { bgPresent: "bg-amber-50", borderPresent: "border-amber-200", dotPresent: "bg-amber-500", textPresent: "text-amber-800" },
+              };
+              const renderRow = (row, rIdx, tone = "emerald", side = null) => {
+                // For COA/MSDS, presence depends on the side ("client" / "logistic")
+                // because the user can generate separate docs per audience.
+                const isScopedDoc = side && (row.doc_type === "coa" || row.doc_type === "msds");
+                const scopedRow = isScopedDoc ? { ...row, scope: side } : row;
+                const present = isRowPresent(scopedRow);
+                const t = TONE[tone];
+                const rowKey = `${row.doc_type}-${row.order_item_id || rIdx}-${tone}`;
                 return (
-                  <div key={rowKey} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}>
+                  <div key={rowKey} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? `${t.bgPresent} ${t.borderPresent}` : "bg-white border-gray-200"}`}>
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
-                      <span className={`text-sm ${present ? "text-emerald-800 font-medium" : "text-gray-800"}`}>{row.label}</span>
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? `${t.dotPresent} text-white` : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
+                      <span className={`text-sm ${present ? `${t.textPresent} font-medium` : "text-gray-800"}`}>{row.label}</span>
                       {row.optional && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1245,10 +1264,30 @@ export default function OrderDetailPage() {
                         <button onClick={() => setPackingListType("logistic")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-coa" && (
-                        <button onClick={() => setCoaEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "" })} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button
+                          onClick={() => {
+                            // Editing an existing scoped doc keeps that scope.
+                            // Generating a new one prompts: same for both, or split?
+                            if (present) {
+                              setCoaEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: side || "both" });
+                            } else {
+                              setScopeAskFor({ kind: "coa", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
+                            }
+                          }}
+                          className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        >{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-msds" && (
-                        <button onClick={() => setMsdsEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "" })} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button
+                          onClick={() => {
+                            if (present) {
+                              setMsdsEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: side || "both" });
+                            } else {
+                              setScopeAskFor({ kind: "msds", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
+                            }
+                          }}
+                          className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        >{present ? "Edit" : "Generate"}</button>
                       )}
                       {row.action === "generate-dbk" && (
                         <button onClick={() => setComplianceDocType("dbk_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
@@ -1271,8 +1310,85 @@ export default function OrderDetailPage() {
                     </div>
                   </div>
                 );
-              })}
-            </div>
+              };
+
+              const clientRows = DOCS_APPROVAL_CHECKLIST.filter((r) => r.groups?.includes("client"));
+              const logisticRows = DOCS_APPROVAL_CHECKLIST.filter((r) => r.groups?.includes("logistic"));
+
+              // Inspection photos (passed + failed) — file count for the
+              // Client section "Pictures" pseudo-row. Click jumps to the
+              // Documents tab so the user can browse / preview them.
+              const inspectionPhotos = orderDocs.filter((d) => {
+                const n = (d.name || "").toLowerCase();
+                if (!n.startsWith("[inspection passed]") && !n.startsWith("[inspection failed]")) return false;
+                return /\.(jpg|jpeg|png|webp|gif)$/i.test(d.name || "");
+              });
+              const passedCount = inspectionPhotos.filter((d) => (d.name || "").startsWith("[Inspection Passed]")).length;
+              const failedCount = inspectionPhotos.filter((d) => (d.name || "").startsWith("[Inspection Failed]")).length;
+              const hasInspectionPics = inspectionPhotos.length > 0;
+
+              const insurancePresentInline = hasDoc("insurance");
+              const showInsuranceInLogistic = ["docs_approved", "dispatched", "in_transit"].includes(order.status);
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Client */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h5 className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Client</h5>
+                      <span className="flex-1 h-px bg-emerald-200" />
+                    </div>
+                    {clientRows.map((r, i) => renderRow(r, i, "emerald", "client"))}
+                    {/* Inspection pictures pseudo-row */}
+                    <div
+                      className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer ${hasInspectionPics ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}
+                      onClick={() => setActiveTab("documents")}
+                      title="Open Documents tab"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${hasInspectionPics ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{hasInspectionPics ? "✓" : "○"}</span>
+                        <span className={`text-sm ${hasInspectionPics ? "text-emerald-800 font-medium" : "text-gray-800"}`}>Inspection Pictures</span>
+                        <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px]">
+                        {passedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Passed: {passedCount}</span>}
+                        {failedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Failed: {failedCount}</span>}
+                        {!hasInspectionPics && <span className="text-gray-400">No photos yet</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Logistic */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h5 className="text-xs font-semibold uppercase tracking-wider text-indigo-700">Logistic</h5>
+                      <span className="flex-1 h-px bg-indigo-200" />
+                    </div>
+                    {/* Insurance — required for Dispatch, only shown once
+                        the order is past Documents Approved. */}
+                    {showInsuranceInLogistic && (
+                      <div className={`flex items-center justify-between p-2.5 border rounded-lg ${insurancePresentInline ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${insurancePresentInline ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{insurancePresentInline ? "✓" : "○"}</span>
+                          <span className={`text-sm font-medium ${insurancePresentInline ? "text-emerald-800" : "text-amber-900"}`}>Insurance</span>
+                          <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
+                          <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5">Required for Dispatch</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {insurancePresentInline && (
+                            <button onClick={() => viewOrderDoc("insurance")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                          )}
+                          <button onClick={() => { setUploadChecklistFor({ doc_type: "insurance", label: "Insurance" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                            {insurancePresentInline ? "Replace" : "Upload"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {logisticRows.map((r, i) => renderRow(r, i, "amber", "logistic"))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1286,6 +1402,8 @@ export default function OrderDetailPage() {
                 const needsRequired = t.status === "docs_preparing" && order.status === "factory_ready" && !checklistRequiredDone;
                 const needsAllDocs = (t.status === "inspection" && order.status === "docs_preparing" && !docsApprovalReady)
                   || (t.status === "docs_approved" && ["container_booked", "packed"].includes(order.status) && !docsApprovalReady);
+                // CRO is mandatory before leaving Container Booked.
+                const needsCRO = t.status === "docs_approved" && order.status === "container_booked" && !orderDocs.some(d => d.doc_type === "cro");
                 const TRANSIT_DT = ["bl", "shipping_bill", "schedule_list", "coo"];
                 const transitMissing = TRANSIT_DT.filter(dt => !orderDocs.some(d => d.doc_type === dt));
                 const needsTransitDocs = t.status === "in_transit" && order.status === "dispatched" && transitMissing.length > 0;
@@ -1319,7 +1437,20 @@ export default function OrderDetailPage() {
                 });
                 const needsStuffingPhoto = t.status === "container_booked" && order.status === "inspection_passed" && !hasStuffingPhoto;
                 const needsChecklist = (t.status === "container_booked" && order.status === "inspection_passed" && !checklistAllDone) || needsRequired || needsAllDocs || needsTransitDocs || needsStuffingPhoto || needsDispatchDocs;
-                const blocked = needsPO || needsPIFGen || needsChecklist;
+                // Before-Dispatch payment checkpoints — every payment row
+                // toggled to "Before Dispatch" must be ticked before the
+                // Dispatch button becomes clickable.
+                const ps = order.payment_schedule || {};
+                const advanceCheckpointMissing = ps.has_advance && order.advance_is_before_dispatch && !ps.advance_received;
+                const balanceCheckpointMissing = ps.has_balance && order.balance_is_before_dispatch && !ps.balance_received;
+                const needsBeforeDispatchPayments = t.status === "dispatched" && (advanceCheckpointMissing || balanceCheckpointMissing);
+                const beforeDispatchPaymentHint = needsBeforeDispatchPayments
+                  ? `Tick the Before Dispatch payment(s): ${[
+                      advanceCheckpointMissing ? `Advance ${ps.advance_pct}%` : null,
+                      balanceCheckpointMissing ? `Balance ${ps.balance_pct}%` : null,
+                    ].filter(Boolean).join(", ")}.`
+                  : undefined;
+                const blocked = needsPO || needsPIFGen || needsChecklist || needsCRO || needsBeforeDispatchPayments;
                 const pifHint = needsPIFGen ? `Generate PIFs for every product first (${pifCounts.done}/${pifCounts.total} done)` : undefined;
                 const checklistHint = needsRequired
                   ? "Tick the required items (Product and Containers) before advancing to Documents Preparing."
@@ -1348,8 +1479,13 @@ export default function OrderDetailPage() {
                         setShowContainerBookedModal(true);
                         return;
                       }
-                      if (order.status === "container_booked" && !orderDocs.some(d => d.doc_type === "cro")) {
+                      if (needsCRO) {
+                        toast.error("Upload the CRO (Container Release Order) before advancing.");
                         setShowCroAdvanceModal({ target_status: t.status });
+                        return;
+                      }
+                      if (needsBeforeDispatchPayments) {
+                        toast.error(beforeDispatchPaymentHint);
                         return;
                       }
                       if (order.status === "docs_approved" && t.status === "dispatched") {
@@ -1421,7 +1557,7 @@ export default function OrderDetailPage() {
                       }
                       handleTransition(t.status);
                     }} disabled={transitioning || blocked}
-                      title={pifHint || checklistHint}
+                      title={pifHint || checklistHint || beforeDispatchPaymentHint}
                       className={`px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 ${blocked ? "bg-gray-300 text-gray-600 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
                       {transitioning ? "..." : `\u2192 ${t.label}`}
                     </button>
@@ -1445,7 +1581,7 @@ export default function OrderDetailPage() {
                 </button>
               )}
               {order.allowed_transitions.some((t) => t.status === "cancelled") && (
-                <button onClick={() => { if (confirm("Cancel this order?")) handleTransition("cancelled"); }}
+                <button onClick={async () => { if ((await confirmDialog("Cancel this order?"))) handleTransition("cancelled"); }}
                   className="px-4 py-2 text-red-600 border border-red-200 text-sm rounded-lg hover:bg-red-50">Cancel Order</button>
               )}
               {order.status === "arrived" && !order._feedback && (
@@ -1476,6 +1612,313 @@ export default function OrderDetailPage() {
         {order.status === "arrived" && <p className="text-green-700 font-medium text-sm mt-2">Order delivered successfully.</p>}
         {order.status === "cancelled" && <p className="text-red-700 font-medium text-sm mt-2">This order has been cancelled.</p>}
       </div>
+
+      {/* Payment Tracking — each payment row carries a Before/After
+          Dispatch dropdown. Rows assigned to "Before Dispatch" act as
+          checkpoints that gate the Dispatched transition. */}
+      {(() => {
+        const ps = order.payment_schedule || {};
+        const hasTerms = !!(order.payment_terms || "").trim();
+        const days = ps.days_until_balance_due;
+        const balanceDueLabel = ps.balance_due_date
+          ? new Date(ps.balance_due_date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+          : null;
+        const balanceUrgent = days !== null && days !== undefined && days <= 10 && !ps.balance_received;
+        const balanceOverdue = days !== null && days !== undefined && days < 0 && !ps.balance_received;
+
+        const advBefore = !!order.advance_is_before_dispatch;
+        const balBefore = !!order.balance_is_before_dispatch;
+
+        const onTogglePhase = async (which, isBefore, currentValue) => {
+          if (isBefore === currentValue) return; // no-op
+          const labelMap = { advance: `Advance (${ps.advance_pct}%)`, balance: `Balance (${ps.balance_pct || 100}%)` };
+          const targetLabel = isBefore ? "Before Dispatch" : "After Dispatch";
+          const ok = await confirmDialog({
+            title: `Move ${labelMap[which]} to ${targetLabel}?`,
+            message: isBefore
+              ? `This makes ${labelMap[which]} a checkpoint that gates the Dispatch button. Dispatch will be blocked until this row is ticked.`
+              : `${labelMap[which]} will no longer block dispatch. It moves to the After-Dispatch list with a due date computed from the order's payment terms, and the 10-day reminder will fire when it's nearly due.`,
+            confirmText: "Yes, switch",
+            cancelText: "Cancel",
+          });
+          if (!ok) return;
+          try {
+            await api.post(`/orders/${id}/set-payment-phase/`, { which, is_before_dispatch: isBefore });
+            toast.success(`${labelMap[which]} moved to ${targetLabel}`);
+            loadOrder();
+          } catch (err) { toast.error(getErrorMessage(err, "Failed to update phase")); }
+        };
+
+        // Pill-style segmented toggle replaces the native <select>. Clicking
+        // the inactive side prompts a confirm before flipping the row.
+        const PhasePill = ({ which, isBefore }) => (
+          <div className="inline-flex rounded-full border border-gray-300 bg-white overflow-hidden text-[11px] font-medium select-none shrink-0">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); onTogglePhase(which, true, isBefore); }}
+              className={`px-2.5 py-1 transition-colors ${isBefore ? "bg-emerald-600 text-white" : "text-gray-600 hover:bg-gray-50"}`}
+            >
+              Before Dispatch
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); onTogglePhase(which, false, isBefore); }}
+              className={`px-2.5 py-1 transition-colors border-l border-gray-300 ${!isBefore ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"}`}
+            >
+              After Dispatch
+            </button>
+          </div>
+        );
+
+        const advDays = ps.days_until_advance_due;
+        const advanceDueLabel = ps.advance_due_date
+          ? new Date(ps.advance_due_date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+          : null;
+        const advanceUrgent = advDays !== null && advDays !== undefined && advDays <= 10 && !ps.advance_received;
+        const advanceOverdue = advDays !== null && advDays !== undefined && advDays < 0 && !ps.advance_received;
+
+        const renderAdvanceRow = () => {
+          if (!ps.has_advance) return null;
+          const bg = ps.advance_received
+            ? "bg-emerald-50 border-emerald-300"
+            : advBefore
+              ? "bg-amber-50 border-amber-300"
+              : advanceOverdue
+                ? "bg-red-50 border-red-300"
+                : advanceUrgent
+                  ? "bg-amber-50 border-amber-300"
+                  : "bg-gray-50 border-gray-200";
+          return (
+            <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${bg}`}>
+              <input
+                type="checkbox"
+                checked={!!ps.advance_received}
+                onChange={async (e) => {
+                  const wantToMark = e.target.checked;
+                  const ok = await confirmDialog({
+                    title: wantToMark ? "Confirm advance received" : "Unmark advance?",
+                    message: wantToMark
+                      ? `Has the ${ps.advance_pct}% advance payment been confirmed by the bank?\n\nClick Yes to mark received. Click No to keep waiting.`
+                      : "Unmark the advance as received?",
+                    confirmText: wantToMark ? "Yes" : "Yes, unmark",
+                    cancelText: wantToMark ? "No" : "Cancel",
+                  });
+                  if (!ok) return;
+                  try {
+                    await api.post(`/orders/${id}/mark-advance-payment/`, { received: wantToMark });
+                    toast.success(wantToMark ? "Advance marked received" : "Advance unmarked");
+                    loadOrder();
+                  } catch (err) { toast.error(getErrorMessage(err, "Failed to update advance")); }
+                }}
+                className="mt-0.5 w-4 h-4 accent-emerald-600"
+              />
+              <span className="text-sm flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold">Advance — {ps.advance_pct}%</span>
+                  <PhasePill which="advance" isBefore={advBefore} />
+                </div>
+                <span className="text-gray-600 block mt-0.5">
+                  {ps.advance_received ? (
+                    <>Received on {fmtDateTime(order.advance_payment_received_at)}.{advBefore ? " Dispatch unlocked." : ""}</>
+                  ) : advBefore ? (
+                    <>Checkpoint — dispatch is blocked until this is ticked.</>
+                  ) : !order.dispatched_at ? (
+                    <>Due date will be set automatically once the order is dispatched.</>
+                  ) : advanceDueLabel ? (
+                    <>
+                      Due <span className="font-semibold">{advanceDueLabel}</span>
+                      {advDays !== null && advDays !== undefined && (
+                        advanceOverdue
+                          ? <span className="ml-2 text-red-700 font-semibold">· {Math.abs(advDays)} day(s) overdue</span>
+                          : advDays <= 10
+                            ? <span className="ml-2 text-amber-700 font-semibold">· {advDays} day(s) remaining</span>
+                            : <span className="ml-2 text-gray-500">· {advDays} day(s) remaining</span>
+                      )}
+                    </>
+                  ) : (
+                    <>Tick once received. Does not gate dispatch.</>
+                  )}
+                </span>
+              </span>
+            </label>
+          );
+        };
+
+        const renderBalanceRow = () => {
+          if (!ps.has_balance) return null;
+          return (
+            <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${ps.balance_received ? "bg-emerald-50 border-emerald-300" : balanceOverdue ? "bg-red-50 border-red-300" : balanceUrgent ? "bg-amber-50 border-amber-300" : "bg-gray-50 border-gray-200"}`}>
+              <input
+                type="checkbox"
+                checked={!!ps.balance_received}
+                onChange={async (e) => {
+                  const wantToMark = e.target.checked;
+                  const ok = await confirmDialog({
+                    title: wantToMark ? "Confirm balance received" : "Unmark balance?",
+                    message: wantToMark
+                      ? `Has the ${ps.balance_pct}% balance (${ps.balance_kind || "balance"}${ps.balance_days ? ` ${ps.balance_days} days` : ""}) been received?\n\nClick Yes to clear the pending reminder.`
+                      : "Unmark the balance as received? The reminder will rearm.",
+                    confirmText: wantToMark ? "Yes" : "Yes, unmark",
+                    cancelText: wantToMark ? "No" : "Cancel",
+                  });
+                  if (!ok) return;
+                  try {
+                    await api.post(`/orders/${id}/mark-balance-payment/`, { received: wantToMark });
+                    toast.success(wantToMark ? "Balance marked received" : "Balance unmarked");
+                    loadOrder();
+                  } catch (err) { toast.error(getErrorMessage(err, "Failed to update balance")); }
+                }}
+                className="mt-0.5 w-4 h-4 accent-emerald-600"
+              />
+              <span className="text-sm flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold">
+                    Balance — {ps.balance_pct || 100}%
+                    {ps.balance_kind ? ` · ${ps.balance_kind}` : ""}
+                    {ps.balance_days ? ` ${ps.balance_days} days` : ""}
+                  </span>
+                  <PhasePill which="balance" isBefore={balBefore} />
+                </div>
+                <span className="text-gray-600 block mt-0.5">
+                  {ps.balance_received ? (
+                    <>Received on {fmtDateTime(order.balance_payment_received_at)}.</>
+                  ) : balBefore ? (
+                    <>Checkpoint — dispatch is blocked until this is ticked.</>
+                  ) : !order.dispatched_at ? (
+                    <>Due date will be set automatically once the order is dispatched.</>
+                  ) : balanceDueLabel ? (
+                    <>
+                      Due <span className="font-semibold">{balanceDueLabel}</span>
+                      {days !== null && days !== undefined && (
+                        balanceOverdue
+                          ? <span className="ml-2 text-red-700 font-semibold">· {Math.abs(days)} day(s) overdue</span>
+                          : days <= 10
+                            ? <span className="ml-2 text-amber-700 font-semibold">· {days} day(s) remaining</span>
+                            : <span className="ml-2 text-gray-500">· {days} day(s) remaining</span>
+                      )}
+                      {order.balance_reminder_sent_at && (
+                        <span className="ml-2 text-xs text-blue-600">· reminder sent</span>
+                      )}
+                    </>
+                  ) : (
+                    <>Pending — confirm once received.</>
+                  )}
+                </span>
+              </span>
+            </label>
+          );
+        };
+
+        const beforeRows = [];
+        const afterRows = [];
+        if (ps.has_advance) (advBefore ? beforeRows : afterRows).push(renderAdvanceRow());
+        if (ps.has_balance) (balBefore ? beforeRows : afterRows).push(renderBalanceRow());
+
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="font-semibold">Payment Tracking</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Terms: <span className="font-medium text-gray-700">{ps.raw || order.payment_terms || "— not set —"}</span>
+                </p>
+              </div>
+              <button
+                onClick={openHeaderEditor}
+                className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded"
+                title="Edit payment terms"
+              >
+                ✎ Edit Terms
+              </button>
+            </div>
+
+            {!hasTerms && (
+              <div className="text-sm text-gray-500 italic bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4">
+                No payment terms set yet. Click <span className="font-medium">Edit Terms</span> and enter something like
+                <span className="font-medium text-gray-700"> &ldquo;50% advance D/A 60 days&rdquo;</span> to enable advance/balance tracking and the dispatch gate.
+              </div>
+            )}
+
+            {hasTerms && (
+              <>
+                <div className="mt-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 mb-2">Before Dispatch (checkpoints)</p>
+                  {beforeRows.length > 0 ? (
+                    <div className="space-y-2">{beforeRows.map((r, i) => <div key={`b-${i}`}>{r}</div>)}</div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
+                      No payments marked as Before Dispatch — dispatch is not blocked on this side.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 mb-2">After Dispatch</p>
+                  {afterRows.length > 0 ? (
+                    <div className="space-y-2">{afterRows.map((r, i) => <div key={`a-${i}`}>{r}</div>)}</div>
+                  ) : (
+                    <p className="text-xs text-gray-500 italic px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
+                      No payments scheduled for after dispatch.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* FIRC — Foreign Inward Remittance Certificate. 11th and final step.
+          Anchored just below the order timeline and pinned open from the
+          moment the shipment Arrives, so the executive can see and tick
+          it without scrolling past the tabs. Checkbox + in-app
+          confirmation popup mirrors the Sample FIRC flow: Yes completes
+          the order; No keeps it on its current step. */}
+      {(order.status === "arrived" || order.status === "delivered" || order._feedback || order.firc_received_at) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+          <h3 className="font-semibold mb-3">FIRC — Foreign Inward Remittance Certificate</h3>
+          <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${order.firc_received_at ? "bg-emerald-50 border-emerald-300" : "bg-amber-50 border-amber-300"}`}>
+            <input
+              type="checkbox"
+              checked={!!order.firc_received_at}
+              onChange={async (e) => {
+                const wantToMark = e.target.checked;
+                if (wantToMark) {
+                  const ok = await confirmDialog({
+                    title: "Confirm FIRC received",
+                    message: "Has the bank confirmed the Foreign Inward Remittance Certificate?\n\nClick Yes to mark FIRC received and complete the order. Click No to keep the order on its current step.",
+                    confirmText: "Yes",
+                    cancelText: "No",
+                  });
+                  if (!ok) return;
+                } else {
+                  const ok = await confirmDialog({
+                    title: "Unmark FIRC?",
+                    message: "Unmark FIRC as received? Shipment progress will drop back to 90%.",
+                    confirmText: "Yes, unmark",
+                    cancelText: "Cancel",
+                  });
+                  if (!ok) return;
+                }
+                try {
+                  await api.post(`/orders/${id}/mark-firc/`, { received: wantToMark });
+                  toast.success(wantToMark ? "FIRC marked received — order is now 100% complete" : "FIRC unmarked");
+                  loadOrder();
+                } catch (err) { toast.error(getErrorMessage(err, "Failed to update FIRC")); }
+              }}
+              className="mt-0.5 w-4 h-4 accent-emerald-600"
+            />
+            <span className="text-sm">
+              <span className="font-semibold block">FIRC received</span>
+              <span className="text-gray-600">
+                {order.firc_received_at
+                  ? `Received on ${fmtDateTime(order.firc_received_at)}. Shipment progress: 100%.`
+                  : "Tick once the foreign payment has been confirmed by the bank. This is the final step of the order."}
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -1624,8 +2067,19 @@ export default function OrderDetailPage() {
 
       {activeTab === "documents" && (() => {
         const LOGISTICS_TYPES = ["coa", "msds", "dbk_declaration", "examination_report", "export_declaration", "factory_stuffing", "non_dg_declaration"];
-        const inspectionPassedDocs = orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Passed]"));
-        const inspectionFailedDocs = orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Failed]"));
+        const sortNewestFirst = (arr) => arr.slice().sort((a, b) => {
+          const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return tb - ta;
+        });
+        // Two separate inspection folders — every upload accumulates inside
+        // its own folder (newest on top).
+        const inspectionPassedDocs = sortNewestFirst(
+          orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Passed]"))
+        );
+        const inspectionFailedDocs = sortNewestFirst(
+          orderDocs.filter((d) => (d.name || "").startsWith("[Inspection Failed]"))
+        );
         const logisticsDocs = orderDocs.filter((d) => {
           const n = d.name || "";
           if (n.startsWith("[Inspection Passed]") || n.startsWith("[Inspection Failed]")) return false;
@@ -1637,6 +2091,7 @@ export default function OrderDetailPage() {
           return !LOGISTICS_TYPES.includes(d.doc_type);
         });
         const stripPrefix = (name) => (name || "").replace(/^\[Inspection (Passed|Failed)\]\s*/, "");
+        const inspectionTag = () => null;
         const renderDocRow = (doc) => (
           <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
             onClick={async () => {
@@ -1659,7 +2114,14 @@ export default function OrderDetailPage() {
             <div className="flex items-center gap-3">
               <span className="text-xl">{{"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊","jpg":"🖼️","jpeg":"🖼️","png":"🖼️","pi":"📋","po":"📦"}[(doc.name || doc.file || "").split(".").pop()?.toLowerCase()] || {"pi":"📋","po":"📦","commercial_invoice":"📑","packing_list":"📦","bl":"🚢","coa":"🧪","insurance":"🛡️"}[doc.doc_type] || "📎"}</span>
               <div>
-                <p className="text-sm font-medium text-gray-800">{stripPrefix(doc.name)}</p>
+                <p className="text-sm font-medium text-gray-800 flex items-center gap-2">
+                  {stripPrefix(doc.name)}
+                  {inspectionTag(doc.name) && (
+                    <span className={`text-[10px] font-semibold border rounded-full px-1.5 py-0.5 ${inspectionTag(doc.name).classes}`}>
+                      {inspectionTag(doc.name).label}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-gray-500">{doc.doc_type} · {fmtDateTime(doc.created_at)}</p>
               </div>
             </div>
@@ -1668,7 +2130,7 @@ export default function OrderDetailPage() {
               {["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type) && (
                 <button onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
               )}
-              <button onClick={async (e) => { e.stopPropagation(); if (!confirm("Delete this document?")) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+              <button onClick={async (e) => { e.stopPropagation(); if (!(await confirmDialog("Delete this document?"))) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
             </div>
           </div>
         );
@@ -1848,33 +2310,6 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* FIRC — Foreign Inward Remittance Certificate. 11th and final step. */}
-      {(order.status === "arrived" || order.status === "delivered" || order._feedback || order.firc_received_at) && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold">FIRC — Foreign Inward Remittance Certificate</h3>
-            <button
-              onClick={async () => {
-                const wantToMark = !order.firc_received_at;
-                if (!wantToMark && !confirm("Unmark FIRC as received? Shipment progress will drop back to 90%.")) return;
-                try {
-                  await api.post(`/orders/${id}/mark-firc/`, { received: wantToMark });
-                  toast.success(wantToMark ? "FIRC marked received — order is now 100% complete" : "FIRC unmarked");
-                  loadOrder();
-                } catch (err) { toast.error(getErrorMessage(err, "Failed to update FIRC")); }
-              }}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg ${order.firc_received_at ? "text-emerald-700 bg-emerald-50 hover:bg-emerald-100" : "text-indigo-700 bg-indigo-50 hover:bg-indigo-100"}`}
-            >
-              {order.firc_received_at ? "✓ FIRC Received — Unmark" : "Mark FIRC Received"}
-            </button>
-          </div>
-          {order.firc_received_at ? (
-            <p className="text-sm text-emerald-700">Received on {fmtDateTime(order.firc_received_at)}. Shipment progress: 100%.</p>
-          ) : (
-            <p className="text-sm text-gray-400">Mark FIRC as received once the foreign payment has been confirmed by the bank. This is the final step in the order lifecycle.</p>
-          )}
-        </div>
-      )}
 
       <Modal open={showFeedbackModal} onClose={() => setShowFeedbackModal(false)} title="Add Client Feedback" size="sm">
         <form onSubmit={async (e) => {
@@ -2143,7 +2578,7 @@ export default function OrderDetailPage() {
       />
 
       <COAEditorModal
-        key={`coa-${coaEditorFor?.orderItemId || 'none'}`}
+        key={`coa-${coaEditorFor?.orderItemId || 'none'}-${coaEditorFor?.scope || 'both'}`}
         open={!!coaEditorFor}
         onClose={() => setCoaEditorFor(null)}
         productName={coaEditorFor?.productName || ""}
@@ -2152,17 +2587,19 @@ export default function OrderDetailPage() {
         onGenerate={async (formData) => {
           try {
             const itemId = coaEditorFor?.orderItemId || null;
+            const scope = coaEditorFor?.scope || "both";
             const isFormData = formData instanceof FormData;
             if (isFormData) {
               const existing = JSON.parse(formData.get("payload"));
               existing.order_id = id;
+              existing.scope = scope;
               if (itemId) existing.order_item_id = itemId;
               formData.set("payload", JSON.stringify(existing));
               await api.post("/communications/generate-coa-pdf/", formData, { headers: { "Content-Type": "multipart/form-data" } });
             } else {
-              await api.post("/communications/generate-coa-pdf/", { ...formData, order_id: id, ...(itemId ? { order_item_id: itemId } : {}) });
+              await api.post("/communications/generate-coa-pdf/", { ...formData, order_id: id, scope, ...(itemId ? { order_item_id: itemId } : {}) });
             }
-            toast.success("COA generated & saved to Documents");
+            toast.success(`COA generated (${scope === "both" ? "for both Client and Logistic" : `${scope} only`})`);
             setCoaEditorFor(null);
             loadOrder();
           } catch { toast.error("Failed to generate COA"); }
@@ -2170,7 +2607,7 @@ export default function OrderDetailPage() {
       />
 
       <MSDSEditorModal
-        key={`msds-${msdsEditorFor?.orderItemId || 'none'}`}
+        key={`msds-${msdsEditorFor?.orderItemId || 'none'}-${msdsEditorFor?.scope || 'both'}`}
         open={!!msdsEditorFor}
         onClose={() => setMsdsEditorFor(null)}
         productName={msdsEditorFor?.productName || ""}
@@ -2178,13 +2615,56 @@ export default function OrderDetailPage() {
         onGenerate={async (formData) => {
           try {
             const itemId = msdsEditorFor?.orderItemId || null;
-            await api.post("/communications/generate-msds-pdf/", { ...formData, order_id: id, ...(itemId ? { order_item_id: itemId } : {}) });
-            toast.success("MSDS generated & saved to Documents");
+            const scope = msdsEditorFor?.scope || "both";
+            await api.post("/communications/generate-msds-pdf/", { ...formData, order_id: id, scope, ...(itemId ? { order_item_id: itemId } : {}) });
+            toast.success(`MSDS generated (${scope === "both" ? "for both Client and Logistic" : `${scope} only`})`);
             setMsdsEditorFor(null);
             loadOrder();
           } catch { toast.error("Failed to generate MSDS"); }
         }}
       />
+
+      {/* Scope chooser — asks whether COA/MSDS should cover both audiences
+          or only one before opening the editor. */}
+      <Modal
+        open={!!scopeAskFor}
+        onClose={() => setScopeAskFor(null)}
+        title={scopeAskFor ? `Generate ${scopeAskFor.kind?.toUpperCase()} for…` : "Generate"}
+        size="md"
+      >
+        {scopeAskFor && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Will the same {scopeAskFor.kind?.toUpperCase()} be used for both Client and Logistic, or do you need separate copies?
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              {[
+                { value: "both", label: "Same for both Client and Logistic", desc: "One document satisfies both rows." },
+                { value: "client", label: "Different — Client only", desc: "Generate a separate Client copy now. Logistic stays missing until you generate that one." },
+                { value: "logistic", label: "Different — Logistic only", desc: "Generate a separate Logistic copy now. Client stays missing until you generate that one." },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    const target = { orderItemId: scopeAskFor.orderItemId, productName: scopeAskFor.productName, scope: opt.value };
+                    if (scopeAskFor.kind === "coa") setCoaEditorFor(target);
+                    else setMsdsEditorFor(target);
+                    setScopeAskFor(null);
+                  }}
+                  className="text-left p-3 rounded-lg border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors"
+                >
+                  <div className="text-sm font-semibold text-gray-800">{opt.label}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end pt-2 border-t border-gray-100">
+              <button onClick={() => setScopeAskFor(null)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <ComplianceDocEditorModal
         open={!!complianceDocType}
@@ -2220,26 +2700,22 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* CRO advance-warning popup — shown when trying to leave Container Booked without a CRO */}
+      {/* CRO required popup — shown when trying to leave Container Booked without a CRO.
+          The "Continue without CRO" escape hatch is intentionally removed:
+          CRO must be uploaded before advancing. The Celery reminder pings every 2 hours. */}
       {showCroAdvanceModal && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowCroAdvanceModal(null)}>
           <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-900">CRO not attached</h3>
-              <p className="text-sm text-gray-500 mt-1">The Container Release Order (CRO) hasn't been uploaded for this order. Do you want to upload it now, or continue anyway?</p>
+              <h3 className="font-semibold text-gray-900">CRO required</h3>
+              <p className="text-sm text-gray-500 mt-1">The Container Release Order (CRO) must be uploaded before this order can advance. You'll be reminded every 2 hours until it's attached.</p>
             </div>
             <div className="p-5 flex flex-col gap-2">
               <button
-                onClick={() => { const tgt = showCroAdvanceModal; setShowCroAdvanceModal(null); setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }}
+                onClick={() => { setShowCroAdvanceModal(null); setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }}
                 className="w-full px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700"
               >
-                Upload CRO first
-              </button>
-              <button
-                onClick={async () => { const tgt = showCroAdvanceModal; setShowCroAdvanceModal(null); await handleTransition(tgt.target_status); }}
-                className="w-full px-4 py-2.5 bg-amber-600 text-white font-medium rounded-lg hover:bg-amber-700"
-              >
-                Continue without CRO
+                Upload CRO now
               </button>
               <button
                 onClick={() => setShowCroAdvanceModal(null)}
@@ -2536,7 +3012,30 @@ export default function OrderDetailPage() {
               <p className="text-[11px] text-gray-500 mt-1">Saved to Notes and synced to the linked Shipment.</p>
             </div>
           )}
-          <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${checklistUploadFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}>
+          <label
+            tabIndex={0}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const f = e.dataTransfer?.files?.[0];
+              if (f) setChecklistUploadFile(f);
+            }}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items || [];
+              for (const it of items) {
+                if (it.kind === "file") {
+                  const f = it.getAsFile();
+                  if (f) {
+                    setChecklistUploadFile(f);
+                    e.preventDefault();
+                    return;
+                  }
+                }
+              }
+            }}
+            className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${checklistUploadFile ? "border-green-400 bg-green-50" : "border-gray-300 hover:border-indigo-400 hover:bg-indigo-50"}`}
+          >
             <input type="file" onChange={(e) => setChecklistUploadFile(e.target.files[0])} className="hidden" />
             {checklistUploadFile ? (
               <div className="text-center">
@@ -2545,7 +3044,7 @@ export default function OrderDetailPage() {
               </div>
             ) : (
               <div className="text-center">
-                <p className="text-sm text-gray-500">Click to select file</p>
+                <p className="text-sm text-gray-500">Click to select, drag &amp; drop, or paste a file</p>
                 <p className="text-xs text-gray-400 mt-0.5">PDF, Word, Images</p>
               </div>
             )}
@@ -2624,7 +3123,7 @@ export default function OrderDetailPage() {
         onSend={handleSendQt} sending={qtSending}
       />
 
-      {/* Edit order header — total amount only */}
+      {/* Edit order header — total amount + payment terms */}
       <Modal open={editHeaderOpen} onClose={() => !headerSaving && setEditHeaderOpen(false)} title="Edit Order Details" size="sm">
         <div className="space-y-4">
           <div>
@@ -2639,6 +3138,17 @@ export default function OrderDetailPage() {
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
             />
             <p className="text-[10px] text-gray-400 mt-1">Overrides the auto-computed total. Adding or editing line items will recompute it.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
+            <input
+              type="text"
+              value={headerForm.payment_terms ?? ""}
+              onChange={(e) => setHeaderForm((f) => ({ ...f, payment_terms: e.target.value }))}
+              placeholder='e.g. "50% advance D/A 60 days" · "100% advance" · "D/P at sight"'
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">Drives the Payment Tracking card. Advance % blocks dispatch; balance days set the due date and 10-day reminder.</p>
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
             <button

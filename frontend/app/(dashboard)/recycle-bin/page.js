@@ -8,6 +8,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
+import { confirmDialog } from "@/lib/confirm";
 
 const RETENTION_DAYS = 30;
 
@@ -92,7 +93,7 @@ export default function RecycleBinPage() {
   };
 
   const handlePurge = async (item) => {
-    if (!confirm(`Permanently delete "${item.name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Permanently delete "${item.name}"? This cannot be undone.`))) return;
     try {
       await api.post("/recycle-bin/purge/", { model: item.model, id: item.id });
       toast.success("Permanently deleted");
@@ -101,7 +102,7 @@ export default function RecycleBinPage() {
   };
 
   const handleEmptyAll = async () => {
-    if (!confirm("Permanently delete ALL items in the recycle bin? This cannot be undone.")) return;
+    if (!(await confirmDialog("Permanently delete ALL items in the recycle bin? This cannot be undone."))) return;
     try {
       const res = await api.post("/recycle-bin/empty/");
       toast.success(res.data.status);

@@ -16,6 +16,7 @@ import PdfViewer from "@/components/ui/PdfViewer";
 import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
+import { confirmDialog } from "@/lib/confirm";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -359,7 +360,7 @@ export default function CommunicationDetailPage() {
   };
 
   const handleDiscardReply = async () => {
-    if (!confirm("Discard this reply?")) return;
+    if (!(await confirmDialog("Discard this reply?"))) return;
     if (replyDraftId) {
       try { await api.post(`/communications/drafts/${replyDraftId}/discard/`); } catch {}
     }

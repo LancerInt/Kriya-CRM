@@ -8,7 +8,7 @@ import { sendWithUndo } from "@/lib/undoSend";
 import EmailChips from "@/components/ui/EmailChips";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 
-export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, ccEmails, onSent }) {
+export default function ComposeEmailModal({ open, onClose, clientId, contactEmail, ccEmails, linkSampleId, onSent }) {
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState({ email_account: "", to: contactEmail || "", cc: ccEmails || "", subject: "", body: "" });
   const [attachments, setAttachments] = useState([]);
@@ -21,6 +21,48 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
       setForm((f) => ({ ...f, to: contactEmail || f.to, cc: ccEmails || f.cc }));
     }
   }, [open, contactEmail, ccEmails]);
+
+  // Reply-Mail flow on a manually-created sample → prefill subject + body
+  // from the sample's product/quantity so the executive doesn't start blank.
+  useEffect(() => {
+    if (!open || !linkSampleId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/samples/${linkSampleId}/`);
+        if (cancelled) return;
+        const s = r.data || {};
+        const items = Array.isArray(s.items) && s.items.length
+          ? s.items.filter((it) => (it.product_name || "").trim())
+          : (s.product_name ? [{ product_name: s.product_name, quantity: s.quantity || "" }] : []);
+        const names = items.map((it) => (it.product_name || "").trim()).filter(Boolean);
+        const productLine = names.length === 0
+          ? ""
+          : names.length === 1
+            ? names[0]
+            : `${names[0]} (+${names.length - 1} more)`;
+        const subject = productLine
+          ? `Request for sample ${productLine}`
+          : "Request for sample";
+        const itemList = items
+          .map((it) => `<li>${it.product_name || ""}${it.quantity ? ` — ${it.quantity}` : ""}</li>`)
+          .join("");
+        const body = `<p>Dear Sir/Madam,</p>
+<p>Thank you for your interest in our products. We are pleased to confirm your sample request${productLine ? ` for the following:` : "."}</p>
+${itemList ? `<ul>${itemList}</ul>` : ""}
+<p>We will share the dispatch details shortly. Please let us know if you have any specific requirements.</p>
+<p>Best regards,</p>`;
+        setForm((f) => ({
+          ...f,
+          subject: f.subject && f.subject.trim() ? f.subject : subject,
+          body: f.body && f.body.trim() && f.body !== "<p></p>" ? f.body : body,
+        }));
+      } catch {
+        // non-fatal — user can type from scratch
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, linkSampleId]);
 
   const handleAddFiles = (e) => {
     const files = Array.from(e.target.files);
@@ -48,7 +90,20 @@ export default function ComposeEmailModal({ open, onClose, clientId, contactEmai
     onClose();
 
     sendWithUndo(
-      () => api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } }),
+      async () => {
+        const r = await api.post("/communications/send-email/", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        // Manually-created sample → link the just-created Communication as
+        // the sample's source thread. Backend stamps replied_at and (for
+        // paid samples at "requested") advances status to "replied".
+        if (linkSampleId && r?.data?.id) {
+          try {
+            await api.patch(`/samples/${linkSampleId}/`, { source_communication: r.data.id });
+          } catch (e) {
+            // non-fatal — the email already went out
+          }
+        }
+        return r;
+      },
       {
         preview: { to: form.to, cc: form.cc, subject: form.subject, body: form.body },
         onSent: () => {

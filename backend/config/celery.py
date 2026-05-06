@@ -60,6 +60,14 @@ app.conf.beat_schedule = {
         'task': 'samples.check_sample_reply_reminders',
         'schedule': crontab(minute='*'),
     },
+    # Sample feedback reminder — every minute, scan for samples that have
+    # been sitting at "delivered" for ≥ 5 min without the executive
+    # logging feedback. The task enforces the cool-down internally so the
+    # minute-cadence is cheap.
+    'check-sample-feedback-reminders-every-minute': {
+        'task': 'samples.check_sample_feedback_reminders',
+        'schedule': crontab(minute='*'),
+    },
     # Daily task due-date reminder — runs at 8:30 AM IST. Fires:
     #   • day-before notifications ("tomorrow is the last date")
     #   • last-day notifications ("today is the last date")
@@ -75,10 +83,23 @@ app.conf.beat_schedule = {
         'task': 'orders.check_cro_reminders',
         'schedule': crontab(minute='*/30'),
     },
+    # Transit-doc reminder (BL, Shipping Bill, Schedule List, COO) —
+    # runs every 30 min; per-order 2h cool-down enforced inside.
+    'check-transit-doc-reminders-every-30-minutes': {
+        'task': 'orders.check_transit_doc_reminders',
+        'schedule': crontab(minute='*/30'),
+    },
     # Delivery acknowledgment reminder — runs every minute; per-order
     # one-shot fire enforced inside (delivery_reminder_sent_at).
     'check-delivery-reminders-every-minute': {
         'task': 'orders.check_delivery_reminders',
         'schedule': crontab(minute='*'),
+    },
+    # Balance-payment reminder (D/A 60 days etc.) — runs daily; fires
+    # once when the due date is within 10 days, then suppressed via
+    # balance_reminder_sent_at.
+    'check-balance-payment-reminders-daily': {
+        'task': 'orders.check_balance_payment_reminders',
+        'schedule': crontab(hour=9, minute=0),
     },
 }

@@ -58,6 +58,7 @@ class OrderSerializer(serializers.ModelSerializer):
     can_view_total = serializers.SerializerMethodField()
     quotation_number = serializers.CharField(source='quotation.quotation_number', read_only=True, default='')
     _feedback = OrderFeedbackSerializer(source='feedback', read_only=True, default=None)
+    payment_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -71,9 +72,35 @@ class OrderSerializer(serializers.ModelSerializer):
             'dispatched_at', 'delivered_at',
             'docs_preparing_at', 'inspection_at', 'in_transit_at', 'arrived_at',
             'firc_received_at',
+            'advance_payment_received_at', 'balance_payment_received_at', 'balance_reminder_sent_at',
+            'advance_is_before_dispatch', 'balance_is_before_dispatch',
+            'payment_schedule',
             'allowed_transitions', 'can_revert', 'revert_to', 'items', '_feedback', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'order_number', 'status']
+
+    def get_payment_schedule(self, obj):
+        """Decoded payment terms + computed due dates for either row when
+        it's scheduled After Dispatch."""
+        from .payment_terms import (
+            parse_payment_terms, compute_balance_due_date, compute_advance_due_date,
+        )
+        parsed = parse_payment_terms(obj.payment_terms)
+        balance_due = compute_balance_due_date(obj)
+        advance_due = compute_advance_due_date(obj)
+        from datetime import date
+        today = date.today()
+        days_until_balance_due = (balance_due - today).days if balance_due else None
+        days_until_advance_due = (advance_due - today).days if advance_due else None
+        return {
+            **parsed,
+            'balance_due_date': balance_due.isoformat() if balance_due else None,
+            'days_until_balance_due': days_until_balance_due,
+            'advance_due_date': advance_due.isoformat() if advance_due else None,
+            'days_until_advance_due': days_until_advance_due,
+            'advance_received': bool(obj.advance_payment_received_at),
+            'balance_received': bool(obj.balance_payment_received_at),
+        }
 
     def get_can_view_total(self, obj):
         request = self.context.get('request')
