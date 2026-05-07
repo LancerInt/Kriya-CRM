@@ -62,21 +62,49 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  // All sibling PIFs for the parent order — one per product line. Lets the
+  // user jump between products without leaving the editor.
+  const [siblings, setSiblings] = useState([]);
+  const [activeItem, setActiveItem] = useState(orderItem || null);
   const loadedFor = useRef(null);
 
+  // Reset the "active item" whenever the modal is opened with a different
+  // entry point so the parent's chosen product still shows first.
   useEffect(() => {
-    if (!open || !orderItem) return;
-    if (loadedFor.current === orderItem.order_item_id) return;
-    loadedFor.current = orderItem.order_item_id;
+    if (open && orderItem) setActiveItem(orderItem);
+  }, [open, orderItem]);
+
+  useEffect(() => {
+    if (!open || !activeItem) return;
+    if (loadedFor.current === activeItem.order_item_id) return;
+    loadedFor.current = activeItem.order_item_id;
     setLoading(true);
-    api.post("/finance/pif/create-from-order-item/", { order_item_id: orderItem.order_item_id })
+    api.post("/finance/pif/create-from-order-item/", { order_item_id: activeItem.order_item_id })
       .then((res) => setPif(res.data))
       .catch(() => {
         toast.error("Failed to load PIF");
         loadedFor.current = null;
       })
       .finally(() => setLoading(false));
-  }, [open, orderItem]);
+  }, [open, activeItem]);
+
+  // Pull every sibling PIF row for this order so the strip can list them.
+  useEffect(() => {
+    if (!open || !orderId) return;
+    api.get("/finance/pif/status-for-order/", { params: { order_id: orderId } })
+      .then((r) => setSiblings(r.data?.items || []))
+      .catch(() => setSiblings([]));
+  }, [open, orderId, pif?.id]);
+
+  const switchTo = (item) => {
+    if (!item || item.order_item_id === activeItem?.order_item_id) return;
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(""); }
+    loadedFor.current = null;
+    setPif(null);
+    setActiveItem(item);
+  };
 
   useEffect(() => {
     if (!open) {
@@ -146,6 +174,36 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
     finally { setSaving(false); }
   };
 
+  // Preview saves the current edits and renders the PDF inline (within
+  // this modal) so the user can review without leaving the editor.
+  const preview = async () => {
+    if (!pif) return;
+    const saved = await save();
+    if (!saved) return;
+    setPreviewing(true);
+    try {
+      const res = await api.get(`/finance/pif/${pif.id}/generate-pdf/`, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      // Revoke any previous URL to avoid leaks across re-previews.
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch { toast.error("Failed to render preview"); }
+    finally { setPreviewing(false); }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl("");
+  };
+
+  // Free the blob URL when the modal closes entirely.
+  useEffect(() => {
+    if (!open && previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl("");
+    }
+  }, [open]);
+
   const generatePdf = async () => {
     if (!pif) return;
     const saved = await save();
@@ -170,14 +228,48 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
         <div className="sticky top-0 bg-white z-10 px-5 py-3 border-b border-gray-200 flex items-center justify-between rounded-t-xl">
           <div>
             <h2 className="font-semibold">Packing Instructions Form</h2>
-            <p className="text-xs text-gray-500">{pif?.pif_number || "Loading..."}{orderItem?.product_name ? ` · ${orderItem.product_name}` : ""}</p>
+            <p className="text-xs text-gray-500">
+              {pif?.pif_number || "Loading..."}{activeItem?.product_name ? ` · ${activeItem.product_name}` : ""}
+              {siblings.length > 1 && (() => {
+                const idx = siblings.findIndex((s) => s.order_item_id === activeItem?.order_item_id);
+                return idx >= 0 ? <span className="ml-1">· PIF {idx + 1} of {siblings.length}</span> : null;
+              })()}
+            </p>
           </div>
           <div className="flex gap-2">
             <button onClick={save} disabled={saving || !pif} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">{saving ? "Saving..." : "Save"}</button>
+            <button onClick={preview} disabled={previewing || !pif} className="px-3 py-1.5 text-sm border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-40">{previewing ? "Rendering..." : "👁 Preview"}</button>
             <button onClick={generatePdf} disabled={generating || !pif} className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">{generating ? "Generating..." : "Save & Generate PDF"}</button>
             <button onClick={onClose} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
           </div>
         </div>
+
+        {/* Sibling-PIF tabs — one tab per product line on the parent
+            order. Status pip shows whether each PIF is generated already. */}
+        {siblings.length > 1 && (
+          <div className="sticky top-[57px] bg-white z-10 px-5 py-2 border-b border-gray-200 flex flex-wrap gap-2 items-center">
+            <span className="text-[11px] uppercase tracking-wide font-semibold text-gray-500 mr-1">Products in this order:</span>
+            {siblings.map((s) => {
+              const active = s.order_item_id === activeItem?.order_item_id;
+              const state = s.has_pdf ? "ready" : s.pif_id ? "draft" : "missing";
+              const pip = state === "ready" ? "bg-emerald-500" : state === "draft" ? "bg-amber-400" : "bg-gray-300";
+              return (
+                <button
+                  key={s.order_item_id}
+                  onClick={() => switchTo(s)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition ${active
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:border-indigo-400"}`}
+                  title={state === "ready" ? "PDF generated" : state === "draft" ? "Saved draft — needs PDF" : "Not started"}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${pip}`} />
+                  <span className="truncate max-w-[180px]">{s.product_name || `Item ${s.order_item_id}`}</span>
+                  {s.pif_number && <span className={`text-[10px] ${active ? "text-indigo-100" : "text-gray-400"}`}>· {s.pif_number}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {loading || !pif ? (
           <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>
@@ -289,6 +381,24 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
           </div>
         )}
       </div>
+
+      {/* Inline PDF preview — overlays the editor without leaving the page. */}
+      {previewUrl && (
+        <div className="fixed inset-0 z-[60] bg-black/85 flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <div className="text-white">
+              <div className="text-sm font-semibold">PIF Preview</div>
+              <div className="text-xs text-gray-300">{pif?.pif_number || ""}{activeItem?.product_name ? ` · ${activeItem.product_name}` : ""}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <a href={previewUrl} download={`${pif?.pif_number || "PIF"}.pdf`} className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white rounded">⬇ Download</a>
+              <button onClick={generatePdf} disabled={generating} className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded disabled:opacity-50">{generating ? "Saving…" : "Save & Open"}</button>
+              <button onClick={closePreview} className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white rounded">✕ Close Preview</button>
+            </div>
+          </div>
+          <iframe src={previewUrl} title="PIF Preview" className="flex-1 bg-white" />
+        </div>
+      )}
     </div>
   );
 }

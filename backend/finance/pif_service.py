@@ -105,22 +105,66 @@ def generate_pif_pdf(pif):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepInFrame
+    from reportlab.platypus import (
+        BaseDocTemplate, PageTemplate, Frame, FrameBreak,
+        Table, TableStyle, Paragraph, Spacer, Image, KeepInFrame,
+    )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
     buffer = io.BytesIO()
     pdf_title = f'PIF {pif.pif_number} - {pif.product_name or ""}'
-    TOP_M = 8 * mm
-    BOT_M = 8 * mm
-    LR_M = 10 * mm
-    doc = SimpleDocTemplate(
+    # Page margins — equal breathing room on all four sides so the
+    # document doesn't touch any edge. The green band sits INSIDE the
+    # left/right margins and starts ~TOP_GAP below the top edge.
+    TOP_GAP = 10 * mm   # whitespace from page top to the green band
+    BOT_M = 10 * mm     # whitespace from page bottom to the footer block
+    LR_M = 12 * mm      # whitespace on left and right
+    GREEN_BAND_H = 4 * mm
+    # Two-frame layout: a tall content frame at the top + a short footer
+    # frame anchored to the bottom of the page. Footer always sits at the
+    # page bottom regardless of how much content lives above it.
+    page_w, page_h = A4
+    content_w = page_w - 2 * LR_M
+    FOOTER_H = 32 * mm  # reserved bottom strip for note + 3 signatures (give it
+                       # enough room so the seal/sign + label rows never spill)
+    GAP_AFTER_BAND = 3 * mm  # tiny breath between green band and header
+    content_x = LR_M
+    content_y = BOT_M + FOOTER_H
+    content_h = page_h - TOP_GAP - GREEN_BAND_H - GAP_AFTER_BAND - BOT_M - FOOTER_H
+    footer_y = BOT_M
+    content_frame = Frame(
+        content_x, content_y, content_w, content_h,
+        leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
+        id='content', showBoundary=0,
+    )
+    footer_frame = Frame(
+        content_x, footer_y, content_w, FOOTER_H,
+        leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
+        id='footer', showBoundary=0,
+    )
+
+    def _draw_green_band(canvas, _doc):
+        """Kriya-green band sitting inside the page margins (does not run
+        edge-to-edge — there's whitespace on all four sides)."""
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor('#4e8a2d'))
+        band_y = page_h - TOP_GAP - GREEN_BAND_H
+        band_w = page_w - 2 * LR_M
+        canvas.rect(LR_M, band_y, band_w, GREEN_BAND_H, stroke=0, fill=1)
+        canvas.restoreState()
+
+    doc = BaseDocTemplate(
         buffer, pagesize=A4,
-        topMargin=TOP_M, bottomMargin=BOT_M,
         leftMargin=LR_M, rightMargin=LR_M,
+        topMargin=TOP_GAP + GREEN_BAND_H + GAP_AFTER_BAND,
+        bottomMargin=BOT_M,
         title=pdf_title, author='Kriya Biosys Private Limited',
     )
+    doc.addPageTemplates([PageTemplate(
+        id='pif', frames=[content_frame, footer_frame], onPage=_draw_green_band,
+    )])
 
     styles = getSampleStyleSheet()
     G = colors.HexColor('#4e8a2d')      # Kriya green
@@ -147,18 +191,19 @@ def generate_pif_pdf(pif):
     except Exception:
         pass
 
-    s8 = ParagraphStyle('s8', parent=styles['Normal'], fontSize=7.5, leading=9.5, fontName=_br)
-    s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=7.5, leading=9.5, fontName=_bf)
-    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=6.5, leading=8, fontName=_br)
-    s_title = ParagraphStyle('s_title', parent=styles['Normal'], fontSize=13, leading=16, fontName=_bf, alignment=1)
-    s_sec = ParagraphStyle('s_sec', parent=styles['Normal'], fontSize=8.5, leading=10, fontName=_bf, textColor=BLUE)
+    # Tighter typography to match the compact feel of the original template.
+    s8 = ParagraphStyle('s8', parent=styles['Normal'], fontSize=7, leading=8.5, fontName=_br)
+    s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=7, leading=8.5, fontName=_bf)
+    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=6.2, leading=7.5, fontName=_br)
+    s_title = ParagraphStyle('s_title', parent=styles['Normal'], fontSize=12, leading=14, fontName=_bf, alignment=1)
+    s_sec = ParagraphStyle('s_sec', parent=styles['Normal'], fontSize=8, leading=9.5, fontName=_bf, textColor=BLUE)
 
     PW = 190 * mm  # page content width
 
     el = []
 
-    # ── Header: logo | title | meta ──
-    logo = Image(logo_path, width=26 * mm, height=15 * mm) if os.path.exists(logo_path) else Paragraph('', s8)
+    # ── Header: logo | title | meta ── (logo trimmed to match original)
+    logo = Image(logo_path, width=22 * mm, height=13 * mm) if os.path.exists(logo_path) else Paragraph('', s8)
     left_cell = Table([[logo]], colWidths=[50 * mm])
     left_cell.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -191,10 +236,18 @@ def generate_pif_pdf(pif):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
     el.append(header)
-    el.append(Spacer(1, 1.5 * mm))
+    el.append(Spacer(1, 1 * mm))
     el.append(Table([['']], colWidths=[PW], rowHeights=[0.5],
-                    style=TableStyle([('LINEBELOW', (0, 0), (-1, -1), 0.6, BLACK)])))
-    el.append(Spacer(1, 1.5 * mm))
+                    style=TableStyle([('LINEBELOW', (0, 0), (-1, -1), 0.5, BLACK)])))
+    el.append(Spacer(1, 1 * mm))
+
+    # Helper for spacers that the leftover-distribution pass is allowed to
+    # grow. Header-related spacers (above and below the divider line) are
+    # NOT marked, so the title block stays glued to the divider.
+    def flex_spacer(h):
+        s = Spacer(1, h)
+        s._pif_flex = True
+        return s
 
     # ── Helper to render a 2-col heading row and a 2-col key/value block ──
     def section_heading_row(left_text, right_text=None):
@@ -202,11 +255,15 @@ def generate_pif_pdf(pif):
         right_para = Paragraph(right_text, s_sec) if right_text else ''
         t = Table([[left_para, right_para]], colWidths=[PW / 2, PW / 2])
         t.setStyle(TableStyle([
-            ('LINEBELOW', (0, 0), (-1, -1), 0.4, BLUE),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.3, BLUE),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            # Full one-row gap between the blue underline and the first
+            # detail row — matches the empty Excel row in the original.
+            # 9pt matches the height of one data row (~7pt font + ~1pt top
+            # padding + ~1pt bottom padding).
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 0.5),
         ]))
         return t
 
@@ -215,13 +272,14 @@ def generate_pif_pdf(pif):
 
     def kv_block(fields, source):
         rows = [kv_pair(label, source.get(key, '')) for key, label in fields]
-        t = Table(rows, colWidths=[35 * mm, (PW / 2) - 35 * mm])
+        t = Table(rows, colWidths=[33 * mm, (PW / 2) - 33 * mm])
         t.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-            ('TOPPADDING', (0, 0), (-1, -1), 0.5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5),
+            # Uniform top/bottom padding gives each row an excel-cell feel.
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
         return t
 
@@ -244,7 +302,7 @@ def generate_pif_pdf(pif):
         kv_pair('Packing Description', pif.packing_description),
         kv_pair('Quantity', pif.quantity),
     ]
-    product_tbl = Table(product_rows, colWidths=[42 * mm, (PW / 2) - 42 * mm])
+    product_tbl = Table(product_rows, colWidths=[40 * mm, (PW / 2) - 40 * mm])
     product_tbl.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -252,13 +310,13 @@ def generate_pif_pdf(pif):
         ('TOPPADDING', (0, 0), (-1, -1), 1),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
     ]))
-    notes_box = Table([[Paragraph(pif.notes or '', s8)]], colWidths=[(PW / 2) - 4 * mm], rowHeights=[22 * mm])
+    notes_box = Table([[Paragraph(pif.notes or '', s8)]], colWidths=[(PW / 2) - 4 * mm], rowHeights=[18 * mm])
     notes_box.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 0.4, GREY),
+        ('BOX', (0, 0), (-1, -1), 0.3, GREY),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
     ]))
     notes_wrap = Table([[notes_box]], colWidths=[PW / 2])
     notes_wrap.setStyle(TableStyle([
@@ -267,7 +325,7 @@ def generate_pif_pdf(pif):
         ('TOPPADDING', (0, 0), (-1, -1), 0),
     ]))
     el.append(two_col(product_tbl, notes_wrap))
-    el.append(Spacer(1, 1.5 * mm))
+    el.append(flex_spacer(1 * mm))
 
     # ── Container / Carton Box ──
     el.append(section_heading_row('Container', 'Carton Box'))
@@ -275,7 +333,7 @@ def generate_pif_pdf(pif):
         kv_block(_LEFT_FIELDS_CONTAINER, pif.container_left or {}),
         kv_block(_RIGHT_FIELDS_CONTAINER, pif.container_right or {}),
     ))
-    el.append(Spacer(1, 1.5 * mm))
+    el.append(flex_spacer(1 * mm))
 
     # ── Repeating Packing Sections ──
     for section in (pif.packing_sections or []):
@@ -288,23 +346,15 @@ def generate_pif_pdf(pif):
             kv_block(_LEFT_FIELDS_QTY, section.get('quantity_left', {}) or {}),
             kv_block(_RIGHT_FIELDS_ACC, section.get('accessories_right', {}) or {}),
         ))
-        el.append(Spacer(1, 1 * mm))
-
-    # ── Footer ──
-    el.append(Spacer(1, 2 * mm))
-    el.append(Table([['']], colWidths=[PW], rowHeights=[0.5],
-                    style=TableStyle([('LINEABOVE', (0, 0), (-1, -1), 0.4, BLACK)])))
-    el.append(Spacer(1, 1 * mm))
-    el.append(Paragraph(pif.footer_note or '', s8))
-    el.append(Spacer(1, 4 * mm))
+        el.append(flex_spacer(0.7 * mm))
 
     # Sign + Seal stamp block — used in the first signature column
     def _make_sign_seal_cell():
-        sign = Image(sign_path, width=20 * mm, height=10 * mm) if os.path.exists(sign_path) else ''
-        seal = Image(seal_path, width=14 * mm, height=14 * mm) if os.path.exists(seal_path) else ''
+        sign = Image(sign_path, width=18 * mm, height=9 * mm) if os.path.exists(sign_path) else ''
+        seal = Image(seal_path, width=12 * mm, height=12 * mm) if os.path.exists(seal_path) else ''
         if not sign and not seal:
             return ''
-        inner = Table([[sign, seal]], colWidths=[22 * mm, 16 * mm])
+        inner = Table([[sign, seal]], colWidths=[20 * mm, 14 * mm])
         inner.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -327,15 +377,57 @@ def generate_pif_pdf(pif):
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5),
     ]))
-    el.append(sig_row)
 
-    # Force single A4 page — shrink content uniformly if it overflows
-    page_w, page_h = A4
-    frame_w = page_w - 2 * LR_M
-    frame_h = page_h - TOP_M - BOT_M
-    wrapped = KeepInFrame(frame_w, frame_h, el, mode='shrink')
-    doc.build([wrapped])
+    # ── Distribute leftover vertical space across the section spacers
+    # so the content fills the page evenly (matches the original
+    # template's even gaps between sections). When the section list is
+    # short, every Spacer grows by the same delta; when it's long, the
+    # KeepInFrame below shrinks the whole stack to fit one page.
+    try:
+        total_h = 0
+        for f in el:
+            try:
+                _w, _h = f.wrap(content_w, content_h)
+            except Exception:
+                _h = 0
+            total_h += _h
+        # Reserve a tiny safety margin so we don't push the last section
+        # right against the footer frame.
+        leftover = content_h - total_h - 4 * mm
+        # Only inter-section spacers are eligible — the header-area spacers
+        # are kept fixed so the title block stays glued to the divider line.
+        spacer_indices = [i for i, f in enumerate(el)
+                          if isinstance(f, Spacer) and getattr(f, '_pif_flex', False)]
+        if leftover > 0 and spacer_indices:
+            per_spacer = leftover / len(spacer_indices)
+            for i in spacer_indices:
+                old = el[i]
+                new_s = Spacer(1, max(0, old.height) + per_spacer)
+                new_s._pif_flex = True
+                el[i] = new_s
+    except Exception:
+        pass  # if measurement fails, fall through to plain shrink-to-fit
+
+    # ── Build the story across two frames ─────────────────────────────
+    # Content frame (top): the section list with redistributed spacers,
+    # wrapped in KeepInFrame so it still shrinks gracefully if a future
+    # PIF carries more rows than expected.
+    story = []
+    story.append(KeepInFrame(content_w, content_h, list(el), mode='shrink'))
+    # Switch to the footer frame, anchored at the bottom of the page.
+    story.append(FrameBreak())
+    footer_items = [
+        Paragraph(pif.footer_note or '', s8),
+        Spacer(1, 2 * mm),
+        sig_row,
+    ]
+    # Hard cap the footer height to FOOTER_H — KeepInFrame shrinks the
+    # footer block if the note grows long, so it can never push the
+    # signatures onto a second page.
+    story.append(KeepInFrame(content_w, FOOTER_H, footer_items, mode='shrink'))
+
+    doc.build(story)
     buffer.seek(0)
     return buffer

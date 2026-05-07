@@ -352,12 +352,20 @@ _STOPWORDS = {
     'confirm', 'confirmed', 'confirming', 'confirmation', 'place',
     'placed', 'review', 'proceed', 'proforma', 'invoice', 'pi',
     'quotation', 'quote', 'and', 'with', 'regarding', 're', 'fwd',
-    'subject', 'product', 'request', 'requested', 'further', 'as',
+    'subject', 'product', 'products', 'request', 'requested', 'requesting',
+    'further', 'as',
     'is', 'are', 'will', 'would', 'shall', 'can', 'could',
     'team', 'sir', 'madam', 'hi', 'hello', 'thanks', 'regards',
     'mt', 'kg', 'kgs', 'ltr', 'ltrs', 'litre', 'litres', 'liter',
     'liters', 'gal', 'gallon', 'gallons', 'nos', 'pcs', 'pieces',
     'bags', 'drums', 'tons', 'l', 'tbd',
+    # ── Section/list filler tokens that should never become a product
+    'below', 'above', 'following', 'follow', 'follows', 'mentioned',
+    'item', 'items', 'list', 'listed', 'detail', 'details',
+    'this', 'that', 'these', 'those', 'them', 'it',
+    'in', 'on', 'at', 'to', 'from', 'by', 'of',
+    'need', 'needs', 'require', 'requires', 'required', 'interested',
+    'noted', 'note', 'notes',
 }
 
 # Phrases that typically precede a product name in a PO email.
@@ -476,7 +484,9 @@ def _resolve_product_from_text(text, subject=''):
         m = re.search(rx, haystack, re.IGNORECASE)
         if m:
             cand = _trim_to_product(m.group(1))
-            if cand and not _is_stopword(cand):
+            # Reject hard non-products too — protects against
+            # "request for the below" → "below" capture.
+            if cand and not _is_stopword(cand) and cand.lower() not in _HARD_NON_PRODUCT:
                 return None, cand
 
     # 4. Trailing words of subject. Walk from the right keeping capitalised /
@@ -499,6 +509,324 @@ def _resolve_product_from_text(text, subject=''):
                 return None, cand
 
     return None, ''
+
+
+# Bullets / numbered list markers that often precede each product name in
+# a multi-product PO request. We strip these and read the product off the
+# remainder of the line.
+_BULLET_LINE_RE = re.compile(r'^\s*(?:[•◦▶▪\-\*]|\d+[\.\)])\s*(.+?)\s*$', re.MULTILINE)
+
+# Phrases that announce a multi-line product list. When any of these are
+# found, we stop reading the same line and start collecting products from
+# the next non-empty lines until we hit a sentence / signature / blank.
+_LIST_TRIGGER_RE = re.compile(
+    r'(?:'
+    r'below\s+products?|'
+    r'following\s+products?|'
+    r'(?:^|\W)products?\s*:|'
+    r'(?:^|\W)items?\s*:|'
+    r'product\s+list|'
+    r'required\s+products?|'
+    r'our\s+requirement|'
+    r'product\s+requirements?|'
+    r'we\s+(?:require|need|are\s+interested\s+in)|'
+    r'interested\s+in\s+sourcing|'
+    r'sourcing\s+(?:the\s+)?(?:following|below)?\s*products?|'
+    r'(?:purchase\s+)?(?:order\s+)?request\s+for|'
+    r'(?:request\s+for\s+)?quotation\s+for|'
+    r'(?:please\s+)?(?:kindly\s+)?(?:share|send)\s+(?:your\s+)?quote\s+for|'
+    r'(?:please\s+)?(?:kindly\s+)?quote\s+for|'
+    r'inquiry\s+for'
+    r')',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Quantity + UOM patterns inside a single product line.
+# UOM tokens are matched as whole words and normalized to uppercase.
+_UOM_TOKENS = (
+    'MT', 'TON', 'TONS', 'TONNES', 'KG', 'KGS', 'GM', 'G',
+    'LTR', 'LTRS', 'LT', 'LITRE', 'LITRES', 'LITER', 'LITERS',
+    'L', 'ML', 'NOS', 'PCS', 'BAG', 'BAGS', 'DRUM', 'DRUMS',
+    'IBC', 'CONTAINER', 'CONTAINERS',
+)
+_UOM_ALT = '|'.join(re.escape(u) for u in _UOM_TOKENS)
+# A number followed by a UOM. Concentrations like "0.3%" / "90%" must NOT
+# match because they're glued to the percent sign instead of a UOM.
+_QTY_UOM_RE = re.compile(
+    rf'(\d+(?:\.\d+)?)\s*({_UOM_ALT})\b',
+    re.IGNORECASE,
+)
+_QTY_LABEL_RE = re.compile(
+    rf'(?:Qty|Quantity)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*({_UOM_ALT})?\b',
+    re.IGNORECASE,
+)
+
+
+def _split_qty_from_line(line):
+    """Extract (clean_product_name, qty, uom) from a single product line.
+    Concentration tokens (`0.3%`, `90%`) stay in the product name; only a
+    bare number followed by a UOM token is treated as the quantity.
+    Returns qty=0 and uom='' when nothing is found."""
+    s = (line or '').strip()
+    if not s:
+        return s, 0, ''
+    qty = 0
+    uom = ''
+    # Prefer "Qty: 30 MT" / "Quantity: 30" patterns
+    m = _QTY_LABEL_RE.search(s)
+    if m:
+        try:
+            qty = float(m.group(1))
+        except (TypeError, ValueError):
+            qty = 0
+        uom = (m.group(2) or '').upper()
+        s = (s[:m.start()] + s[m.end():]).strip()
+    else:
+        m = _QTY_UOM_RE.search(s)
+        if m:
+            try:
+                qty = float(m.group(1))
+            except (TypeError, ValueError):
+                qty = 0
+            uom = (m.group(2) or '').upper()
+            # Strip the qty+uom out of the product label.
+            s = (s[:m.start()] + s[m.end():])
+    # Tidy separators left behind ("Neem Oil 0.3% - " / " | ")
+    s = re.sub(r'\s*[-–—|,:]\s*$', '', s).strip()
+    s = re.sub(r'^\s*[-–—|,:]\s*', '', s).strip()
+    return s, qty, uom
+
+# Words that should NEVER be returned as a product name even if the
+# extractor's regex captured them. Hard guard against the trigger words
+# themselves bleeding through (e.g. "request for" capturing "below").
+_HARD_NON_PRODUCT = {
+    'below', 'above', 'following', 'follow', 'mentioned', 'product',
+    'products', 'item', 'items', 'list', 'request', 'order', 'po',
+    'reference', 'detail', 'details',
+}
+
+
+# Lines that signal we should stop reading the trailing product list.
+_STOP_LINE_RE = re.compile(
+    r'^\s*(?:'
+    r'kindly|please|thanks|regards|best\s+regards|warm\s+regards|'
+    r'sincerely|cheers|looking\s+forward|let\s+us\s+know|'
+    r'we\s+(?:will|shall|hope|are\s+looking)|'
+    r'awaiting|hoping|hope\s+'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_qty(s):
+    """Drop a trailing quantity expression like ' - 30 KG' or ': 5 LTR'."""
+    if not s:
+        return s
+    s = re.sub(rf'\s*[-—–:,]?\s*\d+[\.,]?\d*\s*({_UNIT_TOKEN_RE})\s*$', '', s, flags=re.IGNORECASE)
+    return s.strip()
+
+
+def _resolve_all_products_from_text(text, subject=''):
+    """Return a list of dicts (one per detected product) with keys
+    ``product`` (Product instance or None), ``name`` (short label), and a
+    derived ``unit_price`` from the catalog if matched.
+
+    Strategy:
+      1. Bullet/numbered list — extract every line, match catalog where
+         possible, trim the rest to a 2-word product label.
+      2. If no bullets matched, scan the body+subject for ALL catalog
+         products (longest-name first) to support comma-separated PO
+         requests like "PO for Neem Oil, Humic Acid".
+      3. Last resort — fall back to the single-product extractor so a
+         lonely product still gets picked up.
+    """
+    from products.models import Product
+
+    plain = _strip_html(text)
+    subj = _strip_html(subject or '')
+    haystack = '\n'.join([s for s in (subj, plain) if s])
+    if not haystack:
+        return []
+
+    catalog = list(
+        Product.objects.filter(is_deleted=False, is_active=True)
+        .only('id', 'name', 'concentration', 'base_price')
+    )
+    catalog.sort(key=lambda p: len(p.name or ''), reverse=True)
+
+    def _match_catalog(line):
+        low = line.lower()
+        for p in catalog:
+            nm = (p.name or '').lower().strip()
+            if not nm:
+                continue
+            if re.search(r'(?<![A-Za-z0-9])' + re.escape(nm) + r'(?![A-Za-z0-9])', low):
+                return p
+        return None
+
+    results = []
+    seen = set()
+
+    def _push(prod, name, qty=0, uom=''):
+        # When a catalog product matched, trust that name unless the
+        # original line carries extra info (e.g. catalog has "Neem Oil"
+        # but the email said "Neem Oil 0.3%" — keep the longer label).
+        if prod is not None:
+            candidate = (name or '').strip()
+            cat_name = (prod.name or '').strip()
+            if candidate and len(candidate) > len(cat_name) and cat_name.lower() in candidate.lower():
+                cleaned = candidate[:120]
+            else:
+                cleaned = cat_name
+        else:
+            # Don't trim to 2 words for catalog-less names — products like
+            # "Neem Oil 0.3%" are valid 3-token labels. Just clean filler.
+            cleaned = _clean_token(name)
+            words = [w for w in re.split(r'\s+', cleaned) if w]
+            if not words:
+                return
+            if all(
+                _clean_token(w).lower() in _STOPWORDS
+                or _clean_token(w).lower() in _HARD_NON_PRODUCT
+                for w in words
+            ):
+                return
+        if not cleaned:
+            return
+        # Hard guard — never accept the trigger filler ("below", "following",
+        # "products", etc.) as a product name even if the regex captured it.
+        if cleaned.lower() in _HARD_NON_PRODUCT:
+            return
+        # Drop very short stray tokens with no catalog backing.
+        if len(cleaned) < 2 and not prod:
+            return
+        key = cleaned.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        unit_price = 0
+        if prod is not None:
+            try:
+                unit_price = float(prod.base_price or 0)
+            except (TypeError, ValueError):
+                unit_price = 0
+        results.append({
+            'product': prod,
+            'name': cleaned[:120],
+            'unit_price': unit_price,
+            'quantity': qty,
+            'uom': uom,
+        })
+
+    # Strategy 0 (highest priority): a sentence containing a list-trigger
+    # phrase like "request for the below products:" — read products from
+    # the SUBSEQUENT lines, never from the same line. This stops "below"
+    # from being captured by the weaker generic trigger phrases below.
+    plain_lines = plain.split('\n')
+    trigger_idx = None
+    for i, line in enumerate(plain_lines):
+        if _LIST_TRIGGER_RE.search(line):
+            trigger_idx = i
+            break
+    if trigger_idx is not None:
+        # Some PO emails put the products on the SAME line as the trigger,
+        # after a colon: "below products: MargoShine, OrgoCare". Parse
+        # those inline products first.
+        trigger_line = plain_lines[trigger_idx]
+        m_inline = re.search(r':\s*(.+)$', trigger_line)
+        if m_inline:
+            tail = m_inline.group(1).strip()
+            # Drop common closers if the same line ends with a sentence.
+            if tail and not _STOP_LINE_RE.match(tail):
+                # Split on commas / "and" / semicolons.
+                for part in re.split(r'\s*(?:,|;|\band\b|\bor\b|/)\s*', tail, flags=re.IGNORECASE):
+                    label, qty, uom = _split_qty_from_line(part)
+                    if label and label.lower() not in _HARD_NON_PRODUCT:
+                        prod = _match_catalog(label)
+                        _push(prod, label, qty=qty, uom=uom)
+        # Walk forward, collecting non-empty, non-stopword lines until we
+        # hit a blank line, a signature/sentence opener, or 12 lines max.
+        for raw in plain_lines[trigger_idx + 1: trigger_idx + 13]:
+            line = raw.strip()
+            # Strip a leading bullet/number marker if present.
+            mb = re.match(r'^[\s•◦▶▪\-\*]*(?:\d+[\.\)])?\s*(.+?)\s*$', line)
+            if mb:
+                line = mb.group(1)
+            if not line:
+                # Blank line = end of list (only honour it AFTER we've
+                # already pushed at least one product).
+                if results:
+                    break
+                continue
+            if _STOP_LINE_RE.search(line):
+                break
+            # Skip filler lines that are obviously not a product.
+            if line.lower() in _HARD_NON_PRODUCT:
+                continue
+            # Some emails put a SECOND trigger on this line followed by
+            # the product list inline ("below products: A, B"). When we
+            # spot a trigger phrase on the line, drop everything up to
+            # the colon and split the rest on commas.
+            if _LIST_TRIGGER_RE.search(line):
+                m_in = re.search(r':\s*(.+)$', line)
+                if m_in:
+                    tail = m_in.group(1).strip()
+                    if tail:
+                        for part in re.split(r'\s*(?:,|;|\band\b|\bor\b|/)\s*', tail, flags=re.IGNORECASE):
+                            lab, q, u = _split_qty_from_line(part)
+                            if lab and lab.lower() not in _HARD_NON_PRODUCT:
+                                _push(_match_catalog(lab), lab, qty=q, uom=u)
+                continue
+            # Comma-separated inline list on a normal line ("Margoshine,
+            # OrgoCare, Neem Oil"). Split first; if any part looks like a
+            # standalone product, push it; otherwise treat the whole line
+            # as one product.
+            comma_parts = [p.strip() for p in re.split(r'\s*(?:,|;|\band\b)\s*', line, flags=re.IGNORECASE) if p.strip()]
+            if len(comma_parts) > 1 and all(len(p.split()) <= 4 for p in comma_parts):
+                for part in comma_parts:
+                    lab, q, u = _split_qty_from_line(part)
+                    if lab and lab.lower() not in _HARD_NON_PRODUCT:
+                        _push(_match_catalog(lab), lab, qty=q, uom=u)
+                continue
+            # Split out per-line qty+uom; the rest is the product label.
+            label, qty, uom = _split_qty_from_line(line)
+            if not label:
+                continue
+            prod = _match_catalog(label)
+            _push(prod, label, qty=qty, uom=uom)
+
+    # Strategy 1: bullets / numbered list lines (only triggers when the
+    # trigger-phrase strategy didn't pick anything up).
+    if not results:
+        for m in _BULLET_LINE_RE.finditer(plain):
+            line = m.group(1).strip()
+            if not line:
+                continue
+            # Skip headings / instructions, not product lines.
+            if re.search(r'(please|kindly|update|status|expected|dispatch|timeline|regards|reference)', line, re.IGNORECASE):
+                continue
+            label, qty, uom = _split_qty_from_line(line)
+            if not label:
+                continue
+            prod = _match_catalog(label)
+            _push(prod, label, qty=qty, uom=uom)
+
+    # Strategy 2: catalog scan — covers comma-separated PO lines.
+    if not results:
+        for p in catalog:
+            nm = (p.name or '').lower().strip()
+            if not nm:
+                continue
+            if re.search(r'(?<![A-Za-z0-9])' + re.escape(nm) + r'(?![A-Za-z0-9])', haystack.lower()):
+                _push(p, p.name)
+
+    # Strategy 3: fall back to the single-product resolver.
+    if not results:
+        prod, name = _resolve_product_from_text(text, subject)
+        if name or prod:
+            _push(prod, prod.name if prod else name)
+
+    return results
 
 
 def _resolve_quantity_from_text(text):
@@ -533,38 +861,40 @@ def _create_direct_order(communication, client, text):
     from orders.models import Order, OrderItem
     from products.models import Product  # noqa: F401  (used by helper)
 
-    # 1. Resolve product from the email — pass subject so the extractor can
-    # look in both the body and the subject line.
-    product_obj, product_name = _resolve_product_from_text(
-        text, subject=getattr(communication, 'subject', '') or '',
-    )
+    # 1. Resolve EVERY product mentioned in the email so a multi-product PO
+    # turns into multiple line items, not just one.
+    subject = getattr(communication, 'subject', '') or ''
+    products = _resolve_all_products_from_text(text, subject=subject)
 
-    # 2. Resolve quantity / unit
-    quantity, unit = _resolve_quantity_from_text(text)
+    # 2. Resolve quantity / unit at the email level (used as a fallback
+    # only when a row didn't carry its own qty/uom — never overrides a
+    # row that already has one).
+    fallback_qty, fallback_unit = _resolve_quantity_from_text(text)
 
-    # 3. Last-ditch fallback. The extractor already mines the subject; only
-    # fall through if every strategy failed.
-    if not product_name:
-        product_name = 'Product from PO email'
-    # Hard cap at 2 words (defensive — extractor should already do this).
-    product_name = _trim_to_product(product_name) or product_name
-    product_name = product_name[:120]
+    if not products:
+        # Could not confidently extract anything — leave the order empty
+        # so the executive sees a blank Line Items table and adds rows
+        # manually instead of inheriting a bogus "below / 1 KG" entry.
+        products = []
 
-    # 4. Resolve unit price — prefer matched product; fall back to keyword search
-    unit_price = 0
-    if product_obj is None and product_name:
-        try:
-            first_token = product_name.split()[0]
-            product_obj = Product.objects.filter(
-                is_deleted=False, is_active=True, name__icontains=first_token,
-            ).first()
-        except Exception:
-            pass
-    if product_obj is not None:
-        try:
-            unit_price = float(product_obj.base_price or 0)
-        except (TypeError, ValueError):
-            unit_price = 0
+    # Defensive — keep label clean but don't aggressively trim, so labels
+    # like "Neem Oil 0.3%" survive intact.
+    for entry in products:
+        nm = (entry.get('name') or '').strip()
+        entry['name'] = nm[:120] if nm else 'Product from PO email'
+
+    grand_total = 0
+    for entry in products:
+        # Per-row qty falls back to email-level qty only if missing on the row.
+        qty_for_row = entry.get('quantity') or 0
+        if not qty_for_row and fallback_qty:
+            qty_for_row = fallback_qty
+        unit_for_row = entry.get('uom') or fallback_unit or 'KG'
+        unit_price = float(entry.get('unit_price') or 0)
+        entry['_qty'] = qty_for_row
+        entry['_unit'] = unit_for_row
+        entry['_total'] = (qty_for_row or 0) * unit_price
+        grand_total += entry['_total']
 
     order_count = Order.objects.count() + 1
     order = Order.objects.create(
@@ -573,21 +903,23 @@ def _create_direct_order(communication, client, text):
         order_type='direct',
         status='confirmed',
         currency=client.preferred_currency or 'USD',
-        total=quantity * unit_price,
+        total=grand_total,
         notes=f'Auto-created from PO email: {communication.subject or ""}',
         created_by=communication.user,
         source_communication=communication,
     )
 
-    OrderItem.objects.create(
-        order=order,
-        product=product_obj,
-        product_name=product_name,
-        quantity=quantity or 1,
-        unit=unit,
-        unit_price=unit_price,
-        total_price=(quantity or 1) * unit_price,
-    )
+    for entry in products:
+        OrderItem.objects.create(
+            order=order,
+            product=entry.get('product'),
+            product_name=entry.get('name'),
+            # Leave qty at 0 (NOT default 1) when the email never said a number.
+            quantity=entry.get('_qty') or 0,
+            unit=entry.get('_unit') or 'KG',
+            unit_price=entry.get('unit_price') or 0,
+            total_price=entry.get('_total') or 0,
+        )
 
     # Auto-attach the PO document from the email if one was attached.
     auto_attach_po_document(communication, order)
@@ -605,5 +937,8 @@ def _create_direct_order(communication, client, text):
     except Exception:
         pass
 
-    logger.info(f'Direct order {order.order_number} created from PO email for {client.company_name} — product: {product_name}')
+    logger.info(
+        f'Direct order {order.order_number} created from PO email for {client.company_name} — '
+        f'products: {", ".join(p["name"] for p in products)}'
+    )
     return order

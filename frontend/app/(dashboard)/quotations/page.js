@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -42,6 +42,35 @@ export default function QuotationsPage() {
   };
 
   useEffect(() => { loadQuotations(); }, []);
+
+  // Deep-link from the dashboard / notifications: ?focus=<quotation_id>
+  // auto-opens that quotation in the editor modal once the list arrives.
+  // We auto-open at most once per focusId so closing/reloading the list
+  // doesn't infinite-loop the modal back open.
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("focus");
+  const handledFocusRef = useRef(null);
+  useEffect(() => {
+    if (!focusId || !list?.length) return;
+    if (showQtModal) return;
+    if (handledFocusRef.current === focusId) return;
+    const exists = list.some((q) => String(q.id) === String(focusId));
+    if (exists) {
+      handledFocusRef.current = focusId;
+      _openEditor(focusId);
+    }
+  }, [focusId, list]);
+
+  // Single helper for closing the editor — drops the ?focus= deep-link
+  // param from the URL so a subsequent list reload doesn't re-trigger
+  // the auto-open effect.
+  const closeEditor = () => {
+    setShowQtModal(false);
+    if (focusId) {
+      try { router.replace("/quotations", { scroll: false }); } catch {}
+    }
+    loadQuotations();
+  };
 
   const toggleSelect = (id, e) => {
     e.stopPropagation();
@@ -108,8 +137,7 @@ export default function QuotationsPage() {
       await handleSaveQt();
       await api.post(`/quotations/quotations/${qt.id}/send-to-client/`, { send_via: "email" });
       toast.success("Quotation sent!");
-      setShowQtModal(false);
-      loadQuotations();
+      closeEditor();
     } catch (err) { toast.error(getErrorMessage(err, "Failed to send")); }
     finally { setQtSending(false); }
   };
@@ -281,13 +309,13 @@ export default function QuotationsPage() {
 
       {/* Editor Modal */}
       {qtLoading && showQtModal && (
-        <Modal open={true} onClose={() => setShowQtModal(false)} title="Loading Quotation..." size="sm">
+        <Modal open={true} onClose={closeEditor} title="Loading Quotation..." size="sm">
           <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600" /></div>
         </Modal>
       )}
       <QuotationEditorModal
         open={showQtModal && !qtLoading}
-        onClose={() => { setShowQtModal(false); loadQuotations(); }}
+        onClose={closeEditor}
         qt={qt} qtForm={qtForm} setQtForm={setQtForm}
         qtItems={qtItems} setQtItems={setQtItems}
         onSave={handleSaveQt} onPreview={handlePreviewQt}

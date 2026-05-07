@@ -17,6 +17,7 @@ import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 import { confirmDialog } from "@/lib/confirm";
+import { promptDialog } from "@/lib/prompt";
 
 // Refine Dropdown for reply box
 function ReplyRefineDropdown({ body, onRefined, contactName }) {
@@ -716,6 +717,31 @@ export default function CommunicationDetailPage() {
                           <span className="text-gray-400 shrink-0">{(att.file_size / 1024).toFixed(1)} KB</span>
                           <span className="text-green-600 text-[10px] shrink-0">Saved</span>
                         </div>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const next = await promptDialog({
+                              title: "Rename attachment",
+                              message: "Edit the filename the recipient will see.",
+                              defaultValue: att.filename || "",
+                              confirmText: "Rename",
+                            });
+                            if (next == null) return;
+                            const trimmed = String(next).trim();
+                            if (!trimmed || trimmed === att.filename) return;
+                            try {
+                              const res = await api.post(
+                                `/communications/drafts/${replyDraftId}/rename-attachment/`,
+                                { attachment_id: att.id, filename: trimmed }
+                              );
+                              const newName = res?.data?.filename || trimmed;
+                              setSavedAttachments(prev => prev.map(a => a.id === att.id ? { ...a, filename: newName } : a));
+                              toast.success("Renamed");
+                            } catch (err) { toast.error(getErrorMessage(err, "Failed to rename")); }
+                          }}
+                          title="Rename file"
+                          className="text-blue-600 hover:text-blue-700 ml-2 shrink-0 text-[11px] font-medium"
+                        >Rename</button>
                         <button onClick={() => handleRemoveSavedAtt(att.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0">&times;</button>
                       </div>
                     ))}
@@ -740,7 +766,26 @@ export default function CommunicationDetailPage() {
                           <span className="text-gray-400">{(f.size / 1024).toFixed(1)} KB</span>
                           <span className="text-amber-600 text-[10px]">Unsaved</span>
                         </div>
-                        <button onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={async () => {
+                              const next = await promptDialog({
+                                title: "Rename file",
+                                message: "Edit the filename the recipient will see.",
+                                defaultValue: f.name || "",
+                                confirmText: "Rename",
+                              });
+                              if (next == null) return;
+                              const trimmed = String(next).trim();
+                              if (!trimmed || trimmed === f.name) return;
+                              const renamed = new File([f], trimmed, { type: f.type, lastModified: f.lastModified });
+                              setAttachments(prev => prev.map((file, idx) => idx === i ? renamed : file));
+                            }}
+                            title="Rename file"
+                            className="text-blue-600 hover:text-blue-700 text-[11px] font-medium"
+                          >Rename</button>
+                          <button onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                        </div>
                       </div>
                     ))}
                   </div>

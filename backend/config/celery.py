@@ -102,4 +102,11 @@ app.conf.beat_schedule = {
         'task': 'orders.check_balance_payment_reminders',
         'schedule': crontab(hour=9, minute=0),
     },
+    # Overdue-payment reminder — runs daily; fires once on day N+1 (and
+    # any later day until it lands) when a payment is past its due date.
+    # Independent cool-down per row via *_overdue_reminder_sent_at.
+    'check-overdue-payment-reminders-daily': {
+        'task': 'orders.check_overdue_payment_reminders',
+        'schedule': crontab(hour=9, minute=15),
+    },
 }

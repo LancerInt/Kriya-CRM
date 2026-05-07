@@ -14,9 +14,10 @@ class Inspection(TimeStampedModel):
         FAILED = 'failed', 'Failed'
         PENDING = 'pending', 'Pending'
 
-    shipment = models.ForeignKey('shipments.Shipment', on_delete=models.CASCADE, related_name='inspections')
-    inspection_date = models.DateField()
-    inspector_name = models.CharField(max_length=255)
+    shipment = models.ForeignKey('shipments.Shipment', on_delete=models.CASCADE, null=True, blank=True, related_name='inspections')
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='inspections')
+    inspection_date = models.DateField(null=True, blank=True)
+    inspector_name = models.CharField(max_length=255, blank=True, default='')
     inspection_type = models.CharField(max_length=30, choices=Type.choices)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     notes = models.TextField(blank=True)
@@ -36,10 +37,30 @@ class InspectionMedia(models.Model):
         db_table = 'inspection_media'
 
 
+class MSDSDocument(TimeStampedModel):
+    """Mirror of COADocument for Material Safety Data Sheets. Auto-populated
+    by the signal that listens on OrderDocument(doc_type='msds')."""
+    shipment = models.ForeignKey('shipments.Shipment', on_delete=models.CASCADE, null=True, blank=True, related_name='msds_documents')
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='msds_documents')
+    order_document = models.ForeignKey('orders.OrderDocument', on_delete=models.CASCADE, null=True, blank=True, related_name='quality_msds_mirror')
+    product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
+    msds_type = models.CharField(max_length=20, default='lab', help_text='client / logistic / lab (= shared)')
+    name = models.CharField(max_length=255, blank=True, default='')
+    file = models.FileField(upload_to='msds/%Y/%m/')
+    version = models.IntegerField(default=1)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'msds_documents'
+
+
 class COADocument(TimeStampedModel):
     shipment = models.ForeignKey('shipments.Shipment', on_delete=models.CASCADE, null=True, blank=True, related_name='coa_documents')
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, null=True, blank=True, related_name='coa_documents')
+    order_document = models.ForeignKey('orders.OrderDocument', on_delete=models.CASCADE, null=True, blank=True, related_name='quality_coa_mirror')
     product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True)
     coa_type = models.CharField(max_length=20, default='lab', help_text='lab or client')
+    name = models.CharField(max_length=255, blank=True, default='')
     file = models.FileField(upload_to='coa/%Y/%m/')
     version = models.IntegerField(default=1)
     notes = models.TextField(blank=True)

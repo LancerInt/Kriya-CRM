@@ -83,11 +83,19 @@ class Order(TimeStampedModel):
     advance_payment_received_at = models.DateTimeField(null=True, blank=True)
     balance_payment_received_at = models.DateTimeField(null=True, blank=True)
     balance_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    # One-shot overdue reminders — fire on the day after the payment due date
+    # (e.g. day 61 for a 60-day term) and never fire again for the same row.
+    balance_overdue_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    advance_overdue_reminder_sent_at = models.DateTimeField(null=True, blank=True)
     # Per-payment phase overrides — the parser suggests defaults (advance
     # before, balance after) but the executive can flip either side via the
     # Payment Tracking card. The dispatch gate honors these choices.
     advance_is_before_dispatch = models.BooleanField(default=True)
     balance_is_before_dispatch = models.BooleanField(default=False)
+    # When True, each product needs TWO COA + TWO MSDS (one tagged
+    # _Client, one tagged _Logistic). When False, a single shared doc
+    # satisfies both audiences. Toggled from the Documents Preparing card.
+    separate_coa_msds_per_group = models.BooleanField(default=False)
 
     # Source email thread — used by the email service to keep all order-stage
     # emails (PI, Sales Order, dispatch, transit, delivery) threaded with the

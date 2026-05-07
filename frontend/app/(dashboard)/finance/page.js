@@ -11,6 +11,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import AISummaryButton from "@/components/ai/AISummaryButton";
 
 const TABS = ["Dashboard", "Invoices", "Payments", "FIRC"];
 
@@ -337,7 +338,12 @@ export default function FinancePage() {
             ? "Track revenue, payments, receivables, and financial performance across clients."
             : "Invoices, payments, and FIRC records"
         }
-        action={getActionButton()}
+        action={
+          <div className="flex gap-2">
+            {getActionButton()}
+            <AISummaryButton variant="button" title="Finance Summary" prompt={`Summarize the ${activeTab} section of Finance. Use get_invoices, get_payments, get_orders and any other relevant tools. Show: total revenue this month vs last, outstanding receivables (advance + balance), overdue payments by client, FIRC pending vs received, and any orders with payment risk. Call out anything that needs the executive's attention today.`} />
+          </div>
+        }
       />
 
       {/* Tabs */}

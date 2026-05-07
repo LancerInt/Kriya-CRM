@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import api from "@/lib/axios";
 import { getErrorMessage } from "@/lib/errorHandler";
 import SearchableSelect from "@/components/ui/SearchableSelect";
+import AISummaryButton from "@/components/ai/AISummaryButton";
 
 // Free samples skip "replied" and "payment_received" — paid samples include them.
 const FREE_STATUS_OPTIONS = [
@@ -299,9 +300,12 @@ export default function SamplesPage() {
         title="Samples"
         subtitle={`${samples.length} samples`}
         action={
-          <button onClick={() => setShowTypeChooser(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-            + New Sample
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowTypeChooser(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+              + New Sample
+            </button>
+            <AISummaryButton variant="button" title="Samples Summary" prompt="Summarize all sample requests. Use get_samples tool. Group by status (requested, replied, prepared, dispatched, delivered, feedback received), highlight samples awaiting reply or feedback, list which clients have the most active samples, and call out anything overdue." />
+          </div>
         }
       />
       <DataTable

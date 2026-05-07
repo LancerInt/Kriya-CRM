@@ -15,6 +15,7 @@ import CIEditorModal from "@/components/finance/CIEditorModal";
 import QuotationEditorModal from "@/components/finance/QuotationEditorModal";
 import LIEditorModal from "@/components/finance/LIEditorModal";
 import { PIFListModal } from "@/components/finance/PIFEditorModal";
+import LineItemsCard from "@/components/orders/LineItemsCard";
 import PackingListEditorModal from "@/components/finance/PackingListEditorModal";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
@@ -297,16 +298,32 @@ export default function OrderDetailPage() {
   const orderItems = order?.items || [];
   // ``groups`` controls which heading the row renders under: 'client',
   // 'logistic', or both. COA + MSDS appear in both groups (per spec).
+  // When the order toggle is on, every product needs TWO COA + TWO MSDS
+  // (one tagged for Client, one for Logistic). Otherwise a single shared
+  // doc per product satisfies both audiences.
+  const splitCoaMsds = !!order?.separate_coa_msds_per_group;
   const DOCS_APPROVAL_CHECKLIST = [
     { doc_type: "client_invoice", label: "Client Invoice", action: "generate-ci", groups: ["client"] },
     { doc_type: "client_packing_list", label: "Client Packing List", action: "generate-cpl", groups: ["client"] },
     { doc_type: "logistic_invoice", label: "Logistic Invoice", action: "generate-li", groups: ["logistic"] },
     { doc_type: "logistic_packing_list", label: "Logistic Packing List", action: "generate-lpl", groups: ["logistic"] },
-    ...(orderItems.length > 0
-      ? orderItems.map((it) => ({ doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`}`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }))
+    ...((orderItems.length > 0)
+      ? orderItems.flatMap((it) => splitCoaMsds
+          ? [
+              { doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`} (Client)`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name, scope: "client", groups: ["client"] },
+              { doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`} (Logistic)`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name, scope: "logistic", groups: ["logistic"] },
+            ]
+          : [{ doc_type: "coa", label: `COA — ${it.product_name || `Item #${it.id}`}`, action: "generate-coa", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }]
+        )
       : [{ doc_type: "coa", label: "COA", action: "generate-coa", optional: true, groups: ["client", "logistic"] }]),
-    ...(orderItems.length > 0
-      ? orderItems.map((it) => ({ doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`}`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }))
+    ...((orderItems.length > 0)
+      ? orderItems.flatMap((it) => splitCoaMsds
+          ? [
+              { doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`} (Client)`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name, scope: "client", groups: ["client"] },
+              { doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`} (Logistic)`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name, scope: "logistic", groups: ["logistic"] },
+            ]
+          : [{ doc_type: "msds", label: `MSDS — ${it.product_name || `Item #${it.id}`}`, action: "generate-msds", optional: true, order_item_id: it.id, product_name: it.product_name, groups: ["client", "logistic"] }]
+        )
       : [{ doc_type: "msds", label: "MSDS", action: "generate-msds", optional: true, groups: ["client", "logistic"] }]),
     // Helper used by the per-side renderer to resolve scope-aware presence.
     { doc_type: "dbk_declaration", label: "DBK Declaration", action: "generate-dbk", optional: true, groups: ["logistic"] },
@@ -337,12 +354,22 @@ export default function OrderDetailPage() {
   const docsMissingCount = requiredChecklistRows.filter((r) => !isRowPresent(r)).length;
 
   // Per-item COA/MSDS missing — each OrderItem must have its own doc.
+  // When the split toggle is on, both Client- AND Logistic-tagged copies
+  // are required per product (so 2 COA + 2 MSDS per row).
   const perItemDispatchMissing = (() => {
     if (!orderItems.length) return [];
     const out = [];
     for (const it of orderItems) {
-      if (!hasDocForItem("coa", it.id)) out.push({ doc_type: "coa", order_item_id: it.id, label: `COA — ${it.product_name || `Item #${it.id}`}` });
-      if (!hasDocForItem("msds", it.id)) out.push({ doc_type: "msds", order_item_id: it.id, label: `MSDS — ${it.product_name || `Item #${it.id}`}` });
+      const labelBase = it.product_name || `Item #${it.id}`;
+      if (splitCoaMsds) {
+        if (!hasDocForItem("coa", it.id, "client")) out.push({ doc_type: "coa", order_item_id: it.id, scope: "client", label: `COA — ${labelBase} (Client)` });
+        if (!hasDocForItem("coa", it.id, "logistic")) out.push({ doc_type: "coa", order_item_id: it.id, scope: "logistic", label: `COA — ${labelBase} (Logistic)` });
+        if (!hasDocForItem("msds", it.id, "client")) out.push({ doc_type: "msds", order_item_id: it.id, scope: "client", label: `MSDS — ${labelBase} (Client)` });
+        if (!hasDocForItem("msds", it.id, "logistic")) out.push({ doc_type: "msds", order_item_id: it.id, scope: "logistic", label: `MSDS — ${labelBase} (Logistic)` });
+      } else {
+        if (!hasDocForItem("coa", it.id)) out.push({ doc_type: "coa", order_item_id: it.id, label: `COA — ${labelBase}` });
+        if (!hasDocForItem("msds", it.id)) out.push({ doc_type: "msds", order_item_id: it.id, label: `MSDS — ${labelBase}` });
+      }
     }
     return out;
   })();
@@ -1154,13 +1181,47 @@ export default function OrderDetailPage() {
 
         {["docs_preparing", "inspection", "inspection_passed", "container_booked", "docs_approved", "dispatched", "in_transit"].includes(order.status) && (
           <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
               <div>
                 <h4 className="font-medium text-sm text-gray-800">Documents Checklist</h4>
                 <p className="text-xs text-gray-500">{order.status === "docs_preparing"
                   ? `Generate the ${requiredChecklistRows.length} required invoices/packing lists (CI, CPL, LI, LPL) to enable Under Inspection (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} done). The other rows are optional.`
                   : `Keep editing through In Transit if anything needs to be updated (${requiredChecklistRows.length - docsMissingCount}/${requiredChecklistRows.length} required done). The remaining rows are optional.`}
                 </p>
+              </div>
+              {/* Toggle: separate COA/MSDS for Client vs Logistic.
+                  When ON, every product needs 2 COA + 2 MSDS (one tagged
+                  Client, one tagged Logistic). */}
+              <div className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg shrink-0">
+                <span className="text-xs font-medium text-gray-700">Separate COA/MSDS for Client &amp; Logistic</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = !splitCoaMsds;
+                    if (next) {
+                      const ok = await confirmDialog({
+                        title: "Use separate COA/MSDS per audience?",
+                        message: `Every product will then need TWO COA and TWO MSDS — one tagged "Client" and one tagged "Logistic". Existing shared docs stay where they are; new ones must specify their audience.`,
+                        confirmText: "Yes, separate",
+                        cancelText: "No",
+                      });
+                      if (!ok) return;
+                    }
+                    try {
+                      await api.post(`/orders/${id}/set-coa-msds-split/`, { separate: next });
+                      toast.success(next ? "Switched to separate COA/MSDS per audience" : "Switched to shared COA/MSDS");
+                      loadOrder();
+                    } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+                  }}
+                  role="switch"
+                  aria-checked={splitCoaMsds}
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${splitCoaMsds ? "bg-emerald-500" : "bg-gray-300"}`}
+                >
+                  <span className={`inline-block h-4 w-4 m-0.5 rounded-full bg-white shadow transition-transform ${splitCoaMsds ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+                <span className={`text-xs font-semibold ${splitCoaMsds ? "text-emerald-700" : "text-gray-500"}`}>
+                  {splitCoaMsds ? "Yes" : "No"}
+                </span>
               </div>
             </div>
             {["container_booked", "docs_approved", "dispatched", "in_transit"].includes(order.status) && (() => {
@@ -1266,9 +1327,14 @@ export default function OrderDetailPage() {
                       {row.action === "generate-coa" && (
                         <button
                           onClick={() => {
-                            // Editing an existing scoped doc keeps that scope.
-                            // Generating a new one prompts: same for both, or split?
-                            if (present) {
+                            // When the order is in split mode, the row already
+                            // declares its scope — go straight to the editor.
+                            // Otherwise: editing an existing scoped doc keeps
+                            // its scope; generating a new shared doc asks.
+                            const lockedScope = row.scope || (splitCoaMsds ? side : null);
+                            if (lockedScope) {
+                              setCoaEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: lockedScope });
+                            } else if (present) {
                               setCoaEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: side || "both" });
                             } else {
                               setScopeAskFor({ kind: "coa", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
@@ -1280,7 +1346,10 @@ export default function OrderDetailPage() {
                       {row.action === "generate-msds" && (
                         <button
                           onClick={() => {
-                            if (present) {
+                            const lockedScope = row.scope || (splitCoaMsds ? side : null);
+                            if (lockedScope) {
+                              setMsdsEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: lockedScope });
+                            } else if (present) {
                               setMsdsEditorFor({ orderItemId: row.order_item_id || null, productName: row.product_name || "", scope: side || "both" });
                             } else {
                               setScopeAskFor({ kind: "msds", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
@@ -1933,10 +2002,10 @@ export default function OrderDetailPage() {
       </div>
 
       {activeTab === "details" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h3 className="font-semibold mb-4">Order Information</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500 block text-xs">Order #</span>{order.order_number}</div>
               <div><span className="text-gray-500 block text-xs">Client</span>{order.client_name}</div>
               <div><span className="text-gray-500 block text-xs">Delivery Terms</span>{order.delivery_terms}</div>
@@ -1946,14 +2015,7 @@ export default function OrderDetailPage() {
               {order.po_number && <div><span className="text-gray-500 block text-xs">PO Number</span>{order.po_number}</div>}
             </div>
           </div>
-          {order.items?.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="font-semibold mb-4">Line Items</h3>
-              <table className="w-full text-sm"><thead><tr className="border-b"><th className="text-left py-2 text-gray-500">#</th><th className="text-left py-2 text-gray-500">Product</th><th className="text-right py-2 text-gray-500">Qty</th>{order.can_view_total && <th className="text-right py-2 text-gray-500">Total</th>}</tr></thead>
-              <tbody>{order.items.map((item, i) => (<tr key={item.id} className="border-b border-gray-100"><td className="py-2">{i+1}</td><td className="py-2">{item.product_name}</td><td className="py-2 text-right">{Number(item.quantity).toLocaleString()} {item.unit}</td>{order.can_view_total && <td className="py-2 text-right font-medium">{Number(item.total_price).toLocaleString()}</td>}</tr>))}</tbody></table>
-              {order.can_view_total && <div className="text-right mt-2 pt-2 border-t font-bold">{order.currency} {Number(order.total || 0).toLocaleString()}</div>}
-            </div>
-          )}
+          <LineItemsCard order={order} reload={loadOrder} />
         </div>
       )}
 

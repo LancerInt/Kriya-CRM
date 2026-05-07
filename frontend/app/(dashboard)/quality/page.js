@@ -8,13 +8,17 @@ import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+import InspectionGrid, { MediaLightbox } from "@/components/quality/InspectionGrid";
+import CoaGrid from "@/components/quality/CoaGrid";
 
 export default function QualityPage() {
   const [activeTab, setActiveTab] = useState("inspections");
   const [inspections, setInspections] = useState([]);
   const [coas, setCoas] = useState([]);
+  const [msdsList, setMsdsList] = useState([]);
   const [loadingInspections, setLoadingInspections] = useState(true);
   const [loadingCoas, setLoadingCoas] = useState(true);
+  const [loadingMsds, setLoadingMsds] = useState(true);
   const [showInspectionModal, setShowInspectionModal] = useState(false);
   const [showCoaModal, setShowCoaModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -28,6 +32,7 @@ export default function QualityPage() {
     status: "pending",
     notes: "",
   });
+  const [lightbox, setLightbox] = useState(null); // { inspection, index } | null
   const [coaForm, setCoaForm] = useState({
     shipment: "",
     product: "",
@@ -53,9 +58,18 @@ export default function QualityPage() {
       .finally(() => setLoadingCoas(false));
   };
 
+  const loadMsds = () => {
+    setLoadingMsds(true);
+    api.get("/quality/msds/")
+      .then((r) => setMsdsList(r.data.results || r.data))
+      .catch(() => toast.error("Failed to load MSDS documents"))
+      .finally(() => setLoadingMsds(false));
+  };
+
   useEffect(() => {
     loadInspections();
     loadCoas();
+    loadMsds();
     api.get("/shipments/").then((r) => setShipments(r.data.results || r.data)).catch(() => {});
     api.get("/products/").then((r) => setProducts(r.data.results || r.data)).catch(() => {});
   }, []);
@@ -99,11 +113,25 @@ export default function QualityPage() {
   };
 
   const inspectionColumns = [
-    { key: "shipment_number", label: "Shipment", render: (row) => <span className="font-medium">{row.shipment_number || row.shipment_display || "\u2014"}</span> },
+    { key: "order_number", label: "Order #", render: (row) => (
+      <span className="font-medium text-blue-700">{row.order_number || row.shipment_number || row.shipment_display || "—"}</span>
+    )},
+    { key: "client_name", label: "Client", render: (row) => row.client_name || "—" },
+    { key: "status", label: "Result", render: (row) => {
+      const s = row.status;
+      const cls = s === "passed"
+        ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+        : s === "failed"
+          ? "bg-red-100 text-red-800 border-red-200"
+          : "bg-gray-100 text-gray-700 border-gray-200";
+      const label = s === "passed" ? "Passed" : s === "failed" ? "Failed" : (s || "—");
+      return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold ${cls}`}>{s === "passed" ? "✓" : s === "failed" ? "✗" : "•"} {label}</span>;
+    }},
+    { key: "media_count", label: "Photos", render: (row) => (
+      <span className="text-gray-700">{row.media_count != null ? `${row.media_count} photo${row.media_count === 1 ? "" : "s"}` : "—"}</span>
+    )},
     { key: "inspection_type", label: "Type", render: (row) => <StatusBadge status={row.inspection_type} /> },
-    { key: "inspector_name", label: "Inspector", render: (row) => row.inspector_name || "\u2014" },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "inspection_date", label: "Date", render: (row) => row.inspection_date ? format(new Date(row.inspection_date), "MMM d, yyyy") : "\u2014" },
+    { key: "inspection_date", label: "Date", render: (row) => row.inspection_date ? format(new Date(row.inspection_date), "MMM d, yyyy") : (row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "—") },
   ];
 
   const coaColumns = [
@@ -130,43 +158,86 @@ export default function QualityPage() {
     <div>
       <PageHeader
         title="Quality"
-        subtitle="Manage inspections and COA documents"
-        action={
-          <button
-            onClick={() => activeTab === "inspections" ? setShowInspectionModal(true) : setShowCoaModal(true)}
-            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
-          >
-            {activeTab === "inspections" ? "+ New Inspection" : "+ Upload COA"}
-          </button>
-        }
+        subtitle="Manage inspections, COA, and MSDS documents"
+        action={null}
       />
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
         <button onClick={() => setActiveTab("inspections")} className={tabClass("inspections")}>Inspections</button>
         <button onClick={() => setActiveTab("coa")} className={tabClass("coa")}>COA Documents</button>
+        <button onClick={() => setActiveTab("msds")} className={tabClass("msds")}>MSDS Documents</button>
       </div>
 
-      {/* Inspections Tab */}
+      {/* Inspections Tab — card grid with inline media previews */}
       {activeTab === "inspections" && (
-        <DataTable
-          columns={inspectionColumns}
-          data={inspections}
-          loading={loadingInspections}
-          emptyTitle="No inspections yet"
-          emptyDescription="Create your first quality inspection"
+        loadingInspections ? (
+          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+        ) : inspections.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-gray-700 font-medium">No inspections yet</p>
+            <p className="text-gray-400 text-sm mt-1">Create your first quality inspection</p>
+          </div>
+        ) : (
+          <InspectionGrid
+            inspections={inspections}
+            onOpenViewer={(insp, idx) => setLightbox({ inspection: insp, index: idx })}
+          />
+        )
+      )}
+
+      {/* Lightbox viewer — image / audio / video / file preview */}
+      {lightbox && (
+        <MediaLightbox
+          inspection={lightbox.inspection}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
         />
       )}
 
-      {/* COA Tab */}
+      {/* MSDS Tab — same card grid as COA, normalized to coa_type for the badge */}
+      {activeTab === "msds" && (
+        loadingMsds ? (
+          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+        ) : msdsList.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-gray-700 font-medium">No MSDS documents yet</p>
+            <p className="text-gray-400 text-sm mt-1">Generated/uploaded MSDS files from sales orders show up here automatically.</p>
+          </div>
+        ) : (
+          <CoaGrid
+            coas={msdsList.map((m) => ({ ...m, coa_type: m.msds_type }))}
+            onOpen={(m) => setLightbox({
+              inspection: {
+                order_number: m.order_number || m.shipment_number || "MSDS",
+                status: m.coa_type === "client" ? "client" : (m.coa_type === "logistic" ? "logistic" : ""),
+                media: [{ id: m.id, file: m.file }],
+              },
+              index: 0,
+            })}
+          />
+        )
+      )}
+
+      {/* COA Tab — card grid, opens PDF/image previews in the same lightbox */}
       {activeTab === "coa" && (
-        <DataTable
-          columns={coaColumns}
-          data={coas}
-          loading={loadingCoas}
-          emptyTitle="No COA documents yet"
-          emptyDescription="Upload your first Certificate of Analysis"
-        />
+        loadingCoas ? (
+          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+        ) : coas.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-gray-700 font-medium">No COA documents yet</p>
+            <p className="text-gray-400 text-sm mt-1">Generated/uploaded COAs from sales orders show up here automatically.</p>
+          </div>
+        ) : (
+          <CoaGrid coas={coas} onOpen={(coa) => setLightbox({
+            inspection: {
+              order_number: coa.order_number || coa.shipment_number || "COA",
+              status: coa.coa_type === "client" ? "client" : (coa.coa_type === "logistic" ? "logistic" : ""),
+              media: [{ id: coa.id, file: coa.file }],
+            },
+            index: 0,
+          })} />
+        )
       )}
 
       {/* Inspection Modal */}

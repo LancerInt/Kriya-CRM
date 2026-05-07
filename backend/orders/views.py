@@ -64,6 +64,44 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         )
         return Response(OrderItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='update-item')
+    def update_item(self, request, pk=None):
+        """Patch fields on an existing OrderItem. Body: {item_id, ...fields}.
+        Saves through OrderItem.save() so total_price recomputes from
+        quantity * unit_price, and the OrderItem post_save signal mirrors
+        the change into PurchaseHistory + the order.total."""
+        from .models import OrderItem
+        from .serializers import OrderItemSerializer
+        order = self.get_object()
+        item_id = request.data.get('item_id')
+        if not item_id:
+            return Response({'error': 'item_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item = OrderItem.objects.get(id=item_id, order=order)
+        except OrderItem.DoesNotExist:
+            return Response({'error': 'Item not found'}, status=status.HTTP_404_NOT_FOUND)
+        for f in ('product_name', 'client_product_name', 'description', 'quantity', 'unit', 'unit_price'):
+            if f in request.data:
+                setattr(item, f, request.data[f])
+        item.save()
+        return Response(OrderItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'], url_path='delete-item')
+    def delete_item(self, request, pk=None):
+        """Remove an OrderItem. Body: {item_id}. The OrderItem signal
+        recomputes order.total automatically once the row is gone."""
+        from .models import OrderItem
+        order = self.get_object()
+        item_id = request.data.get('item_id')
+        if not item_id:
+            return Response({'error': 'item_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        deleted, _ = OrderItem.objects.filter(id=item_id, order=order).delete()
+        if not deleted:
+            return Response({'error': 'Item not found'}, status=status.HTTP_404_NOT_FOUND)
+        # Force-recompute total in case the OrderItem signal handled it via
+        # .update() (no in-memory order refresh needed for the response).
+        return Response({'status': 'deleted', 'item_id': str(item_id)})
+
     @action(detail=True, methods=['post'], url_path='add-feedback')
     def add_feedback(self, request, pk=None):
         """Add client feedback to an order."""
@@ -75,6 +113,67 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         feedback.bulk_order_interest = request.data.get('bulk_order_interest', feedback.bulk_order_interest)
         feedback.save()
         return Response({'status': 'saved'}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='set-coa-msds-split')
+    def set_coa_msds_split(self, request, pk=None):
+        """Toggle whether COA/MSDS are required separately for Client and
+        Logistic. Body: {separate: bool}. When True, each product needs
+        a Client-tagged AND a Logistic-tagged copy of COA + MSDS.
+
+        Toggle transitions wipe the COA/MSDS files that no longer fit the
+        new mode so the user always starts fresh:
+          * False → True (Same → Separate): remove SHARED docs (no
+            _Client / _Logistic suffix). The user must regenerate two
+            scoped copies per product.
+          * True → False (Separate → Same): remove SCOPED docs (with
+            _Client or _Logistic suffix). The user must regenerate one
+            shared copy per product.
+
+        Only COA and MSDS are touched — every other document type is
+        left alone. Soft-delete cascades through the Quality signals so
+        the Finance > Quality COA / MSDS tabs reflect the change too.
+        """
+        order = self.get_object()
+        flag = bool(request.data.get('separate'))
+        was_split = order.separate_coa_msds_per_group
+        order.separate_coa_msds_per_group = flag
+        order.save(update_fields=['separate_coa_msds_per_group'])
+
+        from django.db.models import Q
+        from .models import OrderDocument
+
+        scoped_filter = (
+            Q(name__iregex=r'_(Client|Logistic)\.[A-Za-z0-9]+$')
+            | Q(name__iregex=r'_(Client|Logistic)$')
+        )
+
+        deleted = 0
+        if was_split == flag:
+            # No transition; nothing to clean.
+            target = OrderDocument.objects.none()
+        elif was_split and not flag:
+            # Separate → Same. Remove all scoped (Client/Logistic) docs.
+            target = OrderDocument.objects.filter(
+                order=order, doc_type__in=['coa', 'msds'], is_deleted=False,
+            ).filter(scoped_filter)
+        else:
+            # Same → Separate. Remove all SHARED docs (those that have
+            # neither a _Client nor _Logistic suffix in their filename).
+            target = OrderDocument.objects.filter(
+                order=order, doc_type__in=['coa', 'msds'], is_deleted=False,
+            ).exclude(scoped_filter)
+
+        deleted = target.count()
+        for doc in target:
+            if hasattr(doc, 'soft_delete'):
+                doc.soft_delete()
+            else:
+                doc.delete()
+
+        return Response({
+            'separate_coa_msds_per_group': order.separate_coa_msds_per_group,
+            'docs_removed': deleted,
+        })
 
     @action(detail=True, methods=['post'], url_path='set-payment-phase')
     def set_payment_phase(self, request, pk=None):
@@ -733,14 +832,16 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
         def _ext_of(doc):
             return (doc.name or doc.file.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
 
-        # Single-doc attachments (one document on the order)
+        # Single-doc attachments (one document on the order). Filenames
+        # are short and order-id-free so the client only sees the document
+        # type — they don't need the internal order number on the file.
         for doc_type, label in [
             ('client_invoice', 'Client_Invoice'),
             ('client_packing_list', 'Client_Packing_List'),
         ]:
             doc = OrderDocument.objects.filter(order=order, doc_type=doc_type, is_deleted=False).order_by('-created_at').first()
             if doc:
-                _attach_doc(doc, f'{label}_{order_no}.{_ext_of(doc)}')
+                _attach_doc(doc, f'{label}.{_ext_of(doc)}')
 
         # Per-product attachments — one COA and one MSDS for every OrderItem.
         # If an item has its own linked doc that's used; otherwise the
@@ -767,7 +868,7 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                     if doc:
                         order_level_seen[doc_type] = True
                 if doc:
-                    fname = f'{label}_{_safe(item.product_name)}_{order_no}.{_ext_of(doc)}'
+                    fname = f'{label}_{_safe(item.product_name)}.{_ext_of(doc)}'
                     _attach_doc(doc, fname)
 
         # Factory stuffing photos: any image OrderDocument uploaded between
@@ -783,7 +884,7 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
                 fname = (photo.name or '').lower()
                 if any(fname.endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                     photo_counter['n'] += 1
-                    _attach_doc(photo, f'Factory_Stuffing_{order_no}_{photo_counter["n"]}.{_ext_of(photo)}')
+                    _attach_doc(photo, f'Factory_Stuffing_{photo_counter["n"]}.{_ext_of(photo)}')
 
         # NOTE: Order is intentionally NOT transitioned here. The transition
         # to 'dispatched' happens only after the email is actually sent — see
@@ -992,7 +1093,9 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             if not content:
                 return
             ext = (doc.name or doc.file.name or 'pdf').rsplit('.', 1)[-1].lower() or 'pdf'
-            filename = f'{label}_{order_no}.{ext}'
+            # Order id intentionally NOT in the filename — the client
+            # doesn't need the internal order number on the document.
+            filename = f'{label}.{ext}'
             att = DraftAttachment(draft=draft, filename=filename, file_size=len(content))
             att.file.save(filename, ContentFile(content), save=True)
 

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db.models import Count, Sum, Q
@@ -45,12 +46,13 @@ def dashboard_stats(request):
         # All accessible clients (including shadow)
         all_client_ids = _get_exec_client_ids(user)
 
-        # Use own clients for main stats
+        # Use own clients for main stats. is_deleted=False on every querset
+        # so soft-deleted records don't pollute dashboard counts.
         client_qs = Client.objects.filter(is_deleted=False, id__in=own_client_ids)
-        task_qs = Task.objects.filter(Q(owner=user) | Q(client_id__in=own_client_ids))
-        inquiry_qs = Inquiry.objects.filter(client_id__in=own_client_ids)
-        quotation_qs = Quotation.objects.filter(client_id__in=own_client_ids)
-        order_qs = Order.objects.filter(client_id__in=own_client_ids)
+        task_qs = Task.objects.filter(is_deleted=False).filter(Q(owner=user) | Q(client_id__in=own_client_ids))
+        inquiry_qs = Inquiry.objects.filter(is_deleted=False, client_id__in=own_client_ids)
+        quotation_qs = Quotation.objects.filter(is_deleted=False, client_id__in=own_client_ids)
+        order_qs = Order.objects.filter(is_deleted=False, client_id__in=own_client_ids)
 
         # Shadow clients info
         from accounts.models import ExecutiveShadow
@@ -68,10 +70,10 @@ def dashboard_stats(request):
         shadow_client_ids = [c['id'] for c in shadow_clients]
     else:
         client_qs = Client.objects.filter(is_deleted=False)
-        task_qs = Task.objects.all()
-        inquiry_qs = Inquiry.objects.all()
-        quotation_qs = Quotation.objects.all()
-        order_qs = Order.objects.all()
+        task_qs = Task.objects.filter(is_deleted=False)
+        inquiry_qs = Inquiry.objects.filter(is_deleted=False)
+        quotation_qs = Quotation.objects.filter(is_deleted=False)
+        order_qs = Order.objects.filter(is_deleted=False)
         shadow_clients = None
 
     stats = {
@@ -92,6 +94,8 @@ def dashboard_stats(request):
         'orders': {
             'total': order_qs.count(),
             'active': order_qs.filter(status__in=['confirmed', 'processing', 'shipped']).count(),
+            'in_motion': order_qs.filter(status__in=['dispatched', 'in_transit', 'arrived']).count(),
+            'in_transit': order_qs.filter(status='in_transit').count(),
         },
         'revenue': {
             'total': order_qs.aggregate(total=Sum('total'))['total'] or 0,
@@ -121,7 +125,7 @@ def dashboard_stats(request):
             order_qs.exclude(status__in=['delivered', 'cancelled'])
             .select_related('client')
             .order_by('-created_at')[:5]
-            .values('id', 'order_number', 'status', 'total', 'currency', 'client__company_name', 'created_at')
+            .values('id', 'order_number', 'status', 'total', 'currency', 'client__company_name', 'created_at', 'firc_received_at')
         ),
         'draft_emails': Communication.objects.filter(
             is_deleted=False, direction='inbound',
@@ -133,8 +137,18 @@ def dashboard_stats(request):
             is_deleted=False, is_read=False, direction='inbound', is_client_mail=True,
             **({'client_id__in': own_client_ids} if is_executive else {})
         ).count(),
+        # "Draft" on the dashboard = an *active* draft the user is working
+        # on, not every abandoned auto-generated placeholder. We require:
+        #   • at least one line item (excludes empty stubs)
+        #   • created in the last 30 days (excludes long-abandoned drafts)
+        # Other status counts stay direct counts because they're terminal /
+        # workflow states the user manually moved into.
         'quotations_summary': {
-            'draft': quotation_qs.filter(status='draft').count(),
+            'draft': quotation_qs.filter(
+                status='draft',
+                items__isnull=False,
+                created_at__gte=now - timedelta(days=30),
+            ).distinct().count(),
             'pending_approval': quotation_qs.filter(status='pending_approval').count(),
             'approved': quotation_qs.filter(status='approved').count(),
             'sent': quotation_qs.filter(status='sent').count(),
@@ -142,20 +156,64 @@ def dashboard_stats(request):
         'orders_by_status': list(
             order_qs.values('status').annotate(count=Count('id')).order_by('status')
         ),
+        'samples_summary': {
+            'requested': Sample.objects.filter(is_deleted=False, status='requested').count(),
+            'replied': Sample.objects.filter(is_deleted=False, status='replied').count(),
+            'prepared': Sample.objects.filter(is_deleted=False, status='prepared').count(),
+            'dispatched': Sample.objects.filter(is_deleted=False, status='dispatched').count(),
+        },
+        'recent_samples': list(
+            Sample.objects.filter(is_deleted=False)
+            .exclude(status__in=['feedback_received'])
+            .select_related('client')
+            .order_by('-created_at')[:5]
+            .values('id', 'sample_number', 'status', 'product_name', 'client__company_name', 'created_at')
+        ),
     }
 
     # ── Admin/manager-only tiles ──────────────────────────────────────────
     # Pending orders = anything still in CRM's responsibility window.
     # Once the order moves to In Transit (or beyond), tracking is on the
     # carrier — we no longer count it as pending on the dashboard.
-    # Pending samples = anything before feedback_received (still in flight).
+    # Pending samples = anything still in flight before transit completes.
+    # Once a sample is Delivered (transit complete) we stop counting it; the
+    # remaining feedback steps live on the sample detail page, not here.
     if not is_executive:
         stats['pending_orders'] = Order.objects.exclude(
             status__in=['in_transit', 'arrived', 'delivered', 'customs', 'cancelled']
         ).count()
         stats['pending_samples'] = Sample.objects.exclude(
-            status__in=['feedback_received']
+            status__in=['delivered', 'feedback_pending', 'feedback_received']
         ).count()
+
+        # Overdue payments = dispatched orders whose advance/balance has
+        # passed its due date and is still unpaid. Computed at request time
+        # because due dates depend on parsed payment_terms.
+        from datetime import date as _date
+        from orders.payment_terms import (
+            parse_payment_terms, compute_advance_due_date, compute_balance_due_date,
+        )
+        today = _date.today()
+        overdue = 0
+        for o in Order.objects.exclude(dispatched_at__isnull=True).only(
+            'id', 'payment_terms', 'dispatched_at',
+            'advance_payment_received_at', 'balance_payment_received_at',
+            'advance_is_before_dispatch', 'balance_is_before_dispatch',
+        ):
+            parsed = parse_payment_terms(o.payment_terms)
+            row_overdue = False
+            if parsed['has_balance'] and not o.balance_payment_received_at:
+                d = compute_balance_due_date(o)
+                if d and today > d:
+                    row_overdue = True
+            if not row_overdue and parsed['has_advance'] and not o.advance_payment_received_at \
+                    and not o.advance_is_before_dispatch:
+                d = compute_advance_due_date(o)
+                if d and today > d:
+                    row_overdue = True
+            if row_overdue:
+                overdue += 1
+        stats['overdue_payments'] = overdue
 
     if shadow_clients is not None:
         stats['shadow_clients'] = shadow_clients

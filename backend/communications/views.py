@@ -466,17 +466,25 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             return Response({'error': 'No email account configured. Add one in Settings → Email Accounts.'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # Collect saved attachments from DraftAttachment
+        # Collect saved attachments from DraftAttachment. Dedupe by display
+        # filename so any leftover duplicates in the table never end up in
+        # the recipient's inbox twice.
         from io import BytesIO
         attachments = []
-        for att in draft.attachments.all():
-            if att.file:
-                try:
-                    f = BytesIO(att.file.read())
-                    f.name = att.filename
-                    attachments.append(f)
-                except Exception as e:
-                    _log.warning(f'Could not read attachment {att.filename}: {e}')
+        seen_names = set()
+        for att in draft.attachments.all().order_by('-created_at'):
+            if not att.file:
+                continue
+            name = (att.filename or '').strip()
+            if not name or name in seen_names:
+                continue
+            try:
+                f = BytesIO(att.file.read())
+                f.name = name
+                attachments.append(f)
+                seen_names.add(name)
+            except Exception as e:
+                _log.warning(f'Could not read attachment {name}: {e}')
 
         # Convert any legacy markdown-style content (**bold**, plain newlines) into
         # HTML so the recipient sees real bold text, not literal asterisks.
@@ -868,8 +876,12 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         draft.draft_version += 1
         draft.save()
 
-        # Handle file attachments
+        # Handle file attachments. If a row with the same filename already
+        # exists on this draft, REPLACE it instead of creating a second row
+        # — this is what keeps a renamed file from being sent alongside
+        # its original when the user re-uploads or re-saves.
         for f in request.FILES.getlist('attachments'):
+            DraftAttachment.objects.filter(draft=draft, filename=f.name).delete()
             DraftAttachment.objects.create(
                 draft=draft, file=f, filename=f.name, file_size=f.size,
             )
@@ -885,6 +897,37 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             return Response({'error': 'attachment_id required'}, status=status.HTTP_400_BAD_REQUEST)
         DraftAttachment.objects.filter(id=att_id, draft_id=pk).delete()
         return Response({'status': 'removed'})
+
+    @action(detail=True, methods=['post'], url_path='rename-attachment')
+    def rename_attachment(self, request, pk=None):
+        """Rename a draft attachment. Body: {attachment_id, filename}.
+        Only the display name is changed — the underlying stored file
+        is left in place. Used by the AI Draft / dispatch attachment
+        list to let the executive customize filenames before sending."""
+        from .models import DraftAttachment
+        import os, re
+        att_id = request.data.get('attachment_id')
+        new_name = (request.data.get('filename') or '').strip()
+        if not att_id or not new_name:
+            return Response(
+                {'error': 'attachment_id and filename are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Sanitise — strip path separators & control chars, collapse whitespace.
+        new_name = re.sub(r'[\\/\x00-\x1f]', '', new_name).strip()
+        new_name = re.sub(r'\s+', ' ', new_name)[:255]
+        if not new_name:
+            return Response({'error': 'invalid filename'}, status=status.HTTP_400_BAD_REQUEST)
+        att = DraftAttachment.objects.filter(id=att_id, draft_id=pk).first()
+        if not att:
+            return Response({'error': 'attachment not found'}, status=status.HTTP_404_NOT_FOUND)
+        # Preserve the original extension if the user dropped it.
+        old_ext = os.path.splitext(att.filename or '')[1]
+        if old_ext and not os.path.splitext(new_name)[1]:
+            new_name = new_name + old_ext
+        att.filename = new_name
+        att.save(update_fields=['filename'])
+        return Response({'status': 'renamed', 'attachment_id': str(att.id), 'filename': att.filename})
 
     @action(detail=True, methods=['post'])
     def regenerate(self, request, pk=None):

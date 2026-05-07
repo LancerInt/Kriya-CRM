@@ -3,8 +3,8 @@ from rest_framework import viewsets
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.db import transaction
-from .models import Inspection, COADocument, COAReportCounter
-from .serializers import InspectionSerializer, COADocumentSerializer
+from .models import Inspection, COADocument, COAReportCounter, MSDSDocument
+from .serializers import InspectionSerializer, COADocumentSerializer, MSDSDocumentSerializer
 
 class InspectionViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = InspectionSerializer
@@ -17,6 +17,13 @@ class COADocumentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     filterset_fields = ['shipment', 'product', 'coa_type']
     def get_queryset(self):
         return COADocument.objects.select_related('shipment', 'product').all()
+
+
+class MSDSDocumentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
+    serializer_class = MSDSDocumentSerializer
+    filterset_fields = ['shipment', 'product', 'msds_type']
+    def get_queryset(self):
+        return MSDSDocument.objects.select_related('shipment', 'product', 'order', 'order__client').all()
 
 
 @api_view(['GET'])

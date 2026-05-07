@@ -193,49 +193,99 @@ def _build_references(source):
 def get_thread_headers(client, source_communication=None):
     """Resolve the threading headers for an outbound email.
 
-    Walks (in order):
-      1. ``source_communication`` if provided
-      2. Latest INBOUND email from this client (preserves the customer-started thread)
-      3. Latest OUTBOUND email to this client (so our own follow-ups stay together)
+    Returns ``(in_reply_to, references, reply_subject)`` such that Gmail
+    keeps every follow-up (dispatch, transit, delivery, FIRC) in the same
+    thread as the original customer inquiry.
 
-    Returns ``(in_reply_to, references, reply_subject)`` where ``reply_subject``
-    is normalized to start with a single ``Re:``. Returns ``(None, None, None)``
-    when there is no usable thread.
+    Strategy:
+      1. Pick a thread *anchor* — the original message that "starts" the
+         conversation. Priority: source_communication, then oldest inbound
+         from client, then oldest outbound. Used for the canonical subject.
+      2. Collect *every* Communication in this thread (linked to the anchor
+         via Message-ID / In-Reply-To / References) ordered chronologically.
+      3. ``in_reply_to`` = the *most recent* communication's Message-ID
+         (the immediate predecessor we are replying after) — this lets
+         Gmail extend the chain rather than re-anchor on the original.
+      4. ``references`` = anchor.email_references + every Message-ID in the
+         thread, chronological, deduped. Gmail uses this list to thread.
+      5. ``reply_subject`` = "Re: <anchor.subject>" so subject + headers
+         agree (some clients still split threads on subject mismatch).
+
+    Returns ``(None, None, None)`` when no anchor message has a Message-ID.
     """
+    from django.db.models import Q
     from .models import Communication
 
-    candidates = []
-    if source_communication is not None:
-        candidates.append(source_communication)
-    try:
-        if client is not None:
-            inbound = (Communication.objects
-                       .filter(client=client, direction='inbound', comm_type='email',
-                               is_deleted=False, email_message_id__gt='')
-                       .order_by('-created_at').first())
-            if inbound:
-                candidates.append(inbound)
-            outbound = (Communication.objects
-                        .filter(client=client, direction='outbound', comm_type='email',
-                                is_deleted=False, email_message_id__gt='')
-                        .order_by('-created_at').first())
-            if outbound:
-                candidates.append(outbound)
-    except Exception:
-        pass
+    def _has_id(c):
+        return bool(c) and bool((getattr(c, 'email_message_id', '') or '').strip())
 
-    for src in candidates:
-        if not src:
-            continue
-        msg_id = (getattr(src, 'email_message_id', '') or '').strip()
-        if not msg_id:
-            continue
-        return (
-            msg_id,
-            _build_references(src),
-            normalize_reply_subject(getattr(src, 'subject', '') or ''),
-        )
-    return None, None, None
+    anchor = None
+    if _has_id(source_communication):
+        anchor = source_communication
+    if anchor is None and client is not None:
+        try:
+            anchor = (Communication.objects
+                      .filter(client=client, direction='inbound', comm_type='email',
+                              is_deleted=False, email_message_id__gt='')
+                      .order_by('created_at').first())
+        except Exception:
+            anchor = None
+    if anchor is None and client is not None:
+        try:
+            anchor = (Communication.objects
+                      .filter(client=client, comm_type='email',
+                              is_deleted=False, email_message_id__gt='')
+                      .order_by('created_at').first())
+        except Exception:
+            anchor = None
+
+    if not _has_id(anchor):
+        return None, None, None
+
+    anchor_id = anchor.email_message_id.strip()
+
+    thread_comms = []
+    if client is not None:
+        try:
+            thread_comms = list(
+                Communication.objects
+                .filter(client=client, comm_type='email', is_deleted=False)
+                .filter(
+                    Q(email_message_id=anchor_id)
+                    | Q(email_in_reply_to=anchor_id)
+                    | Q(email_references__contains=anchor_id)
+                )
+                .exclude(email_message_id='')
+                .order_by('created_at')
+            )
+        except Exception:
+            thread_comms = []
+
+    seen = set()
+    parts = []
+    anchor_refs = (getattr(anchor, 'email_references', '') or '').strip()
+    if anchor_refs:
+        for tok in anchor_refs.split():
+            tok = tok.strip()
+            if tok and tok not in seen:
+                parts.append(tok)
+                seen.add(tok)
+    if anchor_id not in seen:
+        parts.append(anchor_id)
+        seen.add(anchor_id)
+    for tc in thread_comms:
+        mid = (tc.email_message_id or '').strip()
+        if mid and mid not in seen:
+            parts.append(mid)
+            seen.add(mid)
+
+    in_reply_to = parts[-1] if parts else anchor_id
+
+    return (
+        in_reply_to,
+        ' '.join(parts),
+        normalize_reply_subject(getattr(anchor, 'subject', '') or ''),
+    )
 
 
 class EmailService:
@@ -293,13 +343,22 @@ class EmailService:
         # HTML body — no related multipart wrapper, no inline images
         msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))
 
-        # Attach files
+        # Attach files. Set the filename in BOTH Content-Type (name=)
+        # and Content-Disposition (filename=) so every mail client picks
+        # up the user-renamed name. add_header's keyword form lets
+        # Python's email module RFC-2231-encode non-ASCII characters.
         if attachments:
             for f in attachments:
+                fname = getattr(f, 'name', '') or 'attachment'
+                # Strip any directory path component a caller may have
+                # passed accidentally — keep just the basename.
+                import os as _os
+                fname = _os.path.basename(fname)
                 part = MIMEBase('application', 'octet-stream')
                 part.set_payload(f.read())
                 encoders.encode_base64(part)
-                part.add_header('Content-Disposition', f'attachment; filename="{f.name}"')
+                part.set_param('name', fname)
+                part.add_header('Content-Disposition', 'attachment', filename=fname)
                 msg.attach(part)
 
         try:

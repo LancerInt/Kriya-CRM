@@ -74,6 +74,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'firc_received_at',
             'advance_payment_received_at', 'balance_payment_received_at', 'balance_reminder_sent_at',
             'advance_is_before_dispatch', 'balance_is_before_dispatch',
+            'separate_coa_msds_per_group',
             'payment_schedule',
             'allowed_transitions', 'can_revert', 'revert_to', 'items', '_feedback', 'created_at', 'updated_at',
         ]

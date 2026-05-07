@@ -413,3 +413,96 @@ def check_balance_payment_reminders():
 
     logger.info(f'Payment reminder task: fired {sent} reminders')
     return {'sent': sent}
+
+
+@shared_task(name='orders.check_overdue_payment_reminders')
+def check_overdue_payment_reminders():
+    """
+    Fire a one-shot overdue reminder the day AFTER a payment due date.
+
+    Example: term is "20% Advance 60 days". Balance row falls due 60 days
+    after dispatch. On day 61 (and any later day until the reminder fires)
+    this task notifies the assigned executive + admin/manager. Once a row's
+    overdue reminder is sent, it never re-fires for that row — the cool-down
+    is per-row via ``advance_overdue_reminder_sent_at`` /
+    ``balance_overdue_reminder_sent_at``.
+
+    Independent of the 10-days-before reminder (``balance_reminder_sent_at``)
+    so both can fire across the lifetime of a single order.
+
+    Scheduled daily.
+    """
+    from datetime import date
+    from orders.models import Order
+    from orders.payment_terms import (
+        compute_balance_due_date, compute_advance_due_date, parse_payment_terms,
+    )
+    from notifications.helpers import notify
+
+    today = date.today()
+    qs = (
+        Order.objects.filter(is_deleted=False)
+        .exclude(dispatched_at__isnull=True)
+        .select_related('client')
+    )
+    sent = 0
+
+    for order in qs:
+        parsed = parse_payment_terms(order.payment_terms)
+        client_name = order.client.company_name if order.client else 'Unknown client'
+
+        # ── Balance row ───────────────────────────────────────────────
+        if (
+            parsed['has_balance']
+            and not order.balance_payment_received_at
+            and not order.balance_overdue_reminder_sent_at
+        ):
+            due = compute_balance_due_date(order)
+            if due and today > due:
+                days_overdue = (today - due).days
+                notify(
+                    title=f'Balance payment ({parsed["balance_pct"]}%) overdue ({days_overdue} day(s)): {order.order_number}',
+                    message=(
+                        f'Order {order.order_number} for {client_name} balance '
+                        f'payment was due on {due.isoformat()} (terms: '
+                        f'"{order.payment_terms}") and is now {days_overdue} day(s) '
+                        f'past due. Please follow up with the client.'
+                    ),
+                    notification_type='reminder',
+                    link=f'/orders/{order.id}',
+                    client=order.client,
+                    extra_users=[order.created_by] if order.created_by else None,
+                )
+                order.balance_overdue_reminder_sent_at = timezone.now()
+                order.save(update_fields=['balance_overdue_reminder_sent_at'])
+                sent += 1
+
+        # ── Advance row (only when configured After Dispatch) ─────────
+        if (
+            parsed['has_advance']
+            and not order.advance_is_before_dispatch
+            and not order.advance_payment_received_at
+            and not order.advance_overdue_reminder_sent_at
+        ):
+            due = compute_advance_due_date(order)
+            if due and today > due:
+                days_overdue = (today - due).days
+                notify(
+                    title=f'Advance payment ({parsed["advance_pct"]}%) overdue ({days_overdue} day(s)): {order.order_number}',
+                    message=(
+                        f'Order {order.order_number} for {client_name} advance '
+                        f'payment was due on {due.isoformat()} (terms: '
+                        f'"{order.payment_terms}") and is now {days_overdue} day(s) '
+                        f'past due. Please follow up with the client.'
+                    ),
+                    notification_type='reminder',
+                    link=f'/orders/{order.id}',
+                    client=order.client,
+                    extra_users=[order.created_by] if order.created_by else None,
+                )
+                order.advance_overdue_reminder_sent_at = timezone.now()
+                order.save(update_fields=['advance_overdue_reminder_sent_at'])
+                sent += 1
+
+    logger.info(f'Overdue payment reminder task: fired {sent} reminders')
+    return {'sent': sent}

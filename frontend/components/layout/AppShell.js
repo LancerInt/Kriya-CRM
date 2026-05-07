@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import GlobalTooltip from "@/components/ui/GlobalTooltip";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import PromptDialog from "@/components/ui/PromptDialog";
 import { fetchMe } from "@/store/slices/authSlice";
 
 export default function AppShell({ children }) {
@@ -44,6 +45,8 @@ export default function AppShell({ children }) {
       <GlobalTooltip />
       {/* Global in-app confirm dialog — replaces every native window.confirm */}
       <ConfirmDialog />
+      {/* Global in-app prompt dialog — replaces every native window.prompt */}
+      <PromptDialog />
     </div>
   );
 }

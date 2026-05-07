@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchTasks, createTask, completeTask } from "@/store/slices/taskSlice";
 import PageHeader from "@/components/ui/PageHeader";
@@ -12,6 +13,7 @@ import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 import ModernSelect from "@/components/ui/ModernSelect";
 import { confirmDialog } from "@/lib/confirm";
+import AISummaryButton from "@/components/ai/AISummaryButton";
 
 export default function TasksPage() {
   const dispatch = useDispatch();
@@ -32,10 +34,21 @@ export default function TasksPage() {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to delete task")); }
   };
 
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("focus");
+
   useEffect(() => {
     dispatch(fetchTasks());
     api.get("/auth/users/").then(r => setUsers(r.data.results || r.data)).catch(() => {});
   }, []);
+
+  // If the dashboard (or any link) sent us here with ?focus=<task_id>,
+  // auto-open that task in the existing detail modal once the list loads.
+  useEffect(() => {
+    if (!focusId || !list?.length) return;
+    const t = list.find((row) => String(row.id) === String(focusId));
+    if (t) setViewTask(t);
+  }, [focusId, list]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -116,10 +129,14 @@ export default function TasksPage() {
     <div>
       <PageHeader
         title="Tasks"
+        subtitle={`${list?.length || 0} tasks`}
         action={
-          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-            + New Task
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+              + New Task
+            </button>
+            <AISummaryButton variant="button" title="Tasks Summary" prompt="Summarize all current tasks. Use get_tasks tool. Group by status (pending, in progress, completed, overdue), highlight overdue items, list who's most loaded, and call out anything that needs immediate attention." />
+          </div>
         }
       />
       <DataTable columns={columns} data={list} loading={loading} emptyTitle="No tasks" emptyDescription="Create your first task" onRowClick={(row) => setViewTask(row)} />

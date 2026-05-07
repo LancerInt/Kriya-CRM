@@ -25,6 +25,7 @@ import DocLibraryPickerShared from "@/components/ui/DocLibraryPicker";
 import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 import { confirmDialog } from "@/lib/confirm";
+import { promptDialog } from "@/lib/prompt";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -1458,6 +1459,31 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                         <span className="text-gray-400 shrink-0">{(att.file_size / 1024).toFixed(1)} KB</span>
                         <span className="text-green-600 text-[10px] shrink-0">Saved</span>
                       </a>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const next = await promptDialog({
+                            title: "Rename attachment",
+                            message: "Edit the filename the recipient will see.",
+                            defaultValue: att.filename || "",
+                            confirmText: "Rename",
+                          });
+                          if (next == null) return;
+                          const trimmed = String(next).trim();
+                          if (!trimmed || trimmed === att.filename) return;
+                          try {
+                            const res = await api.post(
+                              `/communications/drafts/${draft.id}/rename-attachment/`,
+                              { attachment_id: att.id, filename: trimmed }
+                            );
+                            const newName = res?.data?.filename || trimmed;
+                            setSavedAttachments(prev => prev.map(a => a.id === att.id ? { ...a, filename: newName } : a));
+                            toast.success("Renamed");
+                          } catch (err) { toast.error(getErrorMessage(err, "Failed to rename")); }
+                        }}
+                        title="Rename file"
+                        className="text-blue-600 hover:text-blue-700 ml-2 shrink-0 text-[11px] font-medium"
+                      >Rename</button>
                       <button onClick={() => handleRemoveSavedAttachment(att.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0">&times;</button>
                     </div>
                   ))}
@@ -1482,7 +1508,29 @@ function CommunicationsTab({ clientId, activeTab, client }) {
                         <span className="text-gray-400">{(file.size / 1024).toFixed(1)} KB</span>
                         <span className="text-amber-600 text-[10px]">Unsaved</span>
                       </div>
-                      <button onClick={() => setDraftAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={async () => {
+                            const next = await promptDialog({
+                              title: "Rename file",
+                              message: "Edit the filename the recipient will see.",
+                              defaultValue: file.name || "",
+                              confirmText: "Rename",
+                            });
+                            if (next == null) return;
+                            const trimmed = String(next).trim();
+                            if (!trimmed || trimmed === file.name) return;
+                            // Replace the File object in-place with one that
+                            // carries the new name; the FormData call later
+                            // sees the renamed file when it's saved.
+                            const renamed = new File([file], trimmed, { type: file.type, lastModified: file.lastModified });
+                            setDraftAttachments(prev => prev.map((f, idx) => idx === i ? renamed : f));
+                          }}
+                          title="Rename file"
+                          className="text-blue-600 hover:text-blue-700 text-[11px] font-medium"
+                        >Rename</button>
+                        <button onClick={() => setDraftAttachments(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600">&times;</button>
+                      </div>
                     </div>
                   ))}
                 </div>
