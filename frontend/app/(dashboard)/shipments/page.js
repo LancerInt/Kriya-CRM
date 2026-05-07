@@ -19,6 +19,8 @@ export default function ShipmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [orders, setOrders] = useState([]);
   const [clients, setClients] = useState([]);
+  // Filters — keep them in one piece of state so "Clear" is a single reset.
+  const [filters, setFilters] = useState({ country: "", status: "", progress: "", dateFrom: "", dateTo: "" });
   const [form, setForm] = useState({
     order: "",
     client: "",
@@ -143,26 +145,91 @@ export default function ShipmentsPage() {
 
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
 
+  // ── Filtering ─────────────────────────────────────────────────────
+  // Build dropdown options from the actual shipment list so we never
+  // show a value the user can't pick.
+  const countryOptions = Array.from(new Set(shipments.map((s) => (s.country || "").trim()).filter(Boolean))).sort();
+  const statusOptions = Array.from(new Set(shipments.map((s) => (s.status || "").trim()).filter(Boolean))).sort();
+
+  const inProgressBucket = (pct) => {
+    if (pct >= 100) return "complete";
+    if (pct >= 75) return "high";
+    if (pct >= 36) return "mid";
+    return "low";
+  };
+
+  const filtered = shipments.filter((s) => {
+    if (filters.country && (s.country || "") !== filters.country) return false;
+    if (filters.status && (s.status || "") !== filters.status) return false;
+    if (filters.progress && inProgressBucket(computeProgress(s)) !== filters.progress) return false;
+    if (filters.dateFrom && s.dispatch_date) {
+      if (new Date(s.dispatch_date) < new Date(filters.dateFrom)) return false;
+    }
+    if (filters.dateFrom && !s.dispatch_date) return false;
+    if (filters.dateTo && s.dispatch_date) {
+      if (new Date(s.dispatch_date) > new Date(filters.dateTo)) return false;
+    }
+    if (filters.dateTo && !s.dispatch_date) return false;
+    return true;
+  });
+
+  const filtersActive = Object.values(filters).some(Boolean);
+  const clearFilters = () => setFilters({ country: "", status: "", progress: "", dateFrom: "", dateTo: "" });
+
+  const filterInput = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none";
+
   return (
     <div>
       <PageHeader
         title="Shipments"
-        subtitle={`${shipments.length} shipments`}
+        subtitle={filtersActive ? `${filtered.length} of ${shipments.length} shipments` : `${shipments.length} shipments`}
         action={
           <div className="flex gap-2">
-            <AISummaryButton variant="button" title="Shipments Summary" prompt="Summarize all current shipments. Use get_shipments tool. Show: shipments by status, any in transit with ETAs, delayed shipments, and upcoming dispatches." />
+            <AISummaryButton variant="button" title="Shipments Summary" prompt={`Write a tight Shipments summary using the pre-loaded shipment data. Structure with these sections (## headings):\n\n## Overview\nOne line: total shipments by status (pending, dispatched, in transit, delivered).\n\n## In Transit\nUp to 5 currently in transit: shipment# · client · POL → POD · ETA.\n\n## Delayed / Needs Attention\nUp to 5 shipments past their ETA, missing documents (BL/COO), or stuck without movement: shipment# · client · issue.\n\n## Upcoming Dispatches\nUp to 4 with a near-term dispatch date.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't list every shipment.`} />
             <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
               + New Shipment
             </button>
           </div>
         }
       />
+
+      {/* Filter bar */}
+      <div className="mb-4 bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide pr-1">Filters</span>
+        <select value={filters.country} onChange={(e) => setFilters({ ...filters, country: e.target.value })} className={filterInput}>
+          <option value="">All countries</option>
+          {countryOptions.map((c) => (<option key={c} value={c}>{c}</option>))}
+        </select>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterInput}>
+          <option value="">All statuses</option>
+          {statusOptions.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</option>))}
+        </select>
+        <select value={filters.progress} onChange={(e) => setFilters({ ...filters, progress: e.target.value })} className={filterInput}>
+          <option value="">Any progress</option>
+          <option value="low">0–35% · Early</option>
+          <option value="mid">36–74% · Mid</option>
+          <option value="high">75–99% · Late</option>
+          <option value="complete">100% · Complete</option>
+        </select>
+        <div className="flex items-center gap-1.5 ml-1">
+          <span className="text-xs text-gray-500">Dispatch</span>
+          <input type="date" value={filters.dateFrom} onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })} className={filterInput} />
+          <span className="text-xs text-gray-400">→</span>
+          <input type="date" value={filters.dateTo} onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })} className={filterInput} />
+        </div>
+        {filtersActive && (
+          <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50">
+            ✕ Clear
+          </button>
+        )}
+      </div>
+
       <DataTable
         columns={columns}
-        data={shipments}
+        data={filtered}
         loading={loading}
-        emptyTitle="No shipments yet"
-        emptyDescription="Create your first shipment to get started"
+        emptyTitle={filtersActive ? "No shipments match" : "No shipments yet"}
+        emptyDescription={filtersActive ? "Try clearing one of the filters above." : "Create your first shipment to get started"}
         onRowClick={(row) => router.push(`/shipments/${row.id}`)}
       />
 

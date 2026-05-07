@@ -305,6 +305,45 @@ def get_shipments(user, client_id='', client_name='', status_filter='', limit='1
     } for s in qs[:limit]]
 
 
+def get_samples(user, client_id='', client_name='', status_filter='', limit='15', **kwargs):
+    """Get samples, optionally filtered by client or status. Status values:
+    requested / replied / prepared / payment_received / dispatched / delivered /
+    feedback_pending / feedback_received."""
+    from samples.models import Sample
+    from django.db.models import Q
+    limit = _int(limit, default=15)
+    qs = Sample.objects.filter(is_deleted=False).select_related('client')
+
+    if _is_executive(user):
+        from clients.models import Client
+        my_client_ids = Client.objects.filter(
+            Q(primary_executive=user) | Q(shadow_executive=user), is_deleted=False
+        ).distinct().values_list('id', flat=True)
+        qs = qs.filter(client_id__in=my_client_ids)
+
+    if client_id or client_name:
+        client, err = _resolve_client(user, client_id=client_id, client_name=client_name)
+        if err:
+            return [{'error': err}]
+        if client:
+            qs = qs.filter(client=client)
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    qs = qs.order_by('-created_at')[:limit]
+    return [{
+        'sample_number': s.sample_number,
+        'client': s.client.company_name if s.client else '—',
+        'product': s.product_name,
+        'quantity': s.quantity,
+        'status': s.status,
+        'sample_type': s.sample_type or '',
+        'dispatch_date': s.dispatch_date.isoformat() if s.dispatch_date else None,
+        'created_at': s.created_at.isoformat(),
+    } for s in qs]
+
+
 def get_pipeline_summary(user, **kwargs):
     """Get pipeline/inquiry summary by stage."""
     from quotations.models import Inquiry
@@ -405,6 +444,131 @@ def get_product_details(user, product_name='', product_id='', **kwargs):
         'client_brand_names': product.client_brand_names,
         'compliance_by_country': compliance,
         'document_count': product.documents.count(),
+    }
+
+
+def get_finance_summary(user, **kwargs):
+    """Aggregate finance metrics — invoices, payments, receivables, FIRC,
+    overdue payments — for the AI summary on the Finance page.
+
+    Returns shape (executives are scoped to their own clients):
+      {
+        'invoices': {'total': int, 'by_status': {...}, 'total_value': str, 'by_currency': {...}},
+        'payments': {'total': int, 'total_value': str, 'by_mode': {...}, 'this_month_value': str},
+        'receivables': {'outstanding_amount': str, 'overdue_amount': str, 'overdue_orders': int},
+        'firc': {'pending': int, 'received': int},
+        'overdue_invoices': [{invoice_number, client, total, currency, days_overdue}, ...],
+        'orders_with_payment_risk': [{order_number, client, payment_terms, days_since_dispatch}, ...],
+        'top_clients_by_revenue': [{client, total_paid}, ...],
+      }
+    """
+    from datetime import date as _date
+    from django.db.models import Sum, Count
+    from finance.models import Invoice, Payment, FIRCRecord
+    from orders.models import Order
+    from orders.payment_terms import (
+        parse_payment_terms, compute_advance_due_date, compute_balance_due_date,
+    )
+
+    inv_qs = Invoice.objects.filter(is_deleted=False)
+    pay_qs = Payment.objects.filter(is_deleted=False)
+    firc_qs = FIRCRecord.objects.filter(is_deleted=False)
+    ord_qs = Order.objects.filter(is_deleted=False)
+
+    if _is_executive(user):
+        from clients.models import Client
+        from django.db.models import Q
+        my_client_ids = list(Client.objects.filter(
+            Q(primary_executive=user) | Q(shadow_executive=user), is_deleted=False
+        ).distinct().values_list('id', flat=True))
+        inv_qs = inv_qs.filter(client_id__in=my_client_ids)
+        pay_qs = pay_qs.filter(client_id__in=my_client_ids)
+        firc_qs = firc_qs.filter(order__client_id__in=my_client_ids) | firc_qs.filter(sample__client_id__in=my_client_ids)
+        ord_qs = ord_qs.filter(client_id__in=my_client_ids)
+
+    today = _date.today()
+    first_of_month = today.replace(day=1)
+
+    inv_by_status = dict(inv_qs.values_list('status').annotate(c=Count('id')).values_list('status', 'c'))
+    inv_by_currency = {
+        row['currency']: str(row['total'] or 0)
+        for row in inv_qs.values('currency').annotate(total=Sum('total'))
+    }
+    inv_total_value = str(inv_qs.aggregate(t=Sum('total'))['t'] or 0)
+
+    pay_by_mode = dict(pay_qs.values_list('mode').annotate(c=Count('id')).values_list('mode', 'c'))
+    pay_total_value = str(pay_qs.aggregate(t=Sum('amount'))['t'] or 0)
+    pay_month_value = str(pay_qs.filter(payment_date__gte=first_of_month).aggregate(t=Sum('amount'))['t'] or 0)
+
+    overdue_inv = list(inv_qs.filter(due_date__lt=today)
+                       .exclude(status__in=['paid', 'cancelled'])
+                       .select_related('client')[:15])
+    overdue_summary = [{
+        'invoice_number': i.invoice_number, 'client': i.client.company_name,
+        'total': str(i.total), 'currency': i.currency,
+        'days_overdue': (today - i.due_date).days if i.due_date else 0,
+    } for i in overdue_inv]
+    overdue_amount = sum((i.total for i in overdue_inv), 0)
+
+    risk_orders = []
+    for o in ord_qs.exclude(dispatched_at__isnull=True).select_related('client')[:300]:
+        parsed = parse_payment_terms(o.payment_terms)
+        flagged = False
+        if parsed['has_balance'] and not o.balance_payment_received_at:
+            d = compute_balance_due_date(o)
+            if d and today > d:
+                flagged = True
+        if not flagged and parsed['has_advance'] and not o.advance_payment_received_at \
+                and not o.advance_is_before_dispatch:
+            d = compute_advance_due_date(o)
+            if d and today > d:
+                flagged = True
+        if flagged:
+            risk_orders.append({
+                'order_number': o.order_number,
+                'client': o.client.company_name if o.client else '—',
+                'payment_terms': o.payment_terms,
+                'days_since_dispatch': (today - o.dispatched_at.date()).days if o.dispatched_at else 0,
+            })
+        if len(risk_orders) >= 15:
+            break
+
+    top_clients = list(
+        pay_qs.values('client__company_name')
+        .annotate(total_paid=Sum('amount'))
+        .order_by('-total_paid')[:5]
+    )
+    top_clients_summary = [
+        {'client': r['client__company_name'], 'total_paid': str(r['total_paid'] or 0)}
+        for r in top_clients
+    ]
+
+    return {
+        'invoices': {
+            'total': inv_qs.count(),
+            'by_status': inv_by_status,
+            'total_value': inv_total_value,
+            'by_currency': inv_by_currency,
+        },
+        'payments': {
+            'total': pay_qs.count(),
+            'total_value': pay_total_value,
+            'by_mode': pay_by_mode,
+            'this_month_value': pay_month_value,
+        },
+        'receivables': {
+            'outstanding_amount': str((inv_qs.exclude(status__in=['paid', 'cancelled'])
+                                       .aggregate(t=Sum('total'))['t'] or 0)),
+            'overdue_amount': str(overdue_amount),
+            'overdue_count': len(overdue_summary),
+        },
+        'firc': {
+            'pending': firc_qs.filter(status='pending').count(),
+            'received': firc_qs.filter(status='received').count(),
+        },
+        'overdue_invoices': overdue_summary,
+        'orders_with_payment_risk': risk_orders,
+        'top_clients_by_revenue': top_clients_summary,
     }
 
 
@@ -554,6 +718,16 @@ TOOL_REGISTRY = {
             'limit': 'Max results (default 10)',
         },
     },
+    'get_samples': {
+        'fn': get_samples,
+        'description': 'Get sample requests, optionally filtered by client or status. Status values: requested / replied / prepared / payment_received / dispatched / delivered / feedback_pending / feedback_received.',
+        'parameters': {
+            'client_name': 'Filter by client company name',
+            'client_id': 'Client UUID — only if you already have it',
+            'status_filter': 'One of the sample statuses (omit for all)',
+            'limit': 'Max results (default 15)',
+        },
+    },
     'get_pipeline_summary': {
         'fn': get_pipeline_summary,
         'description': 'Get sales pipeline summary grouped by stage with counts and total values',
@@ -563,6 +737,11 @@ TOOL_REGISTRY = {
         'fn': get_overdue_invoices,
         'description': 'Get list of overdue invoices that need attention',
         'parameters': {'limit': 'Max results (default 10)'},
+    },
+    'get_finance_summary': {
+        'fn': get_finance_summary,
+        'description': 'Get a complete finance snapshot: invoice counts by status, total invoice value (by currency), payments + this-month total, outstanding receivables, overdue invoices, orders with payment risk, FIRC pending vs received, and top clients by revenue. Use whenever the user asks for a finance summary, revenue breakdown, receivables, or overdue payments.',
+        'parameters': {},
     },
     'search_products': {
         'fn': search_products,

@@ -135,7 +135,7 @@ export default function TasksPage() {
             <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
               + New Task
             </button>
-            <AISummaryButton variant="button" title="Tasks Summary" prompt="Summarize all current tasks. Use get_tasks tool. Group by status (pending, in progress, completed, overdue), highlight overdue items, list who's most loaded, and call out anything that needs immediate attention." />
+            <AISummaryButton variant="button" title="Tasks Summary" prompt={`Write a tight Tasks summary using the pre-loaded task data. Structure with these sections (## headings):\n\n## Overview\nOne line: total counts by status (pending, in progress, completed).\n\n## Overdue\nUp to 5 bullets — overdue tasks only: title · owner · client · days overdue.\n\n## Workload\nTop 3 owners by open task count.\n\n## Needs Attention\nUp to 5 specific high-priority or stuck tasks needing action.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't enumerate every task.`} />
           </div>
         }
       />

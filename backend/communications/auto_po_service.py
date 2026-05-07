@@ -323,6 +323,19 @@ def process_communication_for_po(communication):
 
 
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
+# Block-level *closing* tags + <br> become newlines. Opening tags drop
+# silently. This produces ONE newline per logical break so Gmail's
+# `<div>X</div><div>Y</div>` becomes `X\nY` (not `X\n\nY`).
+_BLOCK_BREAK_RE = re.compile(
+    r'(<\s*br\s*/?>'
+    r'|</\s*(?:p|div|li|tr|h[1-6]|article|section|blockquote|pre)\s*>)',
+    re.IGNORECASE,
+)
+_BLOCK_OPEN_DROP_RE = re.compile(
+    r'<\s*(?:p|div|li|tr|h[1-6]|article|section|blockquote|pre)(?:\s[^>]*)?>',
+    re.IGNORECASE,
+)
+_HTML_ENTITY_NBSP_RE = re.compile(r'&nbsp;|&\#160;|&\#xA0;', re.IGNORECASE)
 
 UNIT_NORMALIZE = {
     'ton': 'MT', 'tons': 'MT', 'mt': 'MT',
@@ -340,7 +353,42 @@ _UNIT_TOKEN_RE = (
 
 
 def _strip_html(s):
-    return _HTML_TAG_RE.sub(' ', s or '')
+    """Strip HTML to plain text WITHOUT losing line structure.
+
+    Email clients render <div>, <p>, <br>, <li> as line breaks; the auto-PO
+    extractor walks lines after the trigger phrase, so flattening them to
+    spaces (the original behaviour) made it impossible to tell where one
+    product ended and the next began. Block tags are now rewritten to
+    newlines before the generic tag stripper runs.
+    """
+    if not s:
+        return ''
+    # Order matters: drop opening block tags first, then convert closes/<br>
+    # to newlines, then strip whatever inline tags remain (a/span/strong/...).
+    s = _BLOCK_OPEN_DROP_RE.sub('', s)
+    s = _BLOCK_BREAK_RE.sub('\n', s)
+    s = _HTML_TAG_RE.sub('', s)
+    s = _HTML_ENTITY_NBSP_RE.sub(' ', s)
+    # Common HTML entities. unescape covers most named/numeric entities.
+    try:
+        import html as _html
+        s = _html.unescape(s)
+    except Exception:
+        pass
+    # Collapse runs of spaces/tabs (but keep newlines), then trim each line
+    # and squeeze multi-blank lines to a single blank.
+    out_lines = []
+    blank_streak = 0
+    for raw in s.split('\n'):
+        line = re.sub(r'[ \t ]+', ' ', raw).strip()
+        if line:
+            out_lines.append(line)
+            blank_streak = 0
+        else:
+            if blank_streak == 0 and out_lines:
+                out_lines.append('')
+            blank_streak += 1
+    return '\n'.join(out_lines).strip()
 
 
 # Words that look like part of a product name but are actually filler
@@ -731,15 +779,24 @@ def _resolve_all_products_from_text(text, subject=''):
     if trigger_idx is not None:
         # Some PO emails put the products on the SAME line as the trigger,
         # after a colon: "below products: MargoShine, OrgoCare". Parse
-        # those inline products first.
+        # those inline products ONLY when the tail looks like a comma-list
+        # (no full sentences, no closers). Otherwise the products are on
+        # the lines that follow — handled by the walk-forward below.
         trigger_line = plain_lines[trigger_idx]
         m_inline = re.search(r':\s*(.+)$', trigger_line)
         if m_inline:
             tail = m_inline.group(1).strip()
-            # Drop common closers if the same line ends with a sentence.
-            if tail and not _STOP_LINE_RE.match(tail):
-                # Split on commas / "and" / semicolons.
-                for part in re.split(r'\s*(?:,|;|\band\b|\bor\b|/)\s*', tail, flags=re.IGNORECASE):
+            looks_like_list = (
+                tail
+                and ',' in tail              # at least one comma → real list
+                and not _STOP_LINE_RE.match(tail)
+                and not re.search(r'[.!?]\s+[A-Z]', tail)  # no mid-tail sentence boundary
+            )
+            if looks_like_list:
+                # Split on commas / semicolons / slashes only. We deliberately
+                # do NOT split on "and"/"or" because prose like "specifications
+                # and availability" used to fragment the line into junk.
+                for part in re.split(r'\s*[,;/]\s*', tail):
                     label, qty, uom = _split_qty_from_line(part)
                     if label and label.lower() not in _HARD_NON_PRODUCT:
                         prod = _match_catalog(label)
@@ -766,22 +823,23 @@ def _resolve_all_products_from_text(text, subject=''):
             # Some emails put a SECOND trigger on this line followed by
             # the product list inline ("below products: A, B"). When we
             # spot a trigger phrase on the line, drop everything up to
-            # the colon and split the rest on commas.
+            # the colon and split the rest on commas / semicolons only.
             if _LIST_TRIGGER_RE.search(line):
                 m_in = re.search(r':\s*(.+)$', line)
                 if m_in:
                     tail = m_in.group(1).strip()
-                    if tail:
-                        for part in re.split(r'\s*(?:,|;|\band\b|\bor\b|/)\s*', tail, flags=re.IGNORECASE):
+                    if tail and ',' in tail and not re.search(r'[.!?]\s+[A-Z]', tail):
+                        for part in re.split(r'\s*[,;/]\s*', tail):
                             lab, q, u = _split_qty_from_line(part)
                             if lab and lab.lower() not in _HARD_NON_PRODUCT:
                                 _push(_match_catalog(lab), lab, qty=q, uom=u)
                 continue
             # Comma-separated inline list on a normal line ("Margoshine,
-            # OrgoCare, Neem Oil"). Split first; if any part looks like a
-            # standalone product, push it; otherwise treat the whole line
-            # as one product.
-            comma_parts = [p.strip() for p in re.split(r'\s*(?:,|;|\band\b)\s*', line, flags=re.IGNORECASE) if p.strip()]
+            # OrgoCare, Neem Oil"). Only split when commas / semicolons
+            # are present and every fragment is short — otherwise treat
+            # the whole line as one product. We deliberately skip "and"
+            # to avoid fragmenting prose like "Acid 90% and Amino...".
+            comma_parts = [p.strip() for p in re.split(r'\s*[,;]\s*', line) if p.strip()]
             if len(comma_parts) > 1 and all(len(p.split()) <= 4 for p in comma_parts):
                 for part in comma_parts:
                     lab, q, u = _split_qty_from_line(part)

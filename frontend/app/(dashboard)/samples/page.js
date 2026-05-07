@@ -304,7 +304,7 @@ export default function SamplesPage() {
             <button onClick={() => setShowTypeChooser(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
               + New Sample
             </button>
-            <AISummaryButton variant="button" title="Samples Summary" prompt="Summarize all sample requests. Use get_samples tool. Group by status (requested, replied, prepared, dispatched, delivered, feedback received), highlight samples awaiting reply or feedback, list which clients have the most active samples, and call out anything overdue." />
+            <AISummaryButton variant="button" title="Samples Summary" prompt={`Write a tight Samples summary using the pre-loaded sample data. Structure the response with these sections (use ## headings):\n\n## Overview\nOne sentence with total count and a one-line breakdown by status (e.g. "11 delivered, 4 dispatched, 3 payment received, 2 feedback received, 1 requested").\n\n## Needs Attention\nUp to 5 bullets — only samples that need action: awaiting our reply, awaiting client feedback past 7 days, or stuck in the same stage too long. Each bullet: SMP-### · client · product · why it needs attention.\n\n## By Client\nUp to 4 bullets listing clients with the most active samples and how many.\n\n### Next Steps\n2-3 concrete next actions for the executive.\n\nKeep the whole thing under 300 words. Don't enumerate every sample.`} />
           </div>
         }
       />

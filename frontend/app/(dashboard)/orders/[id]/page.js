@@ -549,10 +549,21 @@ export default function OrderDetailPage() {
     const fd = new FormData();
     fd.append("file", checklistUploadFile);
     fd.append("doc_type", uploadChecklistFor.doc_type);
-    const namedFile = isBl
+    let namedFile = isBl
       ? `${uploadChecklistFor.label} ${blNumberInput.trim()} - ${checklistUploadFile.name}`
       : `${uploadChecklistFor.label} - ${checklistUploadFile.name}`;
+    // Per-scope suffix so docMatchesScope finds the file under the right
+    // audience tab (Client vs Logistic). Inserted before the extension.
+    const scope = uploadChecklistFor.scope;
+    if (scope === "client" || scope === "logistic") {
+      const suffix = scope === "client" ? "_Client" : "_Logistic";
+      const dot = namedFile.lastIndexOf(".");
+      namedFile = dot > 0 ? `${namedFile.slice(0, dot)}${suffix}${namedFile.slice(dot)}` : `${namedFile}${suffix}`;
+    }
     fd.append("name", namedFile);
+    if (uploadChecklistFor.order_item_id) {
+      fd.append("order_item_id", uploadChecklistFor.order_item_id);
+    }
     if (isBl) fd.append("bl_number", blNumberInput.trim());
     try {
       await api.post(`/orders/${id}/upload-document/`, fd, { headers: { "Content-Type": "multipart/form-data" } });
@@ -1311,6 +1322,24 @@ export default function OrderDetailPage() {
                     <div className="flex items-center gap-2 shrink-0">
                       {present && (
                         <button onClick={() => viewOrderDoc(row.doc_type, row.order_item_id || null)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                      )}
+                      {/* Attach existing PDF — works for any generate-* row.
+                          Pre-fills doc_type, label, order_item_id, scope so
+                          the upload binds to the correct slot in the checklist. */}
+                      {row.action && row.action.startsWith("generate-") && (
+                        <button
+                          onClick={() => {
+                            setUploadChecklistFor({
+                              doc_type: row.doc_type,
+                              label: row.label,
+                              order_item_id: row.order_item_id || null,
+                              scope: row.scope || (splitCoaMsds && (row.doc_type === "coa" || row.doc_type === "msds") ? side : null),
+                            });
+                            setChecklistUploadFile(null);
+                          }}
+                          title="Attach an existing PDF instead of generating one"
+                          className="px-2.5 py-1 text-xs border border-indigo-200 text-indigo-700 bg-indigo-50 rounded hover:bg-indigo-100"
+                        >📎 Attach</button>
                       )}
                       {row.action === "generate-ci" && (
                         <button onClick={handleGenerateCI} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>

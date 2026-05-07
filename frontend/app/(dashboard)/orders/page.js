@@ -126,7 +126,7 @@ export default function OrdersPage() {
       <PageHeader title="Sales Orders" subtitle={`${list.length} orders`} action={
         <div className="flex gap-2">
           <button onClick={openCreate} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Create Order</button>
-          <AISummaryButton variant="button" title="Orders Summary" prompt="Summarize all current orders. Use get_orders tool. Show: orders by status, total value, clients with active orders, and any that need attention." />
+          <AISummaryButton variant="button" title="Orders Summary" prompt={`Write a tight Orders summary using the pre-loaded order data. Structure with these sections (## headings):\n\n## Overview\nOne line: total active orders, total value (by currency), and counts in each major stage (docs preparing, dispatched, in transit, arrived).\n\n## In Motion\nUp to 5 orders dispatched / in transit / arrived: order# · client · status · value.\n\n## Needs Attention\nUp to 5 orders stuck or risk-flagged (e.g. waiting on documents, payment overdue, no movement in days): order# · client · why.\n\n## Top Clients\nUp to 4 clients by active-order value.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't enumerate every order.`} />
         </div>
       } />
       <DataTable columns={columns} data={list} loading={loading} emptyTitle="No orders yet" emptyDescription="Orders are created from approved quotations or manually" onRowClick={(row) => router.push(`/orders/${row.id}`)} />

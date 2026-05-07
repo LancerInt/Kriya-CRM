@@ -489,7 +489,7 @@ export default function CommunicationsPage() {
                 {unreadCount} unread — Mark all read
               </button>
             )}
-            <AISummaryButton variant="button" title="Communications Summary" prompt="Summarize all recent client communications. Use get_recent_communications tool to fetch the latest emails, WhatsApp messages, calls and notes. Group by client, highlight important items, pending replies, and suggested follow-ups." />
+            <AISummaryButton variant="button" title="Communications Summary" prompt={`Write a tight Communications summary using the pre-loaded data. Structure with these sections (## headings):\n\n## Overview\nOne line: total recent comms by type (emails, WhatsApp, calls, notes).\n\n## Pending Replies\nUp to 5 inbound items still awaiting our reply: client · subject · received date.\n\n## By Client\nUp to 5 clients with the most recent activity, one line each: client name · count · what's notable.\n\n## Notable Items\nUp to 4 important conversations needing executive attention.\n\n### Next Steps\n2-3 concrete follow-up actions.\n\nKeep under 300 words. Skip auto-created system mail (mailer-daemon, LinkedIn notifications, Snowflake, etc.) — never list them.`} />
             <button onClick={() => setShowEmailModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
               Compose Email
             </button>

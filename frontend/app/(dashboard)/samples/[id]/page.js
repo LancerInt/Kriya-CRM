@@ -13,6 +13,7 @@ import COAEditorModal from "@/components/finance/COAEditorModal";
 import MSDSEditorModal from "@/components/finance/MSDSEditorModal";
 import DocLibraryPicker from "@/components/ui/DocLibraryPicker";
 import { confirmDialog } from "@/lib/confirm";
+import AISummaryButton from "@/components/ai/AISummaryButton";
 
 function fmtDate(d) {
   if (!d) return "";
@@ -425,6 +426,12 @@ export default function SampleDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <AISummaryButton
+            variant="button"
+            title={`Sample ${sample.sample_number || ""} — AI Summary`.trim()}
+            prompt={`Give a focused summary of this sample request for ${sample.client_name || "this client"}: ${sample.product_name || ""} (${sample.quantity || "qty TBD"}). Call get_samples with client_name="${sample.client_name || ""}" to fetch all of this client's samples for context. Include: current status (${sample.status}), what's been done so far, what's pending, any documents already prepared (COA/MSDS), dispatch & delivery state, and the very next action the executive should take. Keep it tight — no filler.`}
+            clientId={sample.client}
+          />
           {/* Reply to Client */}
           {sample.source_communication && (
             <button

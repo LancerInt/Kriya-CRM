@@ -6,10 +6,47 @@ import toast from "react-hot-toast";
 
 const THINKING_MSGS = ["Analyzing data...", "Generating insights...", "Building summary...", "Almost ready..."];
 
+// Visual theme picker — matches a section's title to an icon, accent color,
+// and card background so the AI summary scans like a designed dashboard
+// instead of plain markdown.
+function _sectionTheme(title) {
+  const t = (title || "").toLowerCase();
+  if (t.includes("overview") || t.includes("summary")) {
+    return { icon: "📊", iconBg: "bg-indigo-100 text-indigo-700", border: "border-indigo-100", header: "text-indigo-900", bullet: "bg-indigo-400" };
+  }
+  if (t.includes("pending") || t.includes("awaiting") || t.includes("reply") || t.includes("replies")) {
+    return { icon: "⏳", iconBg: "bg-amber-100 text-amber-700", border: "border-amber-100", header: "text-amber-900", bullet: "bg-amber-400" };
+  }
+  if (t.includes("attention") || t.includes("urgent") || t.includes("risk") || t.includes("delayed") || t.includes("overdue") || t.includes("stuck") || t.includes("blocker")) {
+    return { icon: "⚠️", iconBg: "bg-rose-100 text-rose-700", border: "border-rose-100", header: "text-rose-900", bullet: "bg-rose-400" };
+  }
+  if (t.includes("client")) {
+    return { icon: "🏢", iconBg: "bg-violet-100 text-violet-700", border: "border-violet-100", header: "text-violet-900", bullet: "bg-violet-400" };
+  }
+  if (t.includes("revenue") || t.includes("payment") || t.includes("receivable") || t.includes("finance") || t.includes("invoice")) {
+    return { icon: "💰", iconBg: "bg-emerald-100 text-emerald-700", border: "border-emerald-100", header: "text-emerald-900", bullet: "bg-emerald-400" };
+  }
+  if (t.includes("notable") || t.includes("highlight")) {
+    return { icon: "✨", iconBg: "bg-sky-100 text-sky-700", border: "border-sky-100", header: "text-sky-900", bullet: "bg-sky-400" };
+  }
+  if (t.includes("transit") || t.includes("motion") || t.includes("dispatch") || t.includes("upcoming") || t.includes("shipment")) {
+    return { icon: "🚚", iconBg: "bg-blue-100 text-blue-700", border: "border-blue-100", header: "text-blue-900", bullet: "bg-blue-400" };
+  }
+  if (t.includes("workload") || t.includes("team") || t.includes("owner")) {
+    return { icon: "👥", iconBg: "bg-fuchsia-100 text-fuchsia-700", border: "border-fuchsia-100", header: "text-fuchsia-900", bullet: "bg-fuchsia-400" };
+  }
+  if (t.includes("firc")) {
+    return { icon: "🧾", iconBg: "bg-teal-100 text-teal-700", border: "border-teal-100", header: "text-teal-900", bullet: "bg-teal-400" };
+  }
+  // Default neutral
+  return { icon: "📌", iconBg: "bg-gray-100 text-gray-600", border: "border-gray-200", header: "text-gray-900", bullet: "bg-gray-400" };
+}
+
 function MarkdownBlock({ text }) {
   if (!text) return null;
 
-  // Parse into sections: split by ## headings
+  // Parse into sections: split by ## headings; ### becomes a Next-Steps-style
+  // sub block — we promote it to its own section so the rendering stays uniform.
   const sections = [];
   let currentSection = null;
 
@@ -17,73 +54,83 @@ function MarkdownBlock({ text }) {
   for (const line of lines) {
     if (line.startsWith("## ")) {
       if (currentSection) sections.push(currentSection);
-      currentSection = { title: line.slice(3).trim(), subsections: [], lines: [] };
-    } else if (line.startsWith("### ") && currentSection) {
-      currentSection.subsections.push({ title: line.slice(4).trim(), lines: [] });
+      currentSection = { title: line.slice(3).trim(), level: 2, lines: [] };
+    } else if (line.startsWith("### ")) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { title: line.slice(4).trim(), level: 3, lines: [] };
     } else if (currentSection) {
-      const target = currentSection.subsections.length > 0
-        ? currentSection.subsections[currentSection.subsections.length - 1].lines
-        : currentSection.lines;
-      target.push(line);
+      currentSection.lines.push(line);
     } else {
-      // Lines before any ## heading
       if (!sections._intro) sections._intro = [];
-      sections._intro = sections._intro || [];
       sections._intro.push(line);
     }
   }
   if (currentSection) sections.push(currentSection);
 
-  const renderLine = (line, i) => {
-    let html = line;
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>');
-    html = html.replace(/`(.*?)`/g, '<code class="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-medium">$1</code>');
+  const renderInline = (s) => s
+    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
+    .replace(/`(.*?)`/g, '<code class="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded text-[11px] font-medium">$1</code>');
+
+  const renderLine = (line, i, theme) => {
     if (line.startsWith("- ") || line.startsWith("* ")) {
-      return <li key={i} className="ml-1 flex items-start gap-2 py-0.5"><span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" /><span dangerouslySetInnerHTML={{ __html: html.slice(2) }} /></li>;
+      return (
+        <li key={i} className="flex items-start gap-2.5 py-0.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${theme.bullet} mt-2 flex-shrink-0`} />
+          <span className="text-gray-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: renderInline(line.slice(2)) }} />
+        </li>
+      );
     }
     const numMatch = line.match(/^(\d+)\.\s(.*)/);
     if (numMatch) {
-      return <li key={i} className="ml-1 flex items-start gap-2 py-0.5"><span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{numMatch[1]}</span><span dangerouslySetInnerHTML={{ __html: numMatch[2].replace(/\*\*(.*?)\*\*/g, '<strong class="text-gray-900">$1</strong>') }} /></li>;
+      return (
+        <li key={i} className="flex items-start gap-3 py-1">
+          <span className={`w-6 h-6 rounded-full ${theme.iconBg} text-xs font-bold flex items-center justify-center flex-shrink-0`}>{numMatch[1]}</span>
+          <span className="text-gray-700 leading-relaxed pt-0.5" dangerouslySetInnerHTML={{ __html: renderInline(numMatch[2]) }} />
+        </li>
+      );
     }
     if (!line.trim()) return null;
-    return <p key={i} className="text-gray-700 py-0.5" dangerouslySetInnerHTML={{ __html: html }} />;
+    return <p key={i} className="text-gray-700 leading-relaxed py-0.5" dangerouslySetInnerHTML={{ __html: renderInline(line) }} />;
   };
-
-  const renderLines = (lines) => lines.map((l, i) => renderLine(l, i)).filter(Boolean);
 
   // If no sections found, render as simple text
   if (sections.length === 0) {
-    return <div className="text-sm space-y-1">{renderLines(lines)}</div>;
+    const theme = _sectionTheme("");
+    return <div className="text-sm space-y-1">{lines.map((l, i) => renderLine(l, i, theme)).filter(Boolean)}</div>;
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Intro lines before first section */}
       {sections._intro && sections._intro.length > 0 && (
-        <div className="text-sm text-gray-600">{renderLines(sections._intro)}</div>
+        <div className="text-sm text-gray-600 px-1">
+          {sections._intro.map((l, i) => renderLine(l, i, _sectionTheme(""))).filter(Boolean)}
+        </div>
       )}
 
       {sections.map((section, si) => {
-        const isActions = section.title.toLowerCase().includes("action") || section.title.toLowerCase().includes("recommendation");
+        const theme = _sectionTheme(section.title);
+        const isNextSteps = section.level === 3 || /next\s*step|recommendation|action/i.test(section.title);
         return (
-          <div key={si} className={`rounded-lg border p-4 ${isActions ? "bg-indigo-50 border-indigo-200" : "bg-white border-gray-200"}`}>
-            <h3 className={`font-semibold text-sm mb-3 flex items-center gap-2 ${isActions ? "text-indigo-800" : "text-gray-800"}`}>
-              {isActions && <span className="text-base">💡</span>}
-              {section.title}
-            </h3>
-
-            {/* Direct lines under section */}
-            {section.lines.filter(l => l.trim()).length > 0 && (
-              <div className="text-sm space-y-0.5 mb-2">{renderLines(section.lines)}</div>
-            )}
-
-            {/* Subsections */}
-            {section.subsections.map((sub, ssi) => (
-              <div key={ssi} className={`${ssi > 0 ? "mt-3 pt-3 border-t border-gray-100" : ""}`}>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{sub.title}</h4>
-                <div className="text-sm space-y-0.5">{renderLines(sub.lines)}</div>
-              </div>
-            ))}
+          <div
+            key={si}
+            className={`rounded-xl border ${theme.border} bg-white shadow-sm overflow-hidden ${
+              isNextSteps ? "ring-1 ring-indigo-200 bg-gradient-to-br from-indigo-50/60 to-violet-50/40" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5 px-4 pt-3.5 pb-2.5">
+              <span className={`w-7 h-7 rounded-lg ${theme.iconBg} flex items-center justify-center text-sm`}>
+                {isNextSteps ? "💡" : theme.icon}
+              </span>
+              <h3 className={`font-semibold text-[13px] tracking-tight ${theme.header}`}>{section.title}</h3>
+            </div>
+            <div className="px-4 pb-4 text-[13px] space-y-0.5">
+              {section.lines.filter((l) => l.trim()).length > 0 ? (
+                section.lines.map((l, i) => renderLine(l, i, theme)).filter(Boolean)
+              ) : (
+                <p className="text-gray-400 italic text-xs">No items.</p>
+              )}
+            </div>
           </div>
         );
       })}
@@ -137,22 +184,31 @@ export default function AISummaryButton({ prompt, title = "AI Summary", size = "
   };
 
   const modalContent = loading ? (
-    <div className="flex items-center gap-3 py-8 justify-center">
-      <div className="relative w-5 h-5"><div className="absolute inset-0 rounded-full border-2 border-purple-200" /><div className="absolute inset-0 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" /></div>
-      <span className="text-sm text-gray-500 animate-pulse">{THINKING_MSGS[msgIdx]}</span>
+    <div className="py-12 flex flex-col items-center justify-center gap-4">
+      <div className="relative w-12 h-12">
+        <div className="absolute inset-0 rounded-full border-2 border-purple-100" />
+        <div className="absolute inset-0 rounded-full border-2 border-purple-600 border-t-transparent animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center text-lg">✨</div>
+      </div>
+      <div className="text-center">
+        <p className="text-sm font-medium text-gray-800">{THINKING_MSGS[msgIdx]}</p>
+        <p className="text-xs text-gray-400 mt-1">Reading the latest data and writing a summary…</p>
+      </div>
     </div>
   ) : (
-    <div>
-      <div className="max-h-[50vh] overflow-y-auto">
+    <div className="-mx-1">
+      <div className="max-h-[60vh] overflow-y-auto pr-2 pl-1 -mr-2">
         <MarkdownBlock text={summary} />
 
         {/* Follow-up conversation */}
         {messages.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+          <div className="mt-5 pt-4 border-t border-dashed border-gray-200 space-y-3">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                  msg.role === "user" ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 rounded-tl-sm"
+                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                  msg.role === "user"
+                    ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-tr-sm"
+                    : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"
                 }`}>
                   {msg.role === "ai" ? <MarkdownBlock text={msg.text} /> : msg.text}
                 </div>
@@ -160,13 +216,13 @@ export default function AISummaryButton({ prompt, title = "AI Summary", size = "
             ))}
             {asking && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 rounded-xl px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                <div className="bg-white border border-gray-200 rounded-2xl px-3.5 py-2 text-sm text-gray-500 flex items-center gap-2 shadow-sm">
                   <div className="flex gap-1">
                     <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                     <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
-                  Thinking...
+                  Thinking…
                 </div>
               </div>
             )}
@@ -175,23 +231,32 @@ export default function AISummaryButton({ prompt, title = "AI Summary", size = "
       </div>
 
       {/* Ask question input */}
-      <form onSubmit={handleAsk} className="mt-4 pt-3 border-t border-gray-200 flex gap-2">
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask a follow-up question about this client..."
-          disabled={asking}
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-50"
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAsk(); } }}
-        />
-        <button type="submit" disabled={asking || !question.trim()} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40">
+      <form onSubmit={handleAsk} className="mt-4 flex gap-2">
+        <div className="flex-1 relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">💬</span>
+          <input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Ask a follow-up question…"
+            disabled={asking}
+            className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none disabled:opacity-50 transition-colors"
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAsk(); } }}
+          />
+        </div>
+        <button type="submit" disabled={asking || !question.trim()} className="px-4 py-2.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-medium rounded-xl shadow-sm hover:shadow-md disabled:opacity-40 disabled:shadow-none transition-all">
           Ask
         </button>
       </form>
 
-      <div className="flex gap-2 mt-3">
-        <button onClick={() => { navigator.clipboard.writeText(summary); toast.success("Copied!"); }} className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Copy</button>
-        <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Close</button>
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+        <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          Generated from live CRM data
+        </span>
+        <div className="flex gap-2">
+          <button onClick={() => { navigator.clipboard.writeText(summary); toast.success("Copied!"); }} className="px-3.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">📋 Copy</button>
+          <button onClick={() => setOpen(false)} className="px-4 py-1.5 text-xs font-medium text-white bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg shadow-sm hover:shadow transition-all">Close</button>
+        </div>
       </div>
     </div>
   );

@@ -49,6 +49,7 @@ def _prefetch_context(user, message: str) -> str:
         get_dashboard_stats, get_tasks, get_pipeline_summary,
         get_overdue_invoices, get_recent_communications,
         get_orders, get_shipments, get_executive_overview,
+        get_samples, get_finance_summary,
     )
     msg = message.lower()
     parts = {}
@@ -76,11 +77,17 @@ def _prefetch_context(user, message: str) -> str:
         except Exception:
             pass
 
-    if any(w in msg for w in ['invoice', 'payment', 'bill', 'finance', 'outstanding']):
+    # Finance — pull the rich summary tool whenever the user asks about
+    # invoices, payments, FIRC, or receivables. Falls back to overdue
+    # invoices alone on failure.
+    if any(w in msg for w in ['invoice', 'payment', 'bill', 'finance', 'outstanding', 'receivable', 'firc', 'gst']):
         try:
-            parts['invoices'] = get_overdue_invoices(user)
+            parts['finance'] = get_finance_summary(user)
         except Exception:
-            pass
+            try:
+                parts['invoices'] = get_overdue_invoices(user)
+            except Exception:
+                pass
 
     if any(w in msg for w in ['email', 'communication', 'message', 'whatsapp', 'call', 'conversation']):
         try:
@@ -91,6 +98,14 @@ def _prefetch_context(user, message: str) -> str:
     if any(w in msg for w in ['shipment', 'shipping', 'transit', 'delivery', 'dispatch', 'container']):
         try:
             parts['shipments'] = get_shipments(user, limit='8')
+        except Exception:
+            pass
+
+    # Samples — pre-fetch the latest 15 sample requests when the prompt
+    # talks about samples / feedback / the request lifecycle.
+    if any(w in msg for w in ['sample', 'smp-', 'feedback', 'requested', 'replied', 'prepared']):
+        try:
+            parts['samples'] = get_samples(user, limit='15')
         except Exception:
             pass
 
@@ -231,7 +246,7 @@ def _stream_groq(messages, user, api_key, model_name, prefetched=''):
     try:
         stream = client.chat.completions.create(
             model=model, messages=groq_messages,
-            temperature=0.4, max_tokens=1200, stream=True,
+            temperature=0.4, max_tokens=3500, stream=True,
         )
         for chunk in stream:
             delta = chunk.choices[0].delta.content or ''
@@ -260,7 +275,7 @@ def _stream_gemini(messages, user, api_key, model_name, prefetched=''):
     contents.append({'role': 'user', 'parts': [{'text': messages[-1]['content'] + tool_desc}]})
 
     model = model_name or 'gemini-2.0-flash'
-    cfg = {'system_instruction': system_prompt, 'max_output_tokens': 1200, 'temperature': 0.4}
+    cfg = {'system_instruction': system_prompt, 'max_output_tokens': 3500, 'temperature': 0.4}
     tool_calls_made = []
 
     try:
