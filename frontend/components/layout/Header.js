@@ -120,30 +120,34 @@ export default function Header({ onMenuClick }) {
     router.push("/login");
   };
 
+  const initials = `${(user?.first_name || "?")[0] || ""}${(user?.last_name || "")[0] || ""}`.toUpperCase() || (user?.username || "U")[0]?.toUpperCase();
+  const iconBtn = "relative p-2 rounded-xl bg-slate-50 hover:bg-white ring-1 ring-slate-200/70 hover:ring-indigo-200 hover:shadow-sm text-slate-600 hover:text-indigo-600 transition-all";
+
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 bg-white border-b border-gray-200">
-      <button onClick={onMenuClick} className="p-2 rounded-lg hover:bg-gray-100 lg:hidden">
-        <HiOutlineBars3 className="w-6 h-6" />
+    <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 bg-white/90 backdrop-blur-md border-b border-slate-200/70 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+      <button onClick={onMenuClick} className="p-2 rounded-xl bg-slate-50 hover:bg-white ring-1 ring-slate-200/70 hover:ring-indigo-200 text-slate-600 hover:text-indigo-600 transition-all lg:hidden">
+        <HiOutlineBars3 className="w-5 h-5" />
       </button>
 
-      <button onClick={() => router.back()} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700" title="Go back">
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <button onClick={() => router.back()} className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-50 hover:bg-white ring-1 ring-slate-200/70 hover:ring-indigo-200 hover:shadow-sm text-slate-600 hover:text-indigo-600 transition-all" title="Go back">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>
+        <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">Back</span>
       </button>
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {/* Proforma Invoices — icon only, badge with role-filtered draft count */}
         <button
           onClick={() => { router.push("/proforma-invoices"); fetchHeaderCounts(); }}
-          className="relative p-2 rounded-lg hover:bg-gray-100"
+          className={iconBtn}
           title="Proforma Invoices"
         >
-          <HiOutlineDocumentDuplicate className="w-5 h-5 text-gray-600" />
+          <HiOutlineDocumentDuplicate className="w-5 h-5" />
           {piCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-purple-500 rounded-full">
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-extrabold text-white bg-gradient-to-br from-purple-500 to-purple-600 rounded-full ring-2 ring-white shadow-sm">
               {piCount > 99 ? "99+" : piCount}
             </span>
           )}
@@ -152,12 +156,12 @@ export default function Header({ onMenuClick }) {
         {/* Inquiries (Quote Requests) — icon only, badge with role-filtered new count */}
         <button
           onClick={() => { router.push("/quote-requests"); fetchHeaderCounts(); }}
-          className="relative p-2 rounded-lg hover:bg-gray-100"
+          className={iconBtn}
           title="Inquiries"
         >
-          <HiOutlineInboxArrowDown className="w-5 h-5 text-gray-600" />
+          <HiOutlineInboxArrowDown className="w-5 h-5" />
           {inquiryCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-orange-500 rounded-full">
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-extrabold text-white bg-gradient-to-br from-orange-500 to-orange-600 rounded-full ring-2 ring-white shadow-sm">
               {inquiryCount > 99 ? "99+" : inquiryCount}
             </span>
           )}
@@ -167,55 +171,84 @@ export default function Header({ onMenuClick }) {
         <button
           onClick={() => runSync(false)}
           disabled={syncing}
-          className={`p-2 rounded-lg hover:bg-gray-100 ${syncing ? "animate-spin text-indigo-600" : "text-gray-500"}`}
+          className={`relative p-2 rounded-xl ring-1 transition-all ${syncing ? "bg-indigo-50 ring-indigo-200 text-indigo-600" : "bg-slate-50 hover:bg-white ring-slate-200/70 hover:ring-indigo-200 hover:shadow-sm text-slate-600 hover:text-indigo-600"}`}
           title={lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : "Sync emails & data"}
         >
-          <HiOutlineArrowPath className="w-5 h-5" />
+          <HiOutlineArrowPath className={`w-5 h-5 ${syncing ? "animate-spin" : ""}`} />
+          {syncing && <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-white animate-pulse" />}
         </button>
 
         {/* Notifications */}
-        <button onClick={() => { router.push("/notifications"); fetchUnread(); }} className="relative p-2 rounded-lg hover:bg-gray-100">
-          <HiOutlineBell className="w-5 h-5 text-gray-600" />
+        <button onClick={() => { router.push("/notifications"); fetchUnread(); }} className={iconBtn} title="Notifications">
+          <HiOutlineBell className="w-5 h-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold text-white bg-red-500 rounded-full">
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-extrabold text-white bg-gradient-to-br from-rose-500 to-rose-600 rounded-full ring-2 ring-white shadow-sm">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
         </button>
 
+        {/* Divider */}
+        <span className="w-px h-7 bg-slate-200 mx-1.5" />
+
         {/* User dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100"
+            className={`flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-xl ring-1 transition-all ${dropdownOpen ? "bg-white ring-indigo-200 shadow-sm" : "bg-slate-50 hover:bg-white ring-slate-200/70 hover:ring-indigo-200 hover:shadow-sm"}`}
           >
-            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-              <HiOutlineUser className="w-4 h-4 text-indigo-600" />
+            <div className="relative shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-xs font-extrabold ring-2 ring-white shadow-sm">
+                {initials}
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
             </div>
-            <span className="hidden sm:block text-sm font-medium text-gray-700">
-              {user?.first_name || user?.username || "User"}
-            </span>
+            <div className="hidden sm:block text-left">
+              <p className="text-xs font-bold text-slate-800 leading-tight">{user?.first_name || user?.username || "User"}</p>
+              {user?.role && <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 capitalize leading-tight">{user.role}</p>}
+            </div>
+            <svg className={`hidden sm:block w-3 h-3 text-slate-400 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           </button>
 
           {dropdownOpen && (
-            <div className="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1">
-              <div className="px-4 py-2 border-b border-gray-100">
-                <p className="text-sm font-medium">{user?.first_name} {user?.last_name}</p>
-                <p className="text-xs text-gray-500">{user?.email}</p>
-                <p className="text-xs text-indigo-600 capitalize mt-0.5">{user?.role}</p>
+            <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200/70 ring-1 ring-slate-200/40 overflow-hidden">
+              <div className="px-4 py-4 bg-gradient-to-br from-indigo-50/60 via-violet-50/40 to-white border-b border-slate-100 flex items-center gap-3">
+                <div className="relative shrink-0">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-base font-extrabold ring-2 ring-white shadow-md">
+                    {initials}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-800 truncate">{user?.first_name} {user?.last_name}</p>
+                  <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
+                  {user?.role && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-br from-indigo-50 to-violet-50 text-indigo-700 ring-1 ring-indigo-200/60 capitalize">
+                      {user.role}
+                    </span>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={() => { setDropdownOpen(false); router.push("/settings"); }}
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                My Profile & Settings
-              </button>
-              <button
-                onClick={handleLogout}
-                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-              >
-                Sign out
-              </button>
+              <div className="p-1.5">
+                <button
+                  onClick={() => { setDropdownOpen(false); router.push("/settings"); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  </span>
+                  Profile &amp; Settings
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-semibold text-rose-700 hover:bg-rose-50 transition-colors"
+                >
+                  <span className="w-7 h-7 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                  </span>
+                  Sign out
+                </button>
+              </div>
             </div>
           )}
         </div>

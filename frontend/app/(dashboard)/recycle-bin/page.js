@@ -42,6 +42,20 @@ export default function RecycleBinPage() {
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [, setTick] = useState(0);
+  // Map keyed by `${model}-${id}` so the same numeric id across different
+  // models can't collide.
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const itemKey = (it) => `${it.model}-${it.id}`;
+  const toggleSelect = (it) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      const k = itemKey(it);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
 
   // Re-render every minute so the auto-purge countdown stays current.
   useEffect(() => {
@@ -101,6 +115,40 @@ export default function RecycleBinPage() {
     } catch (err) { toast.error(getErrorMessage(err, "Failed to delete")); }
   };
 
+  const handleBulkRestore = async () => {
+    const targets = items.filter((it) => selectedKeys.has(itemKey(it)));
+    if (targets.length === 0) return;
+    if (!(await confirmDialog(`Restore ${targets.length} item${targets.length === 1 ? "" : "s"} back to their original location?`))) return;
+    setBulkBusy(true);
+    let ok = 0, fail = 0;
+    for (const t of targets) {
+      try { await api.post("/recycle-bin/restore/", { model: t.model, id: t.id }); ok++; }
+      catch { fail++; }
+    }
+    setBulkBusy(false);
+    setSelectedKeys(new Set());
+    if (ok) toast.success(`Restored ${ok} item${ok === 1 ? "" : "s"}${fail ? ` · ${fail} failed` : ""}`);
+    if (!ok && fail) toast.error(`Failed to restore ${fail} item${fail === 1 ? "" : "s"}`);
+    loadItems();
+  };
+
+  const handleBulkPurge = async () => {
+    const targets = items.filter((it) => selectedKeys.has(itemKey(it)));
+    if (targets.length === 0) return;
+    if (!(await confirmDialog(`Permanently delete ${targets.length} item${targets.length === 1 ? "" : "s"}? This cannot be undone.`))) return;
+    setBulkBusy(true);
+    let ok = 0, fail = 0;
+    for (const t of targets) {
+      try { await api.post("/recycle-bin/purge/", { model: t.model, id: t.id }); ok++; }
+      catch { fail++; }
+    }
+    setBulkBusy(false);
+    setSelectedKeys(new Set());
+    if (ok) toast.success(`Permanently deleted ${ok} item${ok === 1 ? "" : "s"}${fail ? ` · ${fail} failed` : ""}`);
+    if (!ok && fail) toast.error(`Failed to delete ${fail} item${fail === 1 ? "" : "s"}`);
+    loadItems();
+  };
+
   const handleEmptyAll = async () => {
     if (!(await confirmDialog("Permanently delete ALL items in the recycle bin? This cannot be undone."))) return;
     try {
@@ -146,7 +194,7 @@ export default function RecycleBinPage() {
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-white tracking-tight">Archive</h1>
-              <p className="text-indigo-100 text-sm mt-0.5">Restore or permanently remove deleted items \u00b7 30 day retention</p>
+              <p className="text-indigo-100 text-sm mt-0.5">Restore or permanently remove deleted items · 30 day retention</p>
             </div>
           </div>
           {isAdminOrManager && items.length > 0 && (
@@ -170,7 +218,7 @@ export default function RecycleBinPage() {
           <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
           <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-amber-50">Expiring Soon</p>
           <p className="relative text-3xl font-extrabold mt-1">{expiringSoon}</p>
-          <p className="relative text-[11px] text-amber-50 mt-0.5">\u2264 5 days remaining</p>
+          <p className="relative text-[11px] text-amber-50 mt-0.5">≤ 5 days remaining</p>
         </div>
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-4 text-white shadow-md">
           <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
@@ -220,9 +268,65 @@ export default function RecycleBinPage() {
           <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Deleted items will appear here for 30 days before being permanently removed.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <>
+          {/* Bulk action bar */}
+          {selectedKeys.size > 0 && (
+            <div className="flex items-center gap-3 p-3.5 mb-4 bg-gradient-to-r from-indigo-50 via-violet-50/60 to-indigo-50/40 border border-indigo-200/60 rounded-2xl shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center text-[11px] font-extrabold shadow-sm">{selectedKeys.size}</div>
+                <span className="text-sm font-bold text-indigo-700">{selectedKeys.size === 1 ? "item" : "items"} selected</span>
+              </div>
+              <div className="flex gap-2 ml-auto flex-wrap">
+                <button
+                  onClick={handleBulkRestore}
+                  disabled={bulkBusy}
+                  className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg ring-1 ring-emerald-200/60 disabled:opacity-50 transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Restore Selected
+                </button>
+                <button
+                  onClick={handleBulkPurge}
+                  disabled={bulkBusy}
+                  className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg ring-1 ring-rose-200/60 disabled:opacity-50 transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  Delete Forever
+                </button>
+                <button onClick={() => setSelectedKeys(new Set())} className="px-3 py-1.5 text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="hidden md:grid grid-cols-[2.5fr_1fr_1.3fr_1fr_1.4fr] gap-4 px-5 py-3 bg-gradient-to-r from-slate-50 to-slate-50/40 border-b border-slate-200/70 text-[10px] font-bold text-slate-500 uppercase tracking-[0.12em]">
+          <div className="hidden md:grid grid-cols-[auto_2.5fr_1fr_1.3fr_1fr_1.4fr] gap-4 px-5 py-3 bg-gradient-to-r from-slate-50 to-slate-50/40 border-b border-slate-200/70 text-[10px] font-bold text-slate-500 uppercase tracking-[0.12em] items-center">
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && filtered.every((it) => selectedKeys.has(itemKey(it)))}
+              ref={(el) => {
+                if (!el) return;
+                const sel = filtered.filter((it) => selectedKeys.has(itemKey(it))).length;
+                el.indeterminate = sel > 0 && sel < filtered.length;
+              }}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setSelectedKeys((prev) => {
+                    const next = new Set(prev);
+                    filtered.forEach((it) => next.add(itemKey(it)));
+                    return next;
+                  });
+                } else {
+                  setSelectedKeys((prev) => {
+                    const next = new Set(prev);
+                    filtered.forEach((it) => next.delete(itemKey(it)));
+                    return next;
+                  });
+                }
+              }}
+              className="h-4 w-4 text-indigo-600 border-slate-300 rounded cursor-pointer focus:ring-2 focus:ring-indigo-400"
+              title="Select all"
+            />
             <div>Name</div>
             <div>Type</div>
             <div>Deleted</div>
@@ -240,13 +344,24 @@ export default function RecycleBinPage() {
                 : daysLeft <= 15 ? "from-amber-500 to-amber-400"
                 : "from-indigo-500 to-violet-500";
               const tone = toneFor(item.type);
+              const isSelected = selectedKeys.has(itemKey(item));
               return (
                 <div
                   key={`${item.model}-${item.id}`}
                   onClick={() => handlePreview(item)}
-                  className="group relative grid grid-cols-1 md:grid-cols-[2.5fr_1fr_1.3fr_1fr_1.4fr] gap-3 md:gap-4 px-5 py-3.5 hover:bg-slate-50/60 cursor-pointer transition-colors items-center"
+                  className={`group relative grid grid-cols-1 md:grid-cols-[auto_2.5fr_1fr_1.3fr_1fr_1.4fr] gap-3 md:gap-4 px-5 py-3.5 cursor-pointer transition-colors items-center ${isSelected ? "bg-indigo-50/40 hover:bg-indigo-50/70" : "hover:bg-slate-50/60"}`}
                 >
-                  <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r bg-gradient-to-b ${stripeTone} opacity-0 group-hover:opacity-100 transition-opacity`} />
+                  <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r bg-gradient-to-b ${stripeTone} ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"} transition-opacity`} />
+
+                  {/* Checkbox */}
+                  <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(item)}
+                      className="h-4 w-4 text-indigo-600 border-slate-300 rounded cursor-pointer focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
 
                   {/* Name */}
                   <div className="flex items-center gap-3 min-w-0">
@@ -302,7 +417,8 @@ export default function RecycleBinPage() {
               );
             })}
           </div>
-        </div>
+          </div>
+        </>
       )}
 
       {/* Preview Modal */}
