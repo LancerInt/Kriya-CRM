@@ -93,8 +93,13 @@ export default function CommunicationsPage() {
     });
   };
 
+  // Pull the full history in one shot — the user wants to scroll back
+  // years of mail after running historical backfills. Capped at the
+  // StandardPagination max (5000) so this still has a reasonable upper
+  // bound; if the user genuinely has more than that we should switch
+  // this to virtualized infinite scroll.
   const loadData = useCallback(() => {
-    dispatch(fetchCommunications());
+    dispatch(fetchCommunications({ page_size: 5000 }));
   }, [dispatch]);
 
   useEffect(() => {
@@ -479,83 +484,100 @@ export default function CommunicationsPage() {
   const isUnmatched = filterTab === "unmatched";
 
   return (
-    <div>
-      <PageHeader
-        title="Activities"
-        action={
-          <div className="flex gap-2 items-center">
+    <div className="space-y-5">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-6 shadow-xl">
+        <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-violet-300/20 rounded-full blur-2xl" />
+        <div className="relative flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center ring-1 ring-white/30 shadow-lg">
+              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-white tracking-tight">Activities</h1>
+              <p className="text-indigo-100 text-sm mt-0.5">{filteredList.length} {filteredList.length === 1 ? "item" : "items"} · all client communications in one place</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
             {unreadCount > 0 && (
-              <button onClick={handleMarkAllRead} className="px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 border border-blue-200">
-                {unreadCount} unread — Mark all read
+              <button onClick={handleMarkAllRead} className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold text-white bg-white/15 hover:bg-white/25 backdrop-blur rounded-xl ring-1 ring-white/30 transition-all">
+                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold">{unreadCount}</span>
+                Mark all read
               </button>
             )}
             <AISummaryButton variant="button" title="Communications Summary" prompt={`Write a tight Communications summary using the pre-loaded data. Structure with these sections (## headings):\n\n## Overview\nOne line: total recent comms by type (emails, WhatsApp, calls, notes).\n\n## Pending Replies\nUp to 5 inbound items still awaiting our reply: client · subject · received date.\n\n## By Client\nUp to 5 clients with the most recent activity, one line each: client name · count · what's notable.\n\n## Notable Items\nUp to 4 important conversations needing executive attention.\n\n### Next Steps\n2-3 concrete follow-up actions.\n\nKeep under 300 words. Skip auto-created system mail (mailer-daemon, LinkedIn notifications, Snowflake, etc.) — never list them.`} />
-            <button onClick={() => setShowEmailModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+            <button onClick={() => setShowEmailModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 text-sm font-bold rounded-xl ring-1 ring-white/30 hover:shadow-lg hover:scale-[1.02] transition-all shadow-md">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
               Compose Email
             </button>
-            <button onClick={() => setShowWhatsAppModal(true)} className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
+            <button onClick={() => setShowWhatsAppModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-emerald-500 to-green-600 text-white text-sm font-bold rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all shadow-md">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654z"/></svg>
               Send WhatsApp
             </button>
-            <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
-              + New Activity
+            <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 backdrop-blur text-white text-sm font-bold rounded-xl ring-1 ring-white/30 transition-all">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+              New Activity
             </button>
           </div>
-        }
-      />
+        </div>
+      </div>
 
-      {/* Filter bar — compact two-row layout */}
-      <div className="mb-4 space-y-2">
-        {/* Row 1: Primary tabs (most used) + filters */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5">
+      {/* Filter bar */}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap">
             {[
-              { key: "all", label: "All" },
-              { key: "email", label: "Emails" },
-              { key: "whatsapp", label: "WhatsApp" },
-              { key: "call", label: "Calls" },
-              { key: "note", label: "Notes" },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); }}
-                className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                  filterTab === tab.key ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-            <span className="w-px h-5 bg-gray-200 mx-1" />
-            {/* Badge tabs — show counts, stand out visually */}
+              { key: "all", label: "All", icon: "M4 6h16M4 12h16M4 18h16" },
+              { key: "email", label: "Emails", icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
+              { key: "whatsapp", label: "WhatsApp", icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" },
+              { key: "call", label: "Calls", icon: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" },
+              { key: "note", label: "Notes", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" },
+            ].map((tab) => {
+              const isActive = filterTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                    isActive ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} /></svg>
+                  {tab.label}
+                </button>
+              );
+            })}
+            <span className="w-px h-6 bg-slate-200 mx-1.5" />
+            {/* Badge tabs */}
             {[
-              { key: "unread_email", label: "Unread", count: list.filter(i => !i.is_read && i.comm_type === "email" && i.is_client_mail).length, color: "blue" },
-              { key: "starred", label: "Starred", count: list.filter(i => i.is_starred).length, color: "yellow" },
-              { key: "drafts", label: "Drafts", count: list.filter(i => i.draft_id && i.draft_status === "draft").length, color: "purple" },
-              { key: "unmatched", label: "Unmatched", count: unmatchedCount, color: "gray" },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
-                className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors flex items-center gap-1 ${
-                  filterTab === tab.key
-                    ? `bg-${tab.color}-600 text-white`
-                    : `text-${tab.color}-700 bg-${tab.color}-50 hover:bg-${tab.color}-100 border border-${tab.color}-200`
-                }`}
-                style={filterTab === tab.key ? {
-                  backgroundColor: tab.color === "blue" ? "#2563eb" : tab.color === "yellow" ? "#ca8a04" : tab.color === "purple" ? "#7c3aed" : "#4b5563",
-                  color: "white"
-                } : {}}
-              >
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className={`text-[10px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full ${
-                    filterTab === tab.key ? "bg-white/20" : "bg-white"
-                  }`}>
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
+              { key: "unread_email", label: "Unread", count: list.filter(i => !i.is_read && i.comm_type === "email" && i.is_client_mail).length, gradient: "from-blue-500 to-blue-600", soft: "text-blue-700 bg-blue-50 ring-blue-200" },
+              { key: "starred", label: "Starred", count: list.filter(i => i.is_starred).length, gradient: "from-amber-500 to-amber-600", soft: "text-amber-700 bg-amber-50 ring-amber-200" },
+              { key: "drafts", label: "Drafts", count: list.filter(i => i.draft_id && i.draft_status === "draft").length, gradient: "from-purple-500 to-purple-600", soft: "text-purple-700 bg-purple-50 ring-purple-200" },
+              { key: "unmatched", label: "Unmatched", count: unmatchedCount, gradient: "from-slate-500 to-slate-600", soft: "text-slate-700 bg-slate-100 ring-slate-200" },
+            ].map((tab) => {
+              const isActive = filterTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => { setFilterTab(tab.key); setSelectedIds(new Set()); if (tab.key !== "unmatched") setUnmatchedCategory("all"); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                    isActive ? `bg-gradient-to-br ${tab.gradient} text-white shadow-sm` : `${tab.soft} ring-1 hover:shadow-sm`
+                  }`}
+                >
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className={`text-[10px] font-extrabold min-w-[18px] h-4 flex items-center justify-center px-1 rounded-full ${
+                      isActive ? "bg-white/25 text-white" : "bg-white text-current"
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {!isUnmatched && (
             <div className="flex gap-2 shrink-0">
@@ -580,29 +602,36 @@ export default function CommunicationsPage() {
 
       {/* Unmatched category sub-tabs */}
       {isUnmatched && (
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 p-1.5 bg-white rounded-2xl border border-slate-200/70 shadow-sm w-fit">
           <button
             onClick={() => setUnmatchedCategory("all")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
-              unmatchedCategory === "all" ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+              unmatchedCategory === "all" ? "bg-gradient-to-br from-slate-700 to-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
             }`}
           >
-            All ({unmatchedCount})
+            All
+            <span className={`text-[10px] font-extrabold min-w-[18px] h-4 flex items-center justify-center px-1 rounded-full ${
+              unmatchedCategory === "all" ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
+            }`}>{unmatchedCount}</span>
           </button>
           {Object.entries(CLASSIFICATION_LABELS).map(([key, label]) => {
             const c = CLASSIFICATION_COLORS[key];
             const count = classificationCounts[key] || 0;
+            const isActive = unmatchedCategory === key;
             return (
               <button
                 key={key}
                 onClick={() => setUnmatchedCategory(key)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
-                  unmatchedCategory === key
-                    ? `${c.bg} ${c.text} ${c.border} ring-2 ring-offset-1 ring-current`
-                    : `bg-white ${c.text} ${c.border} hover:${c.bg}`
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+                  isActive
+                    ? `${c.bg} ${c.text} shadow-sm ring-1 ring-current`
+                    : `text-slate-600 hover:bg-slate-50`
                 }`}
               >
-                {label} ({count})
+                {label}
+                <span className={`text-[10px] font-extrabold min-w-[18px] h-4 flex items-center justify-center px-1 rounded-full ${
+                  isActive ? "bg-white/60 text-current" : "bg-slate-100 text-slate-500"
+                }`}>{count}</span>
               </button>
             );
           })}
@@ -611,42 +640,56 @@ export default function CommunicationsPage() {
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-          <input type="checkbox" checked={selectedIds.size === filteredList.length && filteredList.length > 0} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
-          <span className="text-sm font-medium text-indigo-700">{selectedIds.size} selected</span>
-          <div className="flex gap-2 ml-auto">
-            <button onClick={handleBulkMarkRead} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200">Mark Read</button>
-            <button onClick={handleBulkMarkUnread} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Mark Unread</button>
-            <button onClick={handleBulkArchive} className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200">Archive</button>
-            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+        <div className="flex items-center gap-3 p-3.5 bg-gradient-to-r from-indigo-50 via-violet-50/60 to-indigo-50/40 border border-indigo-200/60 rounded-2xl shadow-sm">
+          <input type="checkbox" checked={selectedIds.size === filteredList.length && filteredList.length > 0} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-slate-300 rounded cursor-pointer" />
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center text-[11px] font-extrabold shadow-sm">{selectedIds.size}</div>
+            <span className="text-sm font-bold text-indigo-700">{selectedIds.size === 1 ? "item" : "items"} selected</span>
+          </div>
+          <div className="flex gap-2 ml-auto flex-wrap">
+            <button onClick={handleBulkMarkRead} className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg ring-1 ring-blue-200/60 transition-colors">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+              Mark Read
+            </button>
+            <button onClick={handleBulkMarkUnread} className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg ring-1 ring-slate-200 transition-colors">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+              Mark Unread
+            </button>
+            <button onClick={handleBulkArchive} className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg ring-1 ring-rose-200/60 transition-colors">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+              Archive
+            </button>
+            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-[11px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
           </div>
         </div>
       )}
 
       {/* Select All row */}
       {selectedIds.size === 0 && filteredList.length > 0 && (
-        <div className="flex items-center gap-2 mb-2">
-          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-gray-300 rounded cursor-pointer" />
-          <span className="text-xs text-gray-400">Select all</span>
+        <div className="flex items-center gap-2 px-2">
+          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="h-4 w-4 text-indigo-600 border-slate-300 rounded cursor-pointer" />
+          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Select all</span>
         </div>
       )}
 
-      <DataTable
-        columns={isUnmatched ? unmatchedColumns : clientColumns}
-        data={filteredList}
-        loading={loading}
-        emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
-        emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
-        onRowClick={(row) => router.push(`/communications/${row.id}`)}
-        rowClassName={(row) => {
-          if (row._followUp) {
-            return row._followUp.kind === "reply" ? "bg-red-50/60 hover:bg-red-50" : "bg-amber-50/60 hover:bg-amber-50";
-          }
-          if (row.client_tier === "tier_1") return "border-l-4 border-l-red-500 bg-red-50/30 hover:bg-red-50/50";
-          if (row.client_tier === "tier_2") return "border-l-4 border-l-amber-400 bg-amber-50/20 hover:bg-amber-50/40";
-          return "";
-        }}
-      />
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <DataTable
+          columns={isUnmatched ? unmatchedColumns : clientColumns}
+          data={filteredList}
+          loading={loading}
+          emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
+          emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
+          onRowClick={(row) => router.push(`/communications/${row.id}`)}
+          rowClassName={(row) => {
+            if (row._followUp) {
+              return row._followUp.kind === "reply" ? "bg-red-50/60 hover:bg-red-50" : "bg-amber-50/60 hover:bg-amber-50";
+            }
+            if (row.client_tier === "tier_1") return "border-l-4 border-l-red-500 bg-red-50/30 hover:bg-red-50/50";
+            if (row.client_tier === "tier_2") return "border-l-4 border-l-amber-400 bg-amber-50/20 hover:bg-amber-50/40";
+            return "";
+          }}
+        />
+      </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">
         <form onSubmit={handleCreate} className="space-y-4">

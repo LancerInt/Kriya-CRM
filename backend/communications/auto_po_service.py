@@ -230,6 +230,14 @@ def process_communication_for_po(communication):
     logger.info(f'PO intent detected (confidence={confidence}) for comm {communication.id}')
 
     client = communication.client
+    # Skip auto-PO when the matched client is an auto-created placeholder
+    # (e.g. "mailer-daemon (Auto-created)"). These rows are throwaway records
+    # used to attach unmatched mail; turning them into Sales Orders just
+    # produces junk on the Orders page.
+    if client and '(Auto-created)' in (client.company_name or ''):
+        logger.info(f'Skipping auto-PO for placeholder client: {client.company_name}')
+        return None
+
     from finance.models import ProformaInvoice
 
     # Step 1: Look for a sent PI in the SAME email thread first

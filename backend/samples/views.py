@@ -12,9 +12,10 @@ class SampleViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     filterset_fields = ['client', 'status']
     search_fields = ['product_name', 'tracking_number']
     def get_queryset(self):
-        return Sample.objects.filter(is_deleted=False).select_related(
-            'client', 'product', 'created_by'
-        )
+        return (Sample.objects
+                .filter(is_deleted=False)
+                .exclude(client__company_name__icontains='(Auto-created)')
+                .select_related('client', 'product', 'created_by'))
 
     def perform_create(self, serializer):
         sample = serializer.save(created_by=self.request.user)

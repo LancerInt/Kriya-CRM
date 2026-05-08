@@ -446,101 +446,132 @@ export default function TeamChatPage() {
   const dmOtherUser = activeRoom?.other_user;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4">
+    <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
       {/* Sidebar */}
-      <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col shrink-0">
-        <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="font-semibold text-sm">Team Chat</h3>
-          <button onClick={() => setShowNewRoom(true)} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">+ Room</button>
+      <div className="w-72 bg-white/80 backdrop-blur border-r border-slate-200/70 flex flex-col shrink-0 shadow-[1px_0_3px_rgba(0,0,0,0.02)]">
+        <div className="px-4 py-4 border-b border-slate-200/70 bg-gradient-to-br from-indigo-600 to-violet-600">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" /></svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-sm">Team Chat</h3>
+                <p className="text-[10px] text-indigo-100">{rooms.length} channels · {dms.length} DMs</p>
+              </div>
+            </div>
+            <button onClick={() => setShowNewRoom(true)} className="text-[11px] font-semibold text-white bg-white/20 hover:bg-white/30 backdrop-blur px-2.5 py-1 rounded-lg transition-colors">+ Room</button>
+          </div>
         </div>
         {showNewRoom && (
-          <div className="p-2 border-b border-gray-200 flex gap-1">
-            <input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Room name" className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded outline-none" onKeyDown={(e) => e.key === "Enter" && handleCreateRoom()} />
-            <button onClick={handleCreateRoom} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded">Add</button>
+          <div className="px-3 py-2.5 border-b border-slate-200/70 bg-indigo-50/50">
+            <div className="flex gap-1.5">
+              <input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Room name" className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-indigo-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" onKeyDown={(e) => e.key === "Enter" && handleCreateRoom()} autoFocus />
+              <button onClick={handleCreateRoom} className="px-3 py-1.5 text-xs font-semibold bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg shadow-sm hover:shadow">Add</button>
+              <button onClick={() => { setShowNewRoom(false); setNewRoomName(""); }} className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700">✕</button>
+            </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto py-2">
           {/* Channels section */}
-          <div className="px-3 pt-3 pb-1">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Channels</p>
+          <div className="px-4 pt-2 pb-1.5 flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.12em]">Channels</span>
+            <span className="px-1.5 py-px rounded-full bg-slate-100 text-[9px] font-bold text-slate-500">{rooms.length}</span>
           </div>
-          {rooms.map((room) => (
-            <div
-              key={room.id}
-              onClick={() => setActiveRoom(room)}
-              className={`group w-full text-left px-3 py-2.5 border-b border-gray-100 transition-colors cursor-pointer ${
-                activeRoom?.id === room.id ? "bg-indigo-50" : "hover:bg-gray-100"
-              }`}
-            >
-              {editingRoom === room.id ? (
-                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                  <input value={editRoomName} onChange={(e) => setEditRoomName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSaveRoom(room.id); if (e.key === "Escape") setEditingRoom(null); }} autoFocus className="flex-1 px-2 py-1 text-xs border border-indigo-300 rounded outline-none" />
-                  <button onClick={() => handleSaveRoom(room.id)} className="px-1.5 py-1 text-xs bg-indigo-600 text-white rounded">OK</button>
+          <div className="px-2 space-y-0.5">
+            {rooms.map((room) => {
+              const isActive = activeRoom?.id === room.id;
+              return (
+                <div
+                  key={room.id}
+                  onClick={() => setActiveRoom(room)}
+                  className={`group relative px-3 py-2 rounded-lg transition-all cursor-pointer ${
+                    isActive
+                      ? "bg-gradient-to-r from-indigo-50 to-violet-50 shadow-sm ring-1 ring-indigo-200/60"
+                      : "hover:bg-slate-50"
+                  }`}
+                >
+                  {isActive && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r bg-gradient-to-b from-indigo-500 to-violet-500" />}
+                  {editingRoom === room.id ? (
+                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                      <input value={editRoomName} onChange={(e) => setEditRoomName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSaveRoom(room.id); if (e.key === "Escape") setEditingRoom(null); }} autoFocus className="flex-1 px-2 py-1 text-xs bg-white border border-indigo-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
+                      <button onClick={() => handleSaveRoom(room.id)} className="px-2 py-1 text-xs font-semibold bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg">OK</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold ${isActive ? "bg-gradient-to-br from-indigo-500 to-violet-500 text-white" : "bg-slate-100 text-slate-500"}`}>#</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-sm font-semibold truncate ${isActive ? "text-indigo-700" : "text-slate-800"}`}>{room.name}</p>
+                          {room.is_general && <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-px rounded-full">DEFAULT</span>}
+                        </div>
+                        {room.last_message && (
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">{room.last_message.user_name}: {room.last_message.content}</p>
+                        )}
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0 transition-opacity">
+                        <button onClick={(e) => handleEditRoom(room, e)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md" title="Rename">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                        {!room.is_general && (
+                          <button onClick={(e) => handleDeleteRoom(room, e)} className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md" title="Delete room">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-400 shrink-0">#</span>
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-medium truncate ${activeRoom?.id === room.id ? "text-indigo-700" : "text-gray-800"}`}>{room.name}</p>
-                    {room.last_message && (
-                      <p className="text-xs text-gray-400 truncate">{room.last_message.user_name}: {room.last_message.content}</p>
-                    )}
-                  </div>
-                  <div className="opacity-0 group-hover:opacity-100 flex gap-1 shrink-0">
-                    <button onClick={(e) => handleEditRoom(room, e)} className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" title="Rename">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    </button>
-                    {!room.is_general && (
-                      <button onClick={(e) => handleDeleteRoom(room, e)} className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded" title="Delete room">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+              );
+            })}
+          </div>
 
           {/* Direct Messages section */}
-          <div className="px-3 pt-4 pb-1 flex items-center justify-between">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Direct Messages</p>
+          <div className="px-4 pt-5 pb-1.5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.12em]">Direct Messages</span>
+              <span className="px-1.5 py-px rounded-full bg-slate-100 text-[9px] font-bold text-slate-500">{dms.length}</span>
+            </div>
             <div className="relative" data-user-picker>
               <button
                 onClick={handleOpenUserPicker}
-                className="text-gray-400 hover:text-indigo-600 p-0.5 rounded"
+                className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1 rounded-md transition-colors"
                 title="New direct message"
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
               </button>
               {/* User picker dropdown */}
               {showUserPicker && (
-                <div data-user-picker className="absolute right-0 top-6 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
-                  <div className="p-2 border-b border-gray-100">
+                <div data-user-picker className="absolute right-0 top-7 w-60 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="p-2.5 border-b border-slate-100 bg-gradient-to-br from-indigo-50/40 to-white">
                     <input
                       autoFocus
                       value={userSearch}
                       onChange={(e) => setUserSearch(e.target.value)}
                       placeholder="Search people..."
-                      className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-400"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400"
                     />
                   </div>
-                  <div className="max-h-48 overflow-y-auto">
+                  <div className="max-h-56 overflow-y-auto">
                     {filteredUsers.length === 0 ? (
-                      <p className="text-xs text-gray-400 text-center py-4">No users found</p>
+                      <div className="text-center py-6">
+                        <p className="text-2xl mb-1">🔍</p>
+                        <p className="text-xs text-slate-400">No users found</p>
+                      </div>
                     ) : (
                       filteredUsers.map((u) => (
                         <button
                           key={u.id}
                           onClick={() => handleStartDM(u.id)}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-indigo-50 transition-colors"
+                          className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-indigo-50 transition-colors"
                         >
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarColors[u.role] || "bg-gray-100 text-gray-700"}`}>
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarColors[u.role] || "bg-slate-100 text-slate-700"}`}>
                             {getInitials(u.full_name)}
                           </div>
                           <div className="text-left min-w-0">
-                            <p className="text-xs font-medium text-gray-800 truncate">{u.full_name}</p>
-                            <p className={`text-[10px] font-medium ${roleColors[u.role]?.split(" ")[0] || "text-gray-400"}`}>{u.role}</p>
+                            <p className="text-xs font-semibold text-slate-800 truncate">{u.full_name}</p>
+                            <p className={`text-[10px] font-medium capitalize ${roleColors[u.role]?.split(" ")[0] || "text-slate-400"}`}>{u.role}</p>
                           </div>
                         </button>
                       ))
@@ -552,36 +583,49 @@ export default function TeamChatPage() {
           </div>
 
           {dms.length === 0 && (
-            <p className="text-xs text-gray-400 px-3 py-2">No direct messages yet</p>
+            <div className="mx-3 my-2 px-3 py-4 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 text-center">
+              <p className="text-2xl mb-1">💬</p>
+              <p className="text-[11px] text-slate-500 font-medium">No direct messages yet</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Click + to start a chat</p>
+            </div>
           )}
-          {dms.map((dm) => {
-            const other = dm.other_user;
-            return (
-              <div
-                key={dm.id}
-                onClick={() => setActiveRoom(dm)}
-                className={`w-full text-left px-3 py-2.5 border-b border-gray-100 transition-colors cursor-pointer ${
-                  activeRoom?.id === dm.id ? "bg-indigo-50" : "hover:bg-gray-100"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColors[other?.role] || "bg-gray-100 text-gray-700"}`}>
-                    {getInitials(other?.full_name)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm font-medium truncate ${activeRoom?.id === dm.id ? "text-indigo-700" : "text-gray-800"}`}>
-                      {other?.full_name || "Unknown"}
-                    </p>
-                    {dm.last_message ? (
-                      <p className="text-xs text-gray-400 truncate">{dm.last_message.content}</p>
-                    ) : (
-                      <p className="text-xs text-gray-300 italic">No messages yet</p>
-                    )}
+          <div className="px-2 space-y-0.5">
+            {dms.map((dm) => {
+              const other = dm.other_user;
+              const isActive = activeRoom?.id === dm.id;
+              return (
+                <div
+                  key={dm.id}
+                  onClick={() => setActiveRoom(dm)}
+                  className={`group relative px-3 py-2 rounded-lg transition-all cursor-pointer ${
+                    isActive
+                      ? "bg-gradient-to-r from-indigo-50 to-violet-50 shadow-sm ring-1 ring-indigo-200/60"
+                      : "hover:bg-slate-50"
+                  }`}
+                >
+                  {isActive && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r bg-gradient-to-b from-indigo-500 to-violet-500" />}
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative shrink-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColors[other?.role] || "bg-slate-100 text-slate-700"}`}>
+                        {getInitials(other?.full_name)}
+                      </div>
+                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-semibold truncate ${isActive ? "text-indigo-700" : "text-slate-800"}`}>
+                        {other?.full_name || "Unknown"}
+                      </p>
+                      {dm.last_message ? (
+                        <p className="text-[11px] text-slate-400 truncate">{dm.last_message.content}</p>
+                      ) : (
+                        <p className="text-[11px] text-slate-300 italic">No messages yet</p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -589,46 +633,56 @@ export default function TeamChatPage() {
       <div className="flex-1 flex flex-col bg-white relative" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
         {/* Drag overlay */}
         {dragging && (
-          <div className="absolute inset-0 z-50 bg-indigo-50/90 border-2 border-dashed border-indigo-400 rounded-lg flex flex-col items-center justify-center pointer-events-none">
-            <svg className="w-16 h-16 text-indigo-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-            </svg>
-            <p className="text-indigo-600 font-semibold text-lg">Drop files here</p>
-            <p className="text-indigo-400 text-sm mt-1">Images, PDFs, documents, videos, audio</p>
+          <div className="absolute inset-3 z-50 bg-gradient-to-br from-indigo-50/95 to-violet-50/95 backdrop-blur border-2 border-dashed border-indigo-400 rounded-2xl flex flex-col items-center justify-center pointer-events-none shadow-2xl">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-xl mb-4">
+              <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+            </div>
+            <p className="text-indigo-700 font-bold text-xl">Drop files to share</p>
+            <p className="text-indigo-500 text-sm mt-1">Images, PDFs, documents, videos, audio</p>
           </div>
         )}
         {/* Header */}
         {activeRoom && (
-          <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="px-5 py-3.5 border-b border-slate-200/70 bg-white/95 backdrop-blur flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
             {isDMRoom ? (
               <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColors[dmOtherUser?.role] || "bg-gray-100 text-gray-700"}`}>
-                  {getInitials(dmOtherUser?.full_name)}
+                <div className="relative shrink-0">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-white shadow ${avatarColors[dmOtherUser?.role] || "bg-slate-100 text-slate-700"}`}>
+                    {getInitials(dmOtherUser?.full_name)}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-white" />
                 </div>
                 <div>
-                  <h2 className="font-semibold text-gray-900">{dmOtherUser?.full_name || "Direct Message"}</h2>
-                  <p className={`text-xs font-medium capitalize ${roleColors[dmOtherUser?.role]?.split(" ")[0] || "text-gray-400"}`}>{dmOtherUser?.role}</p>
+                  <h2 className="font-bold text-slate-900 text-base">{dmOtherUser?.full_name || "Direct Message"}</h2>
+                  <p className={`text-[11px] font-semibold capitalize ${roleColors[dmOtherUser?.role]?.split(" ")[0] || "text-slate-400"}`}>{dmOtherUser?.role}</p>
                 </div>
               </div>
             ) : (
-              <div>
-                <h2 className="font-semibold"># {activeRoom.name}</h2>
-                {activeRoom.description && <p className="text-xs text-gray-500">{activeRoom.description}</p>}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center shadow-md">
+                  <span className="text-lg font-bold">#</span>
+                </div>
+                <div>
+                  <h2 className="font-bold text-slate-900 text-base">{activeRoom.name}</h2>
+                  <p className="text-[11px] text-slate-500">{activeRoom.description || "Team-wide discussions"}</p>
+                </div>
               </div>
             )}
             <div className="flex items-center gap-2">
               {inCall ? (
-                <button onClick={endGroupCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700">
+                <button onClick={endGroupCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-rose-500 to-rose-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" /></svg>
                   End Call
                 </button>
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={startGroupCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                  <button onClick={startGroupCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                     Start Call
                   </button>
-                  <button onClick={joinCall} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700">
+                  <button onClick={joinCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14" /></svg>
                     Join Call
                   </button>
@@ -646,7 +700,16 @@ export default function TeamChatPage() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-3 bg-gradient-to-b from-slate-50/40 to-white">
+          {messages.length === 0 && activeRoom && (
+            <div className="flex flex-col items-center justify-center h-full text-center py-16">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg mb-4">
+                <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mb-1">{isDMRoom ? `Start chatting with ${dmOtherUser?.full_name?.split(" ")[0] || ""}` : `Welcome to #${activeRoom.name}`}</h3>
+              <p className="text-sm text-slate-500 max-w-sm">{isDMRoom ? "This is the very beginning of your direct message conversation." : "This is the start of the channel. Say hello!"}</p>
+            </div>
+          )}
           {messages.map((msg, i) => {
             const own = isOwnMessage(msg);
             const showAvatar = i === 0 || messages[i - 1]?.user !== msg.user;
@@ -657,7 +720,7 @@ export default function TeamChatPage() {
                 <div className={`flex gap-2 max-w-[70%] ${own ? "flex-row-reverse" : ""}`}>
                   {/* Avatar */}
                   {showAvatar ? (
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColors[msg.user_role] || "bg-gray-100 text-gray-700"}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ring-2 ring-white shadow-sm ${avatarColors[msg.user_role] || "bg-slate-100 text-slate-700"}`}>
                       {getInitials(msg.user_name)}
                     </div>
                   ) : (
@@ -666,23 +729,23 @@ export default function TeamChatPage() {
 
                   <div>
                     {showAvatar && (
-                      <div className={`flex items-center gap-2 mb-0.5 ${own ? "justify-end" : ""}`}>
-                        <span className="text-xs font-semibold text-gray-700">{msg.user_name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${roleColors[msg.user_role] || "text-gray-500 bg-gray-50"}`}>{msg.user_role}</span>
-                        <span className="text-[10px] text-gray-400">{format(new Date(msg.created_at), "h:mm a")}</span>
-                        {msg.is_edited && <span className="text-[10px] text-gray-400 italic">(edited)</span>}
+                      <div className={`flex items-center gap-2 mb-1 ${own ? "justify-end" : ""}`}>
+                        <span className="text-xs font-bold text-slate-700">{msg.user_name}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${roleColors[msg.user_role] || "text-slate-500 bg-slate-50"}`}>{msg.user_role}</span>
+                        <span className="text-[10px] text-slate-400">{format(new Date(msg.created_at), "h:mm a")}</span>
+                        {msg.is_edited && <span className="text-[10px] text-slate-400 italic">(edited)</span>}
                       </div>
                     )}
 
                     {editingMsg === msg.id ? (
                       <div className="flex items-center gap-1">
                         <input value={editText} onChange={(e) => setEditText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSaveEdit(); if (e.key === "Escape") setEditingMsg(null); }} autoFocus className="flex-1 px-3 py-2 text-sm border border-indigo-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" />
-                        <button onClick={handleSaveEdit} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded-lg">Save</button>
-                        <button onClick={() => setEditingMsg(null)} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                        <button onClick={handleSaveEdit} className="px-2.5 py-1.5 text-xs font-semibold bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg shadow-sm">Save</button>
+                        <button onClick={() => setEditingMsg(null)} className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700">Cancel</button>
                       </div>
                     ) : (
                       <div
-                        className={`rounded-2xl px-3 py-2 text-sm relative ${own ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-800"}`}
+                        className={`rounded-2xl px-3.5 py-2.5 text-sm relative shadow-sm ${own ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white" : "bg-white text-slate-800 border border-slate-200/70"}`}
                         onContextMenu={(e) => { e.preventDefault(); setContextMenu({ msgId: msg.id, x: e.clientX, y: e.clientY }); }}
                       >
                         {msg.message_type === "image" && msg.file && (
@@ -698,8 +761,8 @@ export default function TeamChatPage() {
                           </div>
                         )}
                         {msg.message_type === "file" && msg.file && (
-                          <a href={fileUrl(msg.file)} target="_blank" rel="noreferrer" className={`flex items-center gap-2 py-1 ${own ? "text-indigo-100" : "text-indigo-600"} text-xs font-medium`}>
-                            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          <a href={fileUrl(msg.file)} target="_blank" rel="noreferrer" className={`flex items-center gap-2 px-2.5 py-2 rounded-lg ${own ? "bg-white/15 hover:bg-white/25 text-white" : "bg-slate-50 hover:bg-slate-100 text-indigo-700"} text-xs font-semibold transition-colors`}>
+                            <svg className={`w-4 h-4 shrink-0 ${own ? "text-white" : "text-indigo-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             {msg.filename || "Download file"}
                           </a>
                         )}
@@ -710,16 +773,21 @@ export default function TeamChatPage() {
                             const isExpired = callEnded || (Date.now() - msgTime) / 60000 > 60;
                             const displayText = msg.content.replace(/\[JOIN_CALL:[^\]]+\]\s*/, "");
                             return (
-                              <div>
-                                <p className="whitespace-pre-wrap mb-1">{displayText}</p>
+                              <div className={`rounded-xl p-2.5 ${own ? "bg-white/10" : "bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200/60"}`}>
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${own ? "bg-white/20" : "bg-emerald-500"}`}>
+                                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                  </span>
+                                  <p className={`whitespace-pre-wrap text-xs font-semibold ${own ? "text-white" : "text-emerald-800"}`}>{displayText}</p>
+                                </div>
                                 {isExpired ? (
-                                  <span className="inline-flex items-center gap-1 text-xs text-gray-400 italic">
+                                  <span className={`inline-flex items-center gap-1 text-[11px] italic ${own ? "text-white/70" : "text-slate-500"}`}>
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
                                     Call ended
                                   </span>
                                 ) : (
-                                  <button onClick={(e) => { e.stopPropagation(); joinCall(); }} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${own ? "bg-white/20 text-white hover:bg-white/30" : "bg-green-600 text-white hover:bg-green-700"}`}>
-                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                  <button onClick={(e) => { e.stopPropagation(); joinCall(); }} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg shadow-sm transition-all ${own ? "bg-white text-emerald-700 hover:shadow" : "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white hover:shadow"}`}>
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14" /></svg>
                                     Join Call
                                   </button>
                                 )}
@@ -727,25 +795,30 @@ export default function TeamChatPage() {
                             );
                           }
                           if (msg.content.includes("[CALL_ENDED]")) {
-                            return <p className="text-xs italic text-gray-400">{msg.content.replace("[CALL_ENDED] ", "")}</p>;
+                            return (
+                              <span className={`inline-flex items-center gap-1.5 text-[11px] italic ${own ? "text-white/80" : "text-slate-500"}`}>
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+                                {msg.content.replace("[CALL_ENDED] ", "")}
+                              </span>
+                            );
                           }
-                          return <p className="whitespace-pre-wrap">{msg.content}</p>;
+                          return <p className="whitespace-pre-wrap" style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{msg.content}</p>;
                         })()}
                       </div>
                     )}
 
                     {editingMsg !== msg.id && (
-                      <div className={`flex gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${own ? "justify-end" : "justify-start"}`}>
-                        <button onClick={() => handleCopyMsg(msg.content)} className="p-0.5 text-gray-400 hover:text-gray-600" title="Copy">
+                      <div className={`flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${own ? "justify-end" : "justify-start"}`}>
+                        <button onClick={() => handleCopyMsg(msg.content)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md" title="Copy">
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                         </button>
                         {canEdit && (
-                          <button onClick={() => handleEditMsg(msg)} className="p-0.5 text-gray-400 hover:text-gray-600" title="Edit">
+                          <button onClick={() => handleEditMsg(msg)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md" title="Edit">
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={() => handleDeleteMsg(msg.id)} className="p-0.5 text-gray-400 hover:text-red-500" title="Delete">
+                          <button onClick={() => handleDeleteMsg(msg.id)} className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md" title="Delete">
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
                         )}
@@ -761,21 +834,21 @@ export default function TeamChatPage() {
 
         {/* Input */}
         {activeRoom && (
-          <div className="border-t border-gray-200 p-3 bg-white">
+          <div className="border-t border-slate-200/70 px-4 py-3 bg-white/95 backdrop-blur">
             <form onSubmit={handleSend} className="flex items-center gap-2">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" title="Attach file/image/video">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Attach file/image/video">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
               <input type="file" ref={fileInputRef} onChange={handleSendFile} className="hidden" multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar" />
 
-              <button type="button" onClick={recording ? stopRecording : startRecording} className={`p-2 rounded-lg transition-colors ${recording ? "text-red-600 bg-red-50 animate-pulse" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`} title={recording ? "Stop recording" : "Record voice message"}>
+              <button type="button" onClick={recording ? stopRecording : startRecording} className={`p-2.5 rounded-lg transition-colors ${recording ? "text-rose-600 bg-rose-50 animate-pulse" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"}`} title={recording ? "Stop recording" : "Record voice message"}>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
               </button>
 
               {recording ? (
-                <div className="flex-1 flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
-                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                  <span className="text-sm text-red-600 font-medium">Recording... Click mic to stop</span>
+                <div className="flex-1 flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-rose-50 to-rose-100/50 border border-rose-200 rounded-xl">
+                  <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.6)]" />
+                  <span className="text-sm text-rose-600 font-semibold">Recording... Click mic to stop</span>
                 </div>
               ) : (
                 <input
@@ -783,12 +856,13 @@ export default function TeamChatPage() {
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={isDMRoom ? `Message ${dmOtherUser?.full_name || ""}...` : `Message #${activeRoom.name}...`}
                   disabled={sending}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:opacity-50 text-sm"
+                  className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none disabled:opacity-50 text-sm transition-all"
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                   onPaste={handlePaste}
                 />
               )}
-              <button type="submit" disabled={sending || !input.trim() || recording} className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 text-sm">
+              <button type="submit" disabled={sending || !input.trim() || recording} className="px-5 py-2.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-xl font-semibold hover:shadow-md disabled:opacity-50 disabled:hover:shadow-none text-sm shadow-sm transition-all flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                 Send
               </button>
             </form>

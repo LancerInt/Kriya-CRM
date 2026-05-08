@@ -330,19 +330,27 @@ def check_delivery_reminders():
     return {'sent': sent}
 
 
+# How many days before / after the due date the reminders fire.
+# Pre-due  : day = due - PAYMENT_PRE_DUE_DAYS
+# Post-due : day = due + PAYMENT_OVERDUE_DAYS  (one-shot per row)
+PAYMENT_PRE_DUE_DAYS = 3
+PAYMENT_OVERDUE_DAYS = 3
+
+
 @shared_task(name='orders.check_balance_payment_reminders')
 def check_balance_payment_reminders():
     """
-    Fire a reminder 10 days before the balance payment is due (e.g.
-    "D/A 60 days" balance due 50 days after dispatch). The reminder
-    targets the assigned executive + admin/manager via notify(); per-order
-    cool-down is enforced through `balance_reminder_sent_at`.
+    Fire a reminder 3 days BEFORE the payment is due (advance/balance with
+    an after-dispatch terms slot, e.g. "D/A 60 days"). The reminder targets
+    admin + manager + primary executive + shadow executive automatically
+    via notify(); per-order cool-down is enforced through
+    `balance_reminder_sent_at`.
 
-    Scheduled daily (early morning IST). Skips orders that:
-      - have no payment terms with a balance
+    Scheduled daily. Skips orders that:
+      - have no payment terms with an after-dispatch slot
       - haven't dispatched yet
-      - already received the balance
-      - already had a reminder fired
+      - already received the relevant payment
+      - already had a pre-due reminder fired
     """
     from datetime import date
     from orders.models import Order
@@ -386,14 +394,16 @@ def check_balance_payment_reminders():
         candidates.sort(key=lambda c: c[2])
         label, pct, due = candidates[0]
         days_until_due = (due - today).days
-        if days_until_due > 10:
+        # Only fire inside the pre-due window (e.g. day -3..0).
+        # Day +1 onward is owned by check_overdue_payment_reminders.
+        if days_until_due < 0 or days_until_due > PAYMENT_PRE_DUE_DAYS:
             continue
 
         client_name = order.client.company_name if order.client else 'Unknown client'
         title = (
             f'{label} payment ({pct}%) due in {days_until_due} day(s): {order.order_number}'
-            if days_until_due >= 0
-            else f'{label} payment ({pct}%) overdue ({-days_until_due} day(s)): {order.order_number}'
+            if days_until_due > 0
+            else f'{label} payment ({pct}%) due TODAY: {order.order_number}'
         )
         notify(
             title=title,
@@ -411,28 +421,26 @@ def check_balance_payment_reminders():
         order.save(update_fields=['balance_reminder_sent_at'])
         sent += 1
 
-    logger.info(f'Payment reminder task: fired {sent} reminders')
+    logger.info(f'Payment pre-due reminder task: fired {sent} reminders')
     return {'sent': sent}
 
 
 @shared_task(name='orders.check_overdue_payment_reminders')
 def check_overdue_payment_reminders():
     """
-    Fire a one-shot overdue reminder the day AFTER a payment due date.
+    Fire a one-shot overdue reminder once a payment is at least
+    PAYMENT_OVERDUE_DAYS past due (default 3 days). This pairs with the
+    pre-due reminder (3 days before) — together the executive gets one
+    nudge before and one after the due date.
 
-    Example: term is "20% Advance 60 days". Balance row falls due 60 days
-    after dispatch. On day 61 (and any later day until the reminder fires)
-    this task notifies the assigned executive + admin/manager. Once a row's
-    overdue reminder is sent, it never re-fires for that row — the cool-down
-    is per-row via ``advance_overdue_reminder_sent_at`` /
-    ``balance_overdue_reminder_sent_at``.
-
-    Independent of the 10-days-before reminder (``balance_reminder_sent_at``)
-    so both can fire across the lifetime of a single order.
+    Recipients (handled by notify()): admin + manager + the client's
+    primary executive + shadow executive + the order creator. Per-row
+    cool-down via `advance_overdue_reminder_sent_at` /
+    `balance_overdue_reminder_sent_at` so no executive is spammed.
 
     Scheduled daily.
     """
-    from datetime import date
+    from datetime import date, timedelta
     from orders.models import Order
     from orders.payment_terms import (
         compute_balance_due_date, compute_advance_due_date, parse_payment_terms,
@@ -458,7 +466,7 @@ def check_overdue_payment_reminders():
             and not order.balance_overdue_reminder_sent_at
         ):
             due = compute_balance_due_date(order)
-            if due and today > due:
+            if due and today >= due + timedelta(days=PAYMENT_OVERDUE_DAYS):
                 days_overdue = (today - due).days
                 notify(
                     title=f'Balance payment ({parsed["balance_pct"]}%) overdue ({days_overdue} day(s)): {order.order_number}',
@@ -485,7 +493,7 @@ def check_overdue_payment_reminders():
             and not order.advance_overdue_reminder_sent_at
         ):
             due = compute_advance_due_date(order)
-            if due and today > due:
+            if due and today >= due + timedelta(days=PAYMENT_OVERDUE_DAYS):
                 days_overdue = (today - due).days
                 notify(
                     title=f'Advance payment ({parsed["advance_pct"]}%) overdue ({days_overdue} day(s)): {order.order_number}',

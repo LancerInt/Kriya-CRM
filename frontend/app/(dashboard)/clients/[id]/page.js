@@ -57,7 +57,7 @@ function LastConversation({ clientId }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/communications/", { params: { client: clientId, comm_type: "email" } })
+    api.get("/communications/", { params: { client: clientId, comm_type: "email", page_size: 20 } })
       .then((r) => setEmails((r.data.results || r.data).slice(0, 3)))
       .finally(() => setLoading(false));
   }, [clientId]);
@@ -66,22 +66,36 @@ function LastConversation({ clientId }) {
   if (emails.length === 0) return null;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h3 className="font-semibold mb-3">Last Conversation</h3>
-      <div className="space-y-3">
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-blue-50/40 to-white">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+        </div>
+        <div>
+          <h3 className="font-bold text-slate-800 text-sm">Last Conversation</h3>
+          <p className="text-[11px] text-slate-500">Most recent email exchanges</p>
+        </div>
+      </div>
+      <div className="divide-y divide-slate-100">
         {emails.map((em) => (
-          <div key={em.id} className="flex gap-3">
-            <div className={`w-1.5 shrink-0 rounded-full ${em.direction === "inbound" ? "bg-blue-400" : "bg-green-400"}`} />
+          <div key={em.id} className="p-4 hover:bg-slate-50/60 transition-colors flex gap-3">
+            <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${em.direction === "inbound" ? "bg-blue-50 text-blue-600 ring-1 ring-blue-200/60" : "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200/60"}`}>
+              {em.direction === "inbound" ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+              )}
+            </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className={`text-xs font-medium ${em.direction === "inbound" ? "text-blue-600" : "text-green-600"}`}>
+              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ring-1 ${em.direction === "inbound" ? "bg-blue-50 text-blue-700 ring-blue-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200"}`}>
                   {em.direction === "inbound" ? "Received" : "Sent"}
                 </span>
-                <span className="text-xs text-gray-400">{em.external_email}</span>
-                <span className="text-xs text-gray-400 ml-auto">{fmtDate(em.created_at)}</span>
+                <span className="text-[11px] text-slate-500 font-medium truncate">{em.external_email}</span>
+                <span className="text-[11px] text-slate-400 ml-auto shrink-0">{fmtDate(em.created_at)}</span>
               </div>
-              <p className="text-sm font-medium text-gray-800 truncate">{em.subject || "(No subject)"}</p>
-              <p className="text-xs text-gray-500 line-clamp-2">{(em.body || "").replace(/<[^>]*>/g, "").slice(0, 150)}</p>
+              <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{em.subject || "(No subject)"}</p>
+              <p className="text-[12px] text-slate-500 line-clamp-2 mt-0.5">{(em.body || "").replace(/<[^>]*>/g, "").slice(0, 150)}</p>
             </div>
           </div>
         ))}
@@ -143,30 +157,45 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 space-y-6">
-        {/* Stats Cards */}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="lg:col-span-2 space-y-5">
+        {/* Stats Tiles */}
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
-              { label: "Communications", value: stats.communications, color: "text-blue-600 bg-blue-50" },
-              { label: "Quotations", value: stats.quotations, color: "text-indigo-600 bg-indigo-50" },
-              { label: "Orders", value: stats.orders, color: "text-green-600 bg-green-50" },
-              { label: "Tasks", value: stats.tasks, color: "text-yellow-600 bg-yellow-50" },
-              { label: "Invoices", value: stats.invoices, color: "text-purple-600 bg-purple-50" },
-              { label: "Samples", value: stats.samples, color: "text-cyan-600 bg-cyan-50" },
+              { label: "Communications", value: stats.communications, gradient: "from-blue-500 to-indigo-500", icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" },
+              { label: "Quotations", value: stats.quotations, gradient: "from-indigo-500 to-violet-500", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+              { label: "Orders", value: stats.orders, gradient: "from-emerald-500 to-emerald-600", icon: "M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" },
+              { label: "Tasks", value: stats.tasks, gradient: "from-amber-500 to-orange-500", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
+              { label: "Invoices", value: stats.invoices, gradient: "from-purple-500 to-purple-600", icon: "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" },
+              { label: "Samples", value: stats.samples, gradient: "from-cyan-500 to-teal-500", icon: "M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" },
             ].map((s) => (
-              <div key={s.label} className={`rounded-lg p-3 ${s.color}`}>
-                <p className="text-2xl font-bold">{s.value || 0}</p>
-                <p className="text-xs font-medium">{s.label}</p>
+              <div key={s.label} className="relative overflow-hidden rounded-2xl bg-white border border-slate-200/70 shadow-sm p-3 hover:shadow-md transition-all">
+                <div className={`absolute inset-0 bg-gradient-to-br ${s.gradient} opacity-[0.04]`} />
+                <div className="relative">
+                  <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${s.gradient} flex items-center justify-center shadow-sm mb-1.5`}>
+                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={s.icon} /></svg>
+                  </div>
+                  <p className="text-2xl font-extrabold text-slate-800">{s.value || 0}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">{s.label}</p>
+                </div>
               </div>
             ))}
           </div>
         )}
 
         {/* Client Info */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="font-semibold mb-4">Account Information</h3>
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-indigo-50/40 to-white">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Account Information</h3>
+              <p className="text-[11px] text-slate-500">Click any field to edit inline</p>
+            </div>
+          </div>
+          <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="text-gray-500">Status:</span> <StatusBadge status={client.status} /></div>
             <div className="flex items-center gap-2">
@@ -373,38 +402,73 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
               <div className="sm:col-span-2"><span className="text-gray-500">Website:</span> <a href={client.website} target="_blank" rel="noreferrer" className="ml-1 text-indigo-600 hover:underline">{client.website}</a></div>
             )}
           </div>
+          </div>
         </div>
 
         {/* Last Conversation */}
         <LastConversation clientId={client.id} />
 
         {/* Contacts — full CRUD */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Contacts</h3>
-            <button onClick={openAddContact} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700">+ Add Contact</button>
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-50/40 to-white">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 text-sm">Contacts</h3>
+                <p className="text-[11px] text-slate-500">{client.contacts?.length || 0} {(client.contacts?.length || 0) === 1 ? "contact" : "contacts"}</p>
+              </div>
+            </div>
+            <button onClick={openAddContact} className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-[11px] font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+              Add Contact
+            </button>
           </div>
           {client.contacts && client.contacts.length > 0 ? (
-            <div className="space-y-2">
+            <div className="divide-y divide-slate-100">
               {client.contacts.map((c) => (
-                <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{c.name} {c.is_primary && <span className="text-xs text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">(Primary)</span>}</p>
-                    <p className="text-xs text-gray-500">{c.designation}{c.designation && c.email ? " · " : ""}{c.email}</p>
-                    <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                      {c.phone && <span>Phone: {c.phone}</span>}
-                      {c.whatsapp && <span>WA: {c.whatsapp}</span>}
+                <div key={c.id} className="group flex items-center justify-between p-4 hover:bg-slate-50/60 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`shrink-0 w-10 h-10 rounded-xl ${c.is_primary ? "bg-gradient-to-br from-indigo-500 to-violet-500" : "bg-gradient-to-br from-slate-400 to-slate-500"} text-white flex items-center justify-center text-sm font-bold ring-2 ring-white shadow-sm`}>
+                      {(c.name || "?")[0]?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-bold text-slate-800 truncate">{c.name}</p>
+                        {c.is_primary && <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-50 ring-1 ring-indigo-200/60 px-1.5 py-0.5 rounded-full">Primary</span>}
+                      </div>
+                      {(c.designation || c.email) && (
+                        <p className="text-[12px] text-slate-500 truncate">{c.designation}{c.designation && c.email ? " · " : ""}{c.email}</p>
+                      )}
+                      {(c.phone || c.whatsapp) && (
+                        <div className="flex gap-3 mt-0.5 text-[11px] text-slate-400">
+                          {c.phone && <span className="flex items-center gap-1"><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>{c.phone}</span>}
+                          {c.whatsapp && <span className="flex items-center gap-1 text-emerald-600"><svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654z"/></svg>{c.whatsapp}</span>}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex gap-2 ml-3 shrink-0">
-                    <button onClick={() => openEditContact(c)} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Edit</button>
-                    <button onClick={() => handleDeleteContact(c.id)} className="text-xs text-red-600 hover:text-red-700 font-medium">Delete</button>
+                  <div className="flex gap-1.5 ml-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => openEditContact(c)} className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg ring-1 ring-indigo-200/60 transition-colors">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      Edit
+                    </button>
+                    <button onClick={() => handleDeleteContact(c.id)} className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg ring-1 ring-rose-200/60 transition-colors">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-4">No contacts added. Add contacts with their email addresses to enable auto-matching of emails.</p>
+            <div className="text-center py-10 px-5">
+              <div className="inline-flex w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-50 items-center justify-center mb-3 shadow-inner">
+                <svg className="w-7 h-7 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              </div>
+              <p className="text-sm font-bold text-slate-700">No contacts added</p>
+              <p className="text-[12px] text-slate-500 mt-1 max-w-xs mx-auto">Add contacts with their email addresses to enable auto-matching of emails.</p>
+            </div>
           )}
         </div>
 
@@ -413,59 +477,78 @@ function OverviewTab({ client, timeline, stats, onClientUpdate }) {
           <form onSubmit={handleContactSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                <input value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Name *</label>
+                <input value={contactForm.name} onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })} required className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
-                <input value={contactForm.designation} onChange={(e) => setContactForm({ ...contactForm, designation: e.target.value })} placeholder="e.g. Purchase Manager" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Designation</label>
+                <input value={contactForm.designation} onChange={(e) => setContactForm({ ...contactForm, designation: e.target.value })} placeholder="e.g. Purchase Manager" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input type="email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} placeholder="contact@company.com" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-              <p className="text-xs text-gray-400 mt-1">Email is used to auto-match incoming/outgoing emails to this client</p>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Email</label>
+              <input type="email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} placeholder="contact@company.com" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
+              <p className="text-[10px] text-slate-400 mt-1">Email is used to auto-match incoming/outgoing emails to this client</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="+91 9876543210" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Phone</label>
+                <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="+91 9876543210" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label>
-                <input value={contactForm.whatsapp} onChange={(e) => setContactForm({ ...contactForm, whatsapp: e.target.value })} placeholder="+91 9876543210" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">WhatsApp</label>
+                <input value={contactForm.whatsapp} onChange={(e) => setContactForm({ ...contactForm, whatsapp: e.target.value })} placeholder="+91 9876543210" className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
               </div>
             </div>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={contactForm.is_primary} onChange={(e) => setContactForm({ ...contactForm, is_primary: e.target.checked })} className="rounded" />
-              <span className="text-sm text-gray-700">Primary contact</span>
+            <label className="flex items-center gap-2 px-3.5 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer">
+              <input type="checkbox" checked={contactForm.is_primary} onChange={(e) => setContactForm({ ...contactForm, is_primary: e.target.checked })} className="rounded text-indigo-600 focus:ring-indigo-500" />
+              <span className="text-xs font-semibold text-indigo-800">⭐ Mark as primary contact</span>
             </label>
-            <div className="flex gap-3 pt-2">
-              <button type="submit" disabled={submittingContact} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">{submittingContact ? "Saving..." : editingContact ? "Update" : "Add Contact"}</button>
-              <button type="button" onClick={() => setShowContactModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+            <div className="flex gap-3 pt-2 border-t border-slate-100">
+              <button type="submit" disabled={submittingContact} className="px-5 py-2.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-xl font-bold text-sm hover:shadow-md disabled:opacity-50 transition-all shadow-sm">{submittingContact ? "Saving..." : editingContact ? "Update" : "Add Contact"}</button>
+              <button type="button" onClick={() => setShowContactModal(false)} className="px-5 py-2.5 border border-slate-200 rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-50">Cancel</button>
             </div>
           </form>
         </Modal>
       </div>
 
       {/* Timeline */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="font-semibold mb-4">Activity Timeline</h3>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-purple-50/40 to-white">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center shadow-sm">
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm">Activity Timeline</h3>
+            <p className="text-[11px] text-slate-500">Latest 20 events</p>
+          </div>
+        </div>
+        <div className="p-5">
         {timeline.length > 0 ? (
-          <div className="space-y-4">
+          <div className="relative space-y-4">
+            <div className="absolute left-1.5 top-2 bottom-2 w-px bg-gradient-to-b from-purple-200 via-indigo-200 to-transparent" />
             {timeline.slice(0, 20).map((item, i) => (
-              <div key={i} className="flex gap-3">
-                <div className="w-2 h-2 mt-2 rounded-full bg-indigo-400 shrink-0" />
-                <div>
-                  <p className="text-sm text-gray-700">{item.description || item.subject || item.comm_type}</p>
-                  <p className="text-xs text-gray-400">{fmtDate(item.created_at || item.date)}</p>
+              <div key={i} className="relative flex gap-3">
+                <div className="relative shrink-0 w-3 h-3 mt-1.5 rounded-full bg-gradient-to-br from-purple-500 to-violet-500 ring-4 ring-white shadow-sm" />
+                <div className="min-w-0 flex-1 pb-1">
+                  <p className="text-[13px] text-slate-700 font-medium leading-snug">{item.description || item.subject || item.comm_type}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    {fmtDate(item.created_at || item.date)}
+                  </p>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No activity yet</p>
+          <div className="text-center py-8">
+            <div className="inline-flex w-12 h-12 rounded-2xl bg-slate-100 items-center justify-center mb-2">
+              <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-slate-500">No activity yet</p>
+          </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -479,7 +562,10 @@ function useTabData(clientId, endpoint, activeTab, tabKey) {
 
   const reload = useCallback(() => {
     setLoading(true);
-    api.get(endpoint, { params: { client: clientId } })
+    // page_size=500 so a client's full history (emails, orders, samples,
+    // payments, meetings, etc.) loads in one shot — without it the global
+    // 20-row default cuts off anything older than the most recent 20.
+    api.get(endpoint, { params: { client: clientId, page_size: 500 } })
       .then((r) => {
         setData(r.data.results || r.data);
         setLoaded(true);
@@ -1989,10 +2075,24 @@ function TasksTab({ clientId, activeTab, client }) {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ New Task</button>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden mb-4">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-amber-50/40 to-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Tasks</h3>
+              <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "task" : "tasks"}</p>
+            </div>
+          </div>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            New Task
+          </button>
+        </div>
+        <DataTable columns={columns} data={data} loading={loading} emptyTitle="No tasks" emptyDescription="Create a task for this client" />
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No tasks" emptyDescription="Create a task for this client" />
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Task">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -2169,22 +2269,33 @@ function QuotationsTab({ clientId, activeTab }) {
 
   return (
     <>
-      <div className="flex gap-2 mb-4">
-        <button onClick={() => setSubTab("inquiries")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "inquiries" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Inquiries ({inquiries.length})</button>
-        <button onClick={() => setSubTab("quotations")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "quotations" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Quotations ({quotations.length})</button>
-        <button onClick={() => setSubTab("pi")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "pi" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Proforma Invoices ({piList.length})</button>
+      <div className="flex gap-1 p-1.5 bg-white rounded-2xl border border-slate-200/70 shadow-sm w-fit mb-4">
+        <button onClick={() => setSubTab("inquiries")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${subTab === "inquiries" ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Inquiries <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${subTab === "inquiries" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{inquiries.length}</span>
+        </button>
+        <button onClick={() => setSubTab("quotations")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${subTab === "quotations" ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Quotations <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${subTab === "quotations" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{quotations.length}</span>
+        </button>
+        <button onClick={() => setSubTab("pi")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${subTab === "pi" ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>
+          Proforma Invoices <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${subTab === "pi" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{piList.length}</span>
+        </button>
       </div>
-      {subTab === "inquiries" && (
-        <DataTable columns={inquiryColumns} data={inquiries} loading={loadingInq} emptyTitle="No inquiries" emptyDescription="No inquiries from this client" />
-      )}
-      {subTab === "quotations" && (
-        <DataTable columns={quotationColumns} data={quotations} loading={loadingQt} emptyTitle="No quotations" emptyDescription="No quotations for this client"
-          onRowClick={(row) => ["draft", "pending_approval", "approved"].includes(row.status) ? openQuotation(row) : viewPdf("qt", row.id, row.quotation_number)} />
-      )}
-      {subTab === "pi" && (
-        <DataTable columns={piColumns} data={piList} loading={loadingPi} emptyTitle="No proforma invoices" emptyDescription="No PIs for this client"
-          onRowClick={(row) => row.status === "draft" ? openPI(row) : viewPdf("pi", row.id, row.invoice_number)} />
-      )}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {subTab === "inquiries" && (
+          <DataTable columns={inquiryColumns} data={inquiries} loading={loadingInq} emptyTitle="No inquiries" emptyDescription="No inquiries from this client" />
+        )}
+        {subTab === "quotations" && (
+          <DataTable columns={quotationColumns} data={quotations} loading={loadingQt} emptyTitle="No quotations" emptyDescription="No quotations for this client"
+            onRowClick={(row) => ["draft", "pending_approval", "approved"].includes(row.status) ? openQuotation(row) : viewPdf("qt", row.id, row.quotation_number)} />
+        )}
+        {subTab === "pi" && (
+          <DataTable columns={piColumns} data={piList} loading={loadingPi} emptyTitle="No proforma invoices" emptyDescription="No PIs for this client"
+            onRowClick={(row) => row.status === "draft" ? openPI(row) : viewPdf("pi", row.id, row.invoice_number)} />
+        )}
+      </div>
 
       {/* Quotation Editor */}
       <QuotationEditorModal
@@ -2271,20 +2382,33 @@ function QuotationsTab({ clientId, activeTab }) {
 function OrdersTab({ clientId, activeTab }) {
   const { data, loading } = useTabData(clientId, "/orders/", activeTab, "orders");
   const columns = [
-    { key: "order_number", label: "Order #", render: (row) => <span className="font-medium">{row.order_number}</span> },
-    { key: "total", label: "Value", render: (row) => row.total ? `$${Number(row.total).toLocaleString()}` : "—" },
+    { key: "order_number", label: "Order #", render: (row) => <span className="font-bold text-slate-800">{row.order_number}</span> },
+    { key: "total", label: "Value", render: (row) => row.total ? <span className="font-bold text-emerald-700">${Number(row.total).toLocaleString()}</span> : "—" },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "delivery_terms", label: "Terms" },
     { key: "created_at", label: "Date", render: (row) => fmtDate(row.created_at) },
   ];
-  return <DataTable columns={columns} data={data} loading={loading} emptyTitle="No orders" emptyDescription="No orders for this client yet" />;
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-emerald-50/40 to-white">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-sm">
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+        </div>
+        <div>
+          <h3 className="font-bold text-slate-800 text-sm">Orders</h3>
+          <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "order" : "orders"}</p>
+        </div>
+      </div>
+      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No orders" emptyDescription="No orders for this client yet" />
+    </div>
+  );
 }
 
 // ── Shipments Tab ──
 function ShipmentsTab({ clientId, activeTab }) {
   const { data, loading } = useTabData(clientId, "/shipments/", activeTab, "shipments");
   const columns = [
-    { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-medium">{row.shipment_number}</span> },
+    { key: "shipment_number", label: "Shipment #", render: (row) => <span className="font-bold text-slate-800">{row.shipment_number}</span> },
     { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
     { key: "container_number", label: "Container", render: (row) => row.container_number || "—" },
     { key: "port_of_loading", label: "Loading Port", render: (row) => row.port_of_loading || "—" },
@@ -2292,7 +2416,20 @@ function ShipmentsTab({ clientId, activeTab }) {
     { key: "dispatch_date", label: "Dispatch", render: (row) => fmtDate(row.dispatch_date) },
     { key: "estimated_arrival", label: "ETA", render: (row) => fmtDate(row.estimated_arrival) },
   ];
-  return <DataTable columns={columns} data={data} loading={loading} emptyTitle="No shipments" emptyDescription="No shipments for this client yet" />;
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-blue-50/40 to-white">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-sm">
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6 0a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
+        </div>
+        <div>
+          <h3 className="font-bold text-slate-800 text-sm">Shipments</h3>
+          <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "shipment" : "shipments"}</p>
+        </div>
+      </div>
+      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No shipments" emptyDescription="No shipments for this client yet" />
+    </div>
+  );
 }
 
 // ── Samples Tab ──
@@ -2324,7 +2461,18 @@ function SamplesTab({ clientId, activeTab }) {
 
   return (
     <>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No samples" emptyDescription="No sample requests for this client" />
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-cyan-50/40 to-white">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center shadow-sm">
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm">Samples</h3>
+            <p className="text-[11px] text-slate-500">{data.length} sample {data.length === 1 ? "request" : "requests"}</p>
+          </div>
+        </div>
+        <DataTable columns={columns} data={data} loading={loading} emptyTitle="No samples" emptyDescription="No sample requests for this client" />
+      </div>
       <Modal open={!!showFeedback} onClose={() => setShowFeedback(null)} title="Sample Feedback">
         <form onSubmit={handleFeedback} className="space-y-4">
           <div>
@@ -2378,17 +2526,25 @@ function FinanceTab({ clientId, activeTab }) {
   ];
 
   return (
-    <>
-      <div className="flex gap-2 mb-4">
-        <button onClick={() => setSubTab("invoices")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "invoices" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Invoices ({invoices.length})</button>
-        <button onClick={() => setSubTab("payments")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${subTab === "payments" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>Payments ({payments.length})</button>
+    <div className="space-y-4">
+      <div className="flex gap-1 p-1.5 bg-white rounded-2xl border border-slate-200/70 shadow-sm w-fit">
+        <button onClick={() => setSubTab("invoices")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${subTab === "invoices" ? "bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>
+          Invoices <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${subTab === "invoices" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{invoices.length}</span>
+        </button>
+        <button onClick={() => setSubTab("payments")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${subTab === "payments" ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+          Payments <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${subTab === "payments" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{payments.length}</span>
+        </button>
       </div>
-      {subTab === "invoices" ? (
-        <DataTable columns={invoiceColumns} data={invoices} loading={loadingInv} emptyTitle="No invoices" emptyDescription="No invoices for this client" />
-      ) : (
-        <DataTable columns={paymentColumns} data={payments} loading={loadingPay} emptyTitle="No payments" emptyDescription="No payments from this client" />
-      )}
-    </>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {subTab === "invoices" ? (
+          <DataTable columns={invoiceColumns} data={invoices} loading={loadingInv} emptyTitle="No invoices" emptyDescription="No invoices for this client" />
+        ) : (
+          <DataTable columns={paymentColumns} data={payments} loading={loadingPay} emptyTitle="No payments" emptyDescription="No payments from this client" />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2442,10 +2598,24 @@ function MeetingsTab({ clientId, activeTab }) {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Schedule Meeting</button>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden mb-4">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-50/40 to-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Meetings</h3>
+              <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "meeting" : "meetings"} with this client</p>
+            </div>
+          </div>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Schedule Meeting
+          </button>
+        </div>
+        <DataTable columns={columns} data={data} loading={loading} emptyTitle="No meetings" emptyDescription="No meetings with this client" />
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No meetings" emptyDescription="No meetings with this client" />
 
       {/* Create Meeting Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Meeting" size="lg">
@@ -2628,11 +2798,24 @@ function PriceListTab({ clientId, activeTab }) {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{data.length} product{data.length !== 1 ? "s" : ""} in price list</p>
-        {canEdit && <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", client_product_name: "", unit_price: "", currency: "USD", unit: "KG", moq: "", valid_from: "", valid_until: "", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Price</button>}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden mb-4">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-amber-50/40 to-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Price List</h3>
+              <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "product" : "products"} with custom pricing</p>
+            </div>
+          </div>
+          {canEdit && <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", client_product_name: "", unit_price: "", currency: "USD", unit: "KG", moq: "", valid_from: "", valid_until: "", notes: "" }); setShowModal(true); }} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Add Price
+          </button>}
+        </div>
+        <DataTable columns={columns} data={data} loading={loading} emptyTitle="No price list" emptyDescription="Add custom product pricing for this client" />
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No price list" emptyDescription="Add custom product pricing for this client" />
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditing(null); }} title={editing ? "Edit Price" : "Add Price"} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -2828,24 +3011,39 @@ function PurchaseHistoryTab({ clientId, activeTab, clientCountry }) {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-sm text-gray-500">{groupedData.length} invoice{groupedData.length !== 1 ? "s" : ""}</p>
-          {totalValue > 0 && <p className="text-xs text-gray-400">Total: USD {totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden mb-4">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-purple-50/40 to-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Purchase History</h3>
+              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <span>{groupedData.length} {groupedData.length === 1 ? "invoice" : "invoices"}</span>
+                {totalValue > 0 && <><span className="text-slate-300">·</span><span className="font-semibold text-emerald-700">Total: USD {totalValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></>}
+              </div>
+            </div>
+          </div>
+          {canEdit && (
+            <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" }); setShowModal(true); }} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+              Add Purchase History
+            </button>
+          )}
         </div>
-        <button onClick={() => { setEditing(null); setForm({ product: "", product_name: "", quantity: "", unit: "KG", unit_price: "", total_price: "", currency: "USD", purchase_date: "", invoice_number: "", status: "completed", notes: "" }); setShowModal(true); }} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Add Purchase History</button>
+        <DataTable
+          columns={columns}
+          data={groupedData}
+          loading={loading}
+          emptyTitle="No purchase history"
+          emptyDescription="Record purchases for this client"
+          onRowClick={(row) => {
+            const orderId = row.order || row.order_id;
+            if (orderId) router.push(`/orders/${orderId}`);
+          }}
+        />
       </div>
-      <DataTable
-        columns={columns}
-        data={groupedData}
-        loading={loading}
-        emptyTitle="No purchase history"
-        emptyDescription="Record purchases for this client"
-        onRowClick={(row) => {
-          const orderId = row.order || row.order_id;
-          if (orderId) router.push(`/orders/${orderId}`);
-        }}
-      />
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditing(null); }} title={editing ? "Edit Purchase" : "Record Purchase"} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -2958,20 +3156,34 @@ function DocumentsTab({ clientId, activeTab }) {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Upload Document</button>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-50/40 to-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-sm">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Documents</h3>
+              <p className="text-[11px] text-slate-500">{data.length} {data.length === 1 ? "document" : "documents"}</p>
+            </div>
+          </div>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold rounded-xl hover:shadow-md transition-all shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            Upload Document
+          </button>
+        </div>
+        <DataTable columns={columns} data={data} loading={loading} emptyTitle="No documents" emptyDescription="No documents for this client" />
       </div>
-      <DataTable columns={columns} data={data} loading={loading} emptyTitle="No documents" emptyDescription="No documents for this client" />
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Upload Document">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Name *</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Category</label>
+              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all">
                 <option value="commercial">Commercial</option>
                 <option value="quality">Quality</option>
                 <option value="regulatory">Regulatory</option>
@@ -2981,17 +3193,17 @@ function DocumentsTab({ clientId, activeTab }) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Version</label>
-              <input value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Version</label>
+              <input value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all" />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">File *</label>
-            <input type="file" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">File *</label>
+            <input type="file" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-gradient-to-br file:from-indigo-600 file:to-violet-600 file:text-white hover:file:shadow-md file:cursor-pointer file:transition-all" />
           </div>
-          <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">{submitting ? "Uploading..." : "Upload"}</button>
-            <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+          <div className="flex gap-3 pt-2 border-t border-slate-100">
+            <button type="submit" disabled={submitting} className="px-5 py-2.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-xl font-bold text-sm hover:shadow-md disabled:opacity-50 transition-all shadow-sm">{submitting ? "Uploading..." : "Upload"}</button>
+            <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 border border-slate-200 rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-50">Cancel</button>
           </div>
         </form>
       </Modal>
@@ -3033,42 +3245,80 @@ export default function ClientDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (!client) return <p className="text-center text-gray-500 py-8">Client not found</p>;
 
+  const initials = (client.company_name || "?").split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+  const tierTone = client.tier === "tier_1" ? "from-rose-500 to-rose-600" : client.tier === "tier_2" ? "from-amber-500 to-orange-500" : "from-indigo-500 to-violet-500";
+  const tierLabel = client.tier === "tier_1" ? "VIP" : client.tier === "tier_2" ? "Priority" : "Standard";
+
   return (
-    <div>
-      <PageHeader
-        title={client.company_name}
-        subtitle={client.business_type || ""}
-        action={
-          <div className="flex items-center gap-2">
+    <div className="space-y-5">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-6 shadow-xl">
+        <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-violet-300/20 rounded-full blur-2xl" />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="relative shrink-0">
+              <div className="absolute inset-0 bg-white/20 rounded-2xl blur-md" />
+              <div className={`relative w-16 h-16 rounded-2xl bg-gradient-to-br ${tierTone} text-white flex items-center justify-center text-xl font-extrabold ring-4 ring-white/20 shadow-xl`}>
+                {initials || "K"}
+              </div>
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-extrabold text-white tracking-tight truncate">{client.company_name}</h1>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                {client.business_type && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/15 backdrop-blur text-white ring-1 ring-white/30">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    {client.business_type}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/15 backdrop-blur text-white ring-1 ring-white/30">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+                  Tier {tierLabel}
+                </span>
+                {client.country && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/15 backdrop-blur text-white ring-1 ring-white/30">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    {client.country}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             <AISummaryButton
               variant="button"
               title={`${client.company_name} — AI Summary`}
               prompt={`Give me a comprehensive summary of this client. Include: contact details, recent communications, order history, pending tasks, shipment status, price list, purchase history, and any action items.`}
               clientId={id}
             />
-            <Link href={`/clients/${id}/edit`} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+            <Link href={`/clients/${id}/edit`} className="flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 text-sm font-bold rounded-xl ring-1 ring-white/30 hover:shadow-lg hover:scale-[1.02] transition-all shadow-md">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
               Edit Client
             </Link>
           </div>
-        }
-      />
+        </div>
+      </div>
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200 mb-6 overflow-x-auto">
-        <nav className="flex gap-0 min-w-max">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.key
-                  ? "border-indigo-600 text-indigo-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-1.5 overflow-x-auto">
+        <nav className="flex gap-1 min-w-max">
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                  isActive
+                    ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </nav>
       </div>
 

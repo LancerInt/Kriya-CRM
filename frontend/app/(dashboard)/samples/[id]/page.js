@@ -405,93 +405,118 @@ export default function SampleDetailPage() {
     }
   })();
 
+  // Status → hero gradient. Mirrors Sales Order detail page.
+  const SAMPLE_HERO_THEME = {
+    requested:         "from-amber-700 to-orange-900",
+    replied:           "from-blue-700 to-indigo-900",
+    prepared:          "from-indigo-700 to-violet-900",
+    payment_received:  "from-purple-700 to-fuchsia-900",
+    dispatched:        "from-emerald-700 to-teal-900",
+    delivered:         "from-teal-700 to-cyan-900",
+    feedback_pending:  "from-orange-700 to-amber-900",
+    feedback_received: "from-slate-700 to-slate-900",
+  };
+  const heroGradient = SAMPLE_HERO_THEME[sample.status] || "from-slate-700 to-slate-900";
+
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <button onClick={() => router.push("/samples")} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-              <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            </button>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Sample · {sample.client_product_name || sample.product_name || "(no product)"}
+      {/* Hero strip ─────────────────────────────────────────── */}
+      <div className={`relative bg-gradient-to-br ${heroGradient} rounded-2xl p-6 text-white overflow-hidden shadow-sm mb-6`}>
+        <div
+          className="absolute inset-0 opacity-20 pointer-events-none"
+          style={{ backgroundImage: "radial-gradient(circle at 80% 20%, rgba(255,255,255,0.4) 0%, transparent 40%)" }}
+        />
+        <div className="relative flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-2">
+              <button onClick={() => router.push("/samples")} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors" title="Back to Samples">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              </button>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/15 border border-white/20 uppercase tracking-wider">
+                {(sample.status || "").replace(/_/g, " ")}
+              </span>
+              {sample.sample_type && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider ${sample.sample_type === "paid" ? "bg-amber-300/30 text-amber-50 border border-amber-200/40" : "bg-emerald-300/30 text-emerald-50 border border-emerald-200/40"}`}>
+                  {sample.sample_type === "paid" ? "Paid" : "Free"}
+                </span>
+              )}
+              {sample.firc_received_at && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-400/30 border border-emerald-200/40 uppercase tracking-wider">
+                  FIRC ✓
+                </span>
+              )}
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight truncate">
+              {sample.sample_number ? `${sample.sample_number} · ` : ""}{sample.client_product_name || sample.product_name || "(no product)"}
             </h1>
+            <p className="text-sm text-white/80 mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-medium text-white">{sample.client_name}</span>
+              {sample.quantity && (
+                <>
+                  <span className="text-white/40">·</span>
+                  <span>{sample.quantity}</span>
+                </>
+              )}
+            </p>
           </div>
-          <p className="text-sm text-gray-500 ml-9">
-            {sample.client_name}
-            {sample.quantity ? ` · ${sample.quantity}` : ""}
-            {" · "}
-            <StatusBadge status={sample.status} />
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <AISummaryButton
-            variant="button"
-            title={`Sample ${sample.sample_number || ""} — AI Summary`.trim()}
-            prompt={`Give a focused summary of this sample request for ${sample.client_name || "this client"}: ${sample.product_name || ""} (${sample.quantity || "qty TBD"}). Call get_samples with client_name="${sample.client_name || ""}" to fetch all of this client's samples for context. Include: current status (${sample.status}), what's been done so far, what's pending, any documents already prepared (COA/MSDS), dispatch & delivery state, and the very next action the executive should take. Keep it tight — no filler.`}
-            clientId={sample.client}
-          />
-          {/* Reply to Client */}
-          {sample.source_communication && (
-            <button
-              onClick={() => router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`)}
-              className={`px-4 py-2 text-white text-sm font-medium rounded-lg ${
-                sample.replied_at
-                  ? "bg-indigo-500 hover:bg-indigo-600"
-                  : "bg-indigo-600 hover:bg-indigo-700 ring-2 ring-indigo-200"
-              }`}
-              title="Open the AI Draft for this email"
-            >
-              {sample.replied_at ? "↻ Reply Again" : "💬 Reply to Client"}
-            </button>
-          )}
-          {/* Notify Client about dispatch — shows when dispatched but email not sent */}
-          {sample.status === "dispatched" && !sample.dispatch_notified_at && sample.source_communication && (
-            <button
-              onClick={() => {
-                const params = new URLSearchParams();
-                params.set("openDraftFor", sample.source_communication);
-                params.set("dispatchSampleId", sample.id);
-                router.push(`/clients/${sample.client}?${params.toString()}`);
-              }}
-              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 ring-2 ring-green-200 animate-pulse"
-              title="Client has NOT been notified about this dispatch — click to send notification email"
-            >
-              📧 Notify Client of Dispatch
-            </button>
-          )}
-          {/* Revert — walks one step backwards through the workflow.
-              Restricted to admin/manager only. Executives don't see this
-              button at all; the backend also enforces the same rule and
-              notifies admin/manager if an executive somehow triggers it. */}
-          {canRevert && sample.status !== "requested" && (
-            <button
-              onClick={() => setShowRevertModal(true)}
-              className="px-4 py-2 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100"
-              title="Revert to previous step"
-            >
-              ↶ Revert
-            </button>
-          )}
-          {nextAction && (
-            <button
-              onClick={() => {
-                // Guard: all products must be checked before marking Prepared
-                if (nextAction.target === "prepared" && !allItemsChecked) {
-                  toast.error("Please check all products in the Requested Products list before marking as Prepared");
-                  return;
-                }
-                if (nextAction.openFeedback) setShowFeedbackModal(true);
-                else if (nextAction.needsForm) setShowDispatchModal(true);
-                else advance(nextAction.target);
-              }}
-              disabled={advancing}
-              className={`px-4 py-2 text-white text-sm font-medium rounded-lg disabled:opacity-50 ${nextAction.color}`}
-            >
-              {nextAction.label}
-            </button>
-          )}
+
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <AISummaryButton
+              variant="button"
+              title={`Sample ${sample.sample_number || ""} — AI Summary`.trim()}
+              prompt={`Give a focused summary of this sample request for ${sample.client_name || "this client"}: ${sample.product_name || ""} (${sample.quantity || "qty TBD"}). Call get_samples with client_name="${sample.client_name || ""}" to fetch all of this client's samples for context. Include: current status (${sample.status}), what's been done so far, what's pending, any documents already prepared (COA/MSDS), dispatch & delivery state, and the very next action the executive should take. Keep it tight — no filler.`}
+              clientId={sample.client}
+            />
+            {sample.source_communication && (
+              <button
+                onClick={() => router.push(`/clients/${sample.client}?openDraftFor=${sample.source_communication}`)}
+                className="px-4 py-2 bg-white/15 hover:bg-white/25 text-white text-sm font-semibold rounded-xl backdrop-blur-sm border border-white/20 transition-colors"
+                title="Open the AI Draft for this email"
+              >
+                {sample.replied_at ? "↻ Reply Again" : "💬 Reply to Client"}
+              </button>
+            )}
+            {sample.status === "dispatched" && !sample.dispatch_notified_at && sample.source_communication && (
+              <button
+                onClick={() => {
+                  const params = new URLSearchParams();
+                  params.set("openDraftFor", sample.source_communication);
+                  params.set("dispatchSampleId", sample.id);
+                  router.push(`/clients/${sample.client}?${params.toString()}`);
+                }}
+                className="px-4 py-2 bg-emerald-300 text-emerald-900 text-sm font-semibold rounded-xl shadow-sm hover:shadow animate-pulse"
+                title="Client has NOT been notified about this dispatch"
+              >
+                📧 Notify Dispatch
+              </button>
+            )}
+            {canRevert && sample.status !== "requested" && (
+              <button
+                onClick={() => setShowRevertModal(true)}
+                className="px-4 py-2 bg-amber-200 text-amber-900 text-sm font-semibold rounded-xl shadow-sm hover:shadow"
+                title="Revert to previous step"
+              >
+                ↶ Revert
+              </button>
+            )}
+            {nextAction && (
+              <button
+                onClick={() => {
+                  if (nextAction.target === "prepared" && !allItemsChecked) {
+                    toast.error("Please check all products in the Requested Products list before marking as Prepared");
+                    return;
+                  }
+                  if (nextAction.openFeedback) setShowFeedbackModal(true);
+                  else if (nextAction.needsForm) setShowDispatchModal(true);
+                  else advance(nextAction.target);
+                }}
+                disabled={advancing}
+                className="px-4 py-2 bg-white text-gray-900 text-sm font-semibold rounded-xl shadow-sm hover:shadow-md disabled:opacity-50 transition-shadow"
+              >
+                {nextAction.label}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -689,47 +714,48 @@ export default function SampleDetailPage() {
 
       {/* Details grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold mb-4 text-gray-800">Sample Information</h3>
-          <dl className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Client</dt>
-              <dd className="text-gray-700 text-right">{sample.client_name}</dd>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-5">
+            <span className="text-base">📋</span>
+            <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Sample Timeline</h3>
+          </div>
+          <ol className="relative border-l-2 border-gray-100 ml-2 space-y-4">
+            {[
+              { label: "Created",    value: sample.created_at,   tone: "bg-indigo-500", filled: !!sample.created_at },
+              { label: "Replied",    value: sample.replied_at,   tone: "bg-blue-500",   filled: !!sample.replied_at,   show: !!sample.replied_at },
+              { label: "Prepared",   value: sample.prepared_at,  tone: "bg-violet-500", filled: !!sample.prepared_at,  show: !!sample.prepared_at },
+              { label: "Dispatched", value: sample.dispatch_date,tone: "bg-emerald-500",filled: !!sample.dispatch_date,show: !!sample.dispatch_date },
+              { label: "Delivered",  value: sample.delivered_at, tone: "bg-teal-500",   filled: !!sample.delivered_at, show: !!sample.delivered_at },
+            ].filter((s) => s.show !== false).map((step, i) => (
+              <li key={i} className="ml-4">
+                <span className={`absolute -left-[7px] w-3 h-3 rounded-full border-2 border-white ${step.filled ? step.tone : "bg-gray-300"}`} />
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{step.label}</p>
+                <p className="text-sm font-semibold text-gray-900 mt-0.5">{fmtDate(step.value) || "—"}</p>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-5 pt-4 border-t border-gray-100 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Client</p>
+              <p className="text-gray-900 font-medium mt-0.5 truncate">{sample.client_name || "—"}</p>
             </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Created</dt>
-              <dd className="text-gray-700 text-right">{fmtDate(sample.created_at)}</dd>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Type</p>
+              <p className="mt-0.5">
+                <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${sample.sample_type === "paid" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                  {sample.sample_type === "paid" ? "Paid Sample" : "Free Sample"}
+                </span>
+              </p>
             </div>
-            {sample.replied_at && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Replied</dt>
-                <dd className="text-gray-700 text-right">{fmtDate(sample.replied_at)}</dd>
-              </div>
-            )}
-            {sample.prepared_at && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Prepared</dt>
-                <dd className="text-gray-700 text-right">{fmtDate(sample.prepared_at)}</dd>
-              </div>
-            )}
-            {sample.dispatch_date && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Dispatched</dt>
-                <dd className="text-gray-700 text-right">{fmtDate(sample.dispatch_date)}</dd>
-              </div>
-            )}
-            {sample.delivered_at && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Delivered</dt>
-                <dd className="text-gray-700 text-right">{fmtDate(sample.delivered_at)}</dd>
-              </div>
-            )}
-          </dl>
+          </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-gray-800">Shipping Details</h3>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🚚</span>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Shipping Details</h3>
+            </div>
             {/* Edit becomes available once the sample is Prepared (so the
                 executive can fill in tracking/courier/notes before marking
                 Dispatched). Notify Client is shown only when there's actually
@@ -802,20 +828,28 @@ export default function SampleDetailPage() {
             </div>
           ) : (
             <>
-              <dl className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Tracking #</dt>
-                  <dd className="font-medium text-gray-900 text-right">{sample.tracking_number || "—"}</dd>
+              <div className="space-y-3">
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Tracking #</p>
+                  {sample.tracking_number ? (
+                    <p className="font-mono text-sm font-bold text-gray-900">{sample.tracking_number}</p>
+                  ) : (
+                    <p className="text-xs text-gray-300 italic">Not set yet</p>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Courier</dt>
-                  <dd className="text-gray-700 text-right">{sample.courier_details || "—"}</dd>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Courier</p>
+                  {sample.courier_details ? (
+                    <p className="text-sm font-medium text-gray-800">{sample.courier_details}</p>
+                  ) : (
+                    <p className="text-xs text-gray-300 italic">Not set yet</p>
+                  )}
                 </div>
-              </dl>
+              </div>
               {regularNotes && (
                 <div className="mt-4 pt-4 border-t border-gray-100">
-                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Notes</h4>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{regularNotes}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Notes</p>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{regularNotes}</p>
                 </div>
               )}
             </>
@@ -824,11 +858,20 @@ export default function SampleDetailPage() {
       </div>
 
       {/* Documents (COA, MSDS) */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-800">Documents</h3>
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm mt-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <span className="text-base">📁</span>
+            <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Documents</h3>
+            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+              {sampleDocs.length}
+            </span>
+          </div>
           {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
-            <label className="px-3 py-1.5 text-xs font-medium rounded-lg text-gray-700 bg-gray-100 hover:bg-gray-200 cursor-pointer">
+            <label className="inline-flex items-center gap-1 px-3.5 py-1.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow cursor-pointer transition-shadow">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4-4 4m4-4v13" />
+              </svg>
               Upload
               <input type="file" className="hidden" accept=".pdf,.doc,.docx,.jpg,.png" onChange={async (e) => {
                 const f = e.target.files[0];
@@ -849,49 +892,83 @@ export default function SampleDetailPage() {
         </div>
         {sampleDocs.length > 0 ? (
           <div className="space-y-2">
-            {sampleDocs.map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-sm">
-                <a href={doc.file} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:underline text-indigo-600">
-                  <span>{doc.doc_type === "coa" ? "📋" : doc.doc_type === "msds" ? "📄" : "📎"}</span>
-                  <span className="font-medium">{doc.name}</span>
-                  <span className="text-xs text-gray-400 px-1.5 py-0.5 bg-gray-200 rounded">{doc.doc_type.toUpperCase()}</span>
-                </a>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  {doc.uploaded_by_name && <span>{doc.uploaded_by_name}</span>}
+            {sampleDocs.map((doc) => {
+              const TYPE_TONE = {
+                coa:   { bg: "bg-emerald-100 text-emerald-700", icon: "🧪" },
+                msds:  { bg: "bg-purple-100 text-purple-700",   icon: "⚗️" },
+                other: { bg: "bg-gray-100 text-gray-600",       icon: "📎" },
+              };
+              const t = TYPE_TONE[doc.doc_type] || TYPE_TONE.other;
+              return (
+                <div key={doc.id} className="group flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 hover:shadow-sm transition-all">
+                  <a href={doc.file} target="_blank" rel="noreferrer" className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0 ${t.bg}`}>{t.icon}</div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{doc.name}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-1.5">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium uppercase tracking-wide">{doc.doc_type}</span>
+                        {doc.uploaded_by_name && <><span>·</span><span>{doc.uploaded_by_name}</span></>}
+                      </p>
+                    </div>
+                  </a>
                   {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
-                    <button onClick={async () => {
-                      if (!(await confirmDialog("Delete this document?"))) return;
-                      try { await api.delete(`/samples/${id}/documents/${doc.id}/`); toast.success("Deleted"); loadSample(); } catch { toast.error("Failed to delete"); }
-                    }} className="text-red-400 hover:text-red-600">Delete</button>
+                    <button
+                      onClick={async () => {
+                        if (!(await confirmDialog("Delete this document?"))) return;
+                        try { await api.delete(`/samples/${id}/documents/${doc.id}/`); toast.success("Deleted"); loadSample(); } catch { toast.error("Failed to delete"); }
+                      }}
+                      title="Delete document"
+                      className="p-1.5 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-60 group-hover:opacity-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                      </svg>
+                    </button>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No documents yet. Create COA or MSDS to attach.</p>
+          <div className="border border-dashed border-gray-200 rounded-xl py-8 text-center text-sm text-gray-400 italic">
+            No documents yet. Create COA or MSDS to attach.
+          </div>
         )}
       </div>
 
       {/* Feedback (if recorded) */}
       {sample.feedback && (
-        <div className="mt-6 bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold mb-4 text-gray-800">Client Feedback</h3>
-          <div className="space-y-2 text-sm">
+        <div className="mt-6 bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">⭐</span>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Client Feedback</h3>
+            </div>
+            {sample.feedback.rating && (
+              <span className="inline-flex items-center gap-1 text-sm font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-0.5">
+                <span className="text-base">★</span>
+                {sample.feedback.rating}/5
+              </span>
+            )}
+          </div>
+          <div className="space-y-3">
             {sample.feedback.comments && (
-              <div>
-                <span className="text-gray-500 block text-xs">Comments</span>
-                <p className="text-gray-700">{sample.feedback.comments}</p>
+              <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Comments</p>
+                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{sample.feedback.comments}</p>
               </div>
             )}
             {sample.feedback.issues && (
-              <div>
-                <span className="text-gray-500 block text-xs">Issues</span>
-                <p className="text-gray-700">{sample.feedback.issues}</p>
+              <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-rose-600 mb-1">Issues Reported</p>
+                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{sample.feedback.issues}</p>
               </div>
             )}
             {sample.feedback.bulk_order_interest && (
-              <div className="inline-block px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold rounded-lg">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
                 Interested in bulk order
               </div>
             )}

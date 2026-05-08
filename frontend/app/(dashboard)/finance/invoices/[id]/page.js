@@ -10,8 +10,8 @@ import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
 
 function fmtDate(d) {
-  if (!d) return "\u2014";
-  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "\u2014"; }
+  if (!d) return "—";
+  try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; }
 }
 
 export default function InvoiceDetailPage() {
@@ -58,7 +58,7 @@ export default function InvoiceDetailPage() {
     <div>
       <PageHeader
         title={`${isPI ? "Proforma Invoice" : "Commercial Invoice"} - ${invoice.invoice_number}`}
-        subtitle={`${invoice.client_name} \u00b7 ${invoice.currency}`}
+        subtitle={`${invoice.client_name} · ${invoice.currency}`}
         action={
           <div className="flex gap-2">
             <button onClick={handleDownloadPDF} className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">Download PDF</button>

@@ -177,189 +177,209 @@ export default function AnalyticsPage() {
           ? viewMode === "shared" ? "Shared accounts performance" : viewMode === "combined" ? "Combined portfolio" : "Your portfolio performance"
           : "Business intelligence and reports"}
         action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={fetchData}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
-            >
-              <HiOutlineArrowPath className="w-4 h-4" />
-              Refresh
-            </button>
-          </div>
+          <button
+            onClick={fetchData}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all"
+          >
+            <HiOutlineArrowPath className="w-4 h-4" />
+            Refresh
+          </button>
         }
       />
 
-      {/* View Mode Toggle — executives with shared accounts */}
+      {/* View Mode Toggle — segmented pill control */}
       {hasShadow && (
-        <div className="flex items-center gap-2 mb-6">
-          {[
-            { key: "my", label: "My Accounts", count: data?.clients?.total || 0 },
-            { key: "shared", label: "Shared Accounts", count: ss.clients?.total || 0 },
-            { key: "combined", label: "Combined", count: (data?.clients?.total || 0) + (ss.clients?.total || 0) },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setViewMode(tab.key)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                viewMode === tab.key
-                  ? tab.key === "shared" ? "bg-amber-600 text-white" : tab.key === "combined" ? "bg-purple-600 text-white" : "bg-indigo-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              {tab.label} ({tab.count})
-            </button>
-          ))}
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-1.5 inline-flex gap-1">
+            {[
+              { key: "my",       label: "My Accounts",     icon: "👤", count: data?.clients?.total || 0 },
+              { key: "shared",   label: "Shared Accounts", icon: "🤝", count: ss.clients?.total || 0 },
+              { key: "combined", label: "Combined",        icon: "📊", count: (data?.clients?.total || 0) + (ss.clients?.total || 0) },
+            ].map((tab) => {
+              const isActive = viewMode === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setViewMode(tab.key)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-1.5 transition-all ${
+                    isActive
+                      ? "bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100"
+                      : "text-gray-500 hover:text-gray-800 hover:bg-white/60"
+                  }`}
+                >
+                  <span className="text-base leading-none">{tab.icon}</span>
+                  <span>{tab.label}</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isActive ? "bg-indigo-100 text-indigo-700" : "bg-gray-200 text-gray-600"}`}>{tab.count}</span>
+                </button>
+              );
+            })}
+          </div>
           {viewMode === "shared" && (
-            <button onClick={() => setShowShadow(true)} className="text-xs text-amber-700 hover:text-amber-800 ml-2 underline">
-              View accounts
+            <button onClick={() => setShowShadow(true)} className="text-xs font-semibold text-amber-700 hover:text-amber-800 underline underline-offset-2">
+              View shared accounts
             </button>
           )}
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-        <StatsCard
-          title={viewMode === "shared" ? "Shared Accounts" : viewMode === "combined" ? "All Accounts" : isExecutive ? "My Accounts" : "Total Clients"}
-          value={active?.clients?.total || 0}
-          icon={HiOutlineUsers}
-          color="indigo"
-        />
-        <StatsCard
-          title="Active Clients"
-          value={active?.clients?.active || 0}
-          icon={HiOutlineUserGroup}
-          color="green"
-        />
-        <StatsCard
-          title="Total Orders"
-          value={active?.orders?.total || 0}
-          icon={HiOutlineShoppingCart}
-          color="blue"
-        />
+      {/* Stat tiles — gradient cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">👤</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{viewMode === "shared" ? "Shared" : viewMode === "combined" ? "All" : isExecutive ? "My" : "Total"} Accounts</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{active?.clients?.total || 0}</p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">✓</span><span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Active Clients</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{active?.clients?.active || 0}</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📦</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">Total Orders</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{active?.orders?.total || 0}</p>
+        </div>
         {!isExecutive && (
-          <StatsCard
-            title="Revenue"
-            value={`$${Number(active?.revenue?.total || 0).toLocaleString()}`}
-            icon={HiOutlineBanknotes}
-            color="purple"
-          />
+          <div className="bg-gradient-to-br from-purple-50 to-fuchsia-50 border border-purple-100 rounded-xl p-4">
+            <div className="flex items-center gap-2"><span className="text-lg">💰</span><span className="text-[11px] font-semibold uppercase tracking-wider text-purple-700">Revenue</span></div>
+            <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">${Number(active?.revenue?.total || 0).toLocaleString()}</p>
+          </div>
         )}
-        <StatsCard
-          title="Pending Tasks"
-          value={active?.tasks?.pending || 0}
-          icon={HiOutlineClock}
-          color="yellow"
-        />
-        <StatsCard
-          title="Overdue Tasks"
-          value={active?.tasks?.overdue || 0}
-          icon={HiOutlineExclamationTriangle}
-          color="red"
-        />
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⏳</span><span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">Pending Tasks</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{active?.tasks?.pending || 0}</p>
+        </div>
+        <div className="bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⚠️</span><span className="text-[11px] font-semibold uppercase tracking-wider text-rose-700">Overdue Tasks</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{active?.tasks?.overdue || 0}</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Pipeline by Stage */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Pipeline by Stage</h2>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🔀</span>
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Pipeline by Stage</h2>
+            </div>
+            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+              {pipelineStages.length} stages
+            </span>
+          </div>
           {pipelineStages.length > 0 ? (
             <div className="space-y-4">
               {pipelineStages.map((stage, idx) => (
                 <div key={stage.stage}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-700 capitalize">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-semibold text-gray-800 capitalize tracking-tight">
                       {stage.stage.replace(/_/g, " ")}
                     </span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500">
-                        ${Number(stage.value || 0).toLocaleString()}
-                      </span>
-                      <span className="text-sm font-semibold text-gray-900">{stage.count}</span>
+                    <div className="flex items-center gap-2">
+                      {stage.value > 0 && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5 tabular-nums">
+                          ${Number(stage.value || 0).toLocaleString()}
+                        </span>
+                      )}
+                      <span className="text-sm font-bold text-gray-900 tabular-nums">{stage.count}</span>
                     </div>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-full h-3">
+                  <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                     <div
-                      className={`h-3 rounded-full ${stageColors[idx % stageColors.length]}`}
-                      style={{ width: `${(stage.count / maxStageCount) * 100}%`, minWidth: stage.count > 0 ? "12px" : "0" }}
+                      className={`h-2 rounded-full ${stageColors[idx % stageColors.length]} transition-all`}
+                      style={{ width: `${(stage.count / maxStageCount) * 100}%`, minWidth: stage.count > 0 ? "8px" : "0" }}
                     />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-8">No pipeline data available</p>
+            <div className="text-center py-10 text-gray-400">
+              <div className="text-3xl mb-2">📭</div>
+              <p className="text-sm">No pipeline data available</p>
+            </div>
           )}
         </div>
 
         {/* Clients by Country */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            {isExecutive ? "My Accounts by Country" : "Clients by Country"}
-          </h2>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🌍</span>
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-gray-700">
+                {isExecutive ? "My Accounts by Country" : "Clients by Country"}
+              </h2>
+            </div>
+            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+              Top {clientsByCountry.length}
+            </span>
+          </div>
           {clientsByCountry.length > 0 ? (
             <div className="space-y-3">
               {clientsByCountry.map((item, idx) => (
                 <div key={item.country} className="flex items-center gap-3">
-                  <span className="text-sm text-gray-700 w-28 truncate flex-shrink-0">
+                  <span className="text-xs font-semibold text-gray-700 w-28 truncate flex-shrink-0">
                     {item.country || "Unknown"}
                   </span>
-                  <div className="flex-1 bg-gray-100 rounded-full h-3">
+                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                     <div
-                      className={`h-3 rounded-full ${countryBarColors[idx % countryBarColors.length]}`}
-                      style={{ width: `${(item.count / maxCountryCount) * 100}%`, minWidth: item.count > 0 ? "12px" : "0" }}
+                      className={`h-2 rounded-full ${countryBarColors[idx % countryBarColors.length]} transition-all`}
+                      style={{ width: `${(item.count / maxCountryCount) * 100}%`, minWidth: item.count > 0 ? "8px" : "0" }}
                     />
                   </div>
-                  <span className="text-sm font-medium text-gray-900 w-8 text-right flex-shrink-0">
+                  <span className="text-sm font-bold text-gray-900 w-8 text-right flex-shrink-0 tabular-nums">
                     {item.count}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-8">No country data available</p>
+            <div className="text-center py-10 text-gray-400">
+              <div className="text-3xl mb-2">🗺️</div>
+              <p className="text-sm">No country data available</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Key Metrics */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Key Metrics</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="bg-purple-50 rounded-lg p-4">
+      {/* Key Metrics — gradient tiles to match top */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="text-base">⭐</span>
+          <h2 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Key Metrics</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-gradient-to-br from-purple-50 to-fuchsia-50 border border-purple-100 rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <HiOutlineFunnel className="w-5 h-5 text-purple-600" />
+              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-purple-700 shrink-0">
+                <HiOutlineFunnel className="w-5 h-5" />
               </div>
-              <div>
-                <p className="text-sm text-purple-600 font-medium">Active Inquiries</p>
-                <p className="text-2xl font-bold text-purple-900">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-purple-700">Active Inquiries</p>
+                <p className="text-2xl font-bold text-gray-900 leading-none mt-1">
                   {active?.pipeline?.active_inquiries || 0}
                 </p>
               </div>
             </div>
           </div>
-          <div className="bg-yellow-50 rounded-lg p-4">
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-100 rounded-lg">
-                <HiOutlineClock className="w-5 h-5 text-yellow-600" />
+              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                <HiOutlineClock className="w-5 h-5" />
               </div>
-              <div>
-                <p className="text-sm text-yellow-600 font-medium">Pending Approvals</p>
-                <p className="text-2xl font-bold text-yellow-900">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">Pending Approvals</p>
+                <p className="text-2xl font-bold text-gray-900 leading-none mt-1">
                   {active?.pipeline?.pending_approvals || 0}
                 </p>
               </div>
             </div>
           </div>
-          <div className="bg-green-50 rounded-lg p-4">
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <HiOutlineCheckCircle className="w-5 h-5 text-green-600" />
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                <HiOutlineCheckCircle className="w-5 h-5" />
               </div>
-              <div>
-                <p className="text-sm text-green-600 font-medium">Active Orders</p>
-                <p className="text-2xl font-bold text-green-900">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Active Orders</p>
+                <p className="text-2xl font-bold text-gray-900 leading-none mt-1">
                   {active?.orders?.active || 0}
                 </p>
               </div>

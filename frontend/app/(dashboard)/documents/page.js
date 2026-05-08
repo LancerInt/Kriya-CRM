@@ -232,31 +232,78 @@ export default function DocumentsPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Documents</h1>
-          <p className="text-sm text-gray-500">{folders.length} folder{folders.length !== 1 ? "s" : ""} · {files.length} file{files.length !== 1 ? "s" : ""}</p>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Documents</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            <span className="font-semibold text-gray-700">{folders.length}</span> folder{folders.length !== 1 ? "s" : ""}
+            <span className="mx-1.5 text-gray-300">·</span>
+            <span className="font-semibold text-gray-700">{files.length}</span> file{files.length !== 1 ? "s" : ""}
+            {currentFolder && breadcrumbs.length > 0 && (
+              <>
+                <span className="mx-1.5 text-gray-300">·</span>
+                in <span className="font-medium text-gray-700">{breadcrumbs[breadcrumbs.length - 1]?.name}</span>
+              </>
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowNewFolder(true)} className="px-3 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 flex items-center gap-1">📁 New Folder</button>
-          <button onClick={() => setShowUpload(true)} className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 flex items-center gap-1">⬆ Upload</button>
+          <button onClick={() => setShowNewFolder(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-gray-200 bg-white text-gray-700 text-sm font-medium rounded-xl hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New Folder
+          </button>
+          <button onClick={() => setShowUpload(true)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4-4 4m4-4v13" />
+            </svg>
+            Upload
+          </button>
         </div>
       </div>
 
-      {/* Breadcrumbs */}
-      <div className="flex items-center gap-1 mb-4 text-sm">
-        <button onClick={() => navigateToBreadcrumb(-1)} className={`px-2 py-1 rounded hover:bg-gray-100 ${!currentFolder ? "font-semibold text-indigo-600" : "text-gray-500"}`}>📁 Root</button>
+      {/* Breadcrumbs — chevron-separated chip style */}
+      <nav className="flex flex-wrap items-center gap-1 mb-4 text-sm bg-white border border-gray-200 rounded-xl px-3 py-2">
+        <button
+          onClick={() => navigateToBreadcrumb(-1)}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${!currentFolder ? "bg-indigo-50 text-indigo-700 border border-indigo-100" : "text-gray-600 hover:bg-gray-50"}`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          Root
+        </button>
         {breadcrumbs.map((b, i) => (
           <span key={b.id} className="flex items-center gap-1">
-            <span className="text-gray-300">/</span>
-            <button onClick={() => navigateToBreadcrumb(i)} className={`px-2 py-1 rounded hover:bg-gray-100 ${i === breadcrumbs.length - 1 ? "font-semibold text-indigo-600" : "text-gray-500"}`}>{b.name}</button>
+            <svg className="w-3 h-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+            <button
+              onClick={() => navigateToBreadcrumb(i)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${i === breadcrumbs.length - 1 ? "bg-indigo-50 text-indigo-700 border border-indigo-100" : "text-gray-600 hover:bg-gray-50"}`}
+            >
+              {b.name}
+            </button>
           </span>
         ))}
-      </div>
+      </nav>
 
       {/* Search */}
-      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search all files across all folders..." className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 mb-4" />
-      {isSearching && <p className="text-xs text-gray-400 mb-3">Showing {filteredFiles.length} result{filteredFiles.length !== 1 ? "s" : ""} for "{search}"</p>}
+      <div className="relative mb-4 max-w-md">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.5 10.5a6 6 0 11-12 0 6 6 0 0112 0z" />
+        </svg>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search all files across all folders..."
+          className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 bg-white"
+        />
+      </div>
+      {isSearching && (
+        <p className="text-xs text-gray-500 mb-3">
+          Showing <span className="font-semibold text-gray-700">{filteredFiles.length}</span> result{filteredFiles.length !== 1 ? "s" : ""} for <span className="font-semibold text-indigo-600">"{search}"</span>
+        </p>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
@@ -265,37 +312,64 @@ export default function DocumentsPage() {
           {/* Folders */}
           {filteredFolders.length > 0 && (
             <div className="mb-6">
-              <p className="text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Folders</p>
+              <p className="text-[11px] text-gray-500 font-bold mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                Folders ({filteredFolders.length})
+              </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {filteredFolders.map(f => {
                   const canManage = isAdminOrManager || f.created_by === currentUser?.id;
                   const isPublic = f.visibility === "public";
                   return (
-                  <div key={f.id} onDoubleClick={() => navigateToFolder(f)} className="group bg-white border border-gray-200 rounded-xl p-4 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors relative">
-                    {/* Visibility badge — always visible (small pill in top-left corner) */}
+                  <div
+                    key={f.id}
+                    onDoubleClick={() => navigateToFolder(f)}
+                    onClick={() => navigateToFolder(f)}
+                    className="group relative bg-white border border-gray-200 rounded-2xl p-4 cursor-pointer hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5 transition-all"
+                    title="Click to open"
+                  >
+                    {/* Visibility chip */}
                     <span
-                      className={`absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold rounded-full ${
+                      className={`absolute top-2.5 left-2.5 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${
                         isPublic
-                          ? "bg-green-100 text-green-700 border border-green-200"
-                          : "bg-gray-100 text-gray-600 border border-gray-200"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-gray-100 text-gray-600 border-gray-200"
                       }`}
                       title={isPublic ? "Visible to everyone" : "Visible to you + admin/manager"}
                     >
-                      {isPublic ? "🌐 PUBLIC" : "🔒 PRIVATE"}
-                    </span>
-                    <div className="text-center">
-                      <span className="text-4xl">📁</span>
-                      {renaming === `folder-${f.id}` ? (
-                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)} onBlur={() => handleRename(f.id, "folder")} onKeyDown={e => { if (e.key === "Enter") handleRename(f.id, "folder"); if (e.key === "Escape") setRenaming(null); }} autoFocus className="w-full text-center text-sm mt-1 border border-indigo-300 rounded px-1 outline-none" />
+                      {isPublic ? (
+                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       ) : (
-                        <p className="text-sm font-medium text-gray-800 mt-1 truncate">{f.name}</p>
+                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                       )}
-                      <p className="text-[10px] text-gray-400">{f.file_count} file{f.file_count !== 1 ? "s" : ""} · {f.subfolder_count} folder{f.subfolder_count !== 1 ? "s" : ""}</p>
-                      {f.created_by_name && <p className="text-[10px] text-gray-400 mt-0.5">by {f.created_by_name}</p>}
+                      {isPublic ? "PUBLIC" : "PRIVATE"}
+                    </span>
+                    <div className="text-center pt-3">
+                      <div className="text-5xl mb-1.5 transition-transform group-hover:scale-110">📁</div>
+                      {renaming === `folder-${f.id}` ? (
+                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)} onBlur={() => handleRename(f.id, "folder")} onKeyDown={e => { if (e.key === "Enter") handleRename(f.id, "folder"); if (e.key === "Escape") setRenaming(null); }} autoFocus onClick={(e) => e.stopPropagation()} className="w-full text-center text-sm mt-1 border border-indigo-300 rounded-md px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-indigo-500" />
+                      ) : (
+                        <p className="text-sm font-bold text-gray-900 truncate" title={f.name}>{f.name}</p>
+                      )}
+                      <div className="flex items-center justify-center gap-1 mt-1.5">
+                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5">
+                          {f.file_count} {f.file_count === 1 ? "file" : "files"}
+                        </span>
+                        {f.subfolder_count > 0 && (
+                          <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-100 rounded-full px-1.5 py-0.5">
+                            {f.subfolder_count} {f.subfolder_count === 1 ? "subfolder" : "subfolders"}
+                          </span>
+                        )}
+                      </div>
+                      {f.created_by_name && <p className="text-[10px] text-gray-400 mt-1.5">by {f.created_by_name}</p>}
                     </div>
-                    <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); setRenaming(`folder-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200" title="Rename">✏️</button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }} className="w-6 h-6 bg-red-50 rounded text-[10px] hover:bg-red-100" title="Delete">🗑️</button>
+                    <div className="absolute top-2.5 right-2.5 hidden group-hover:flex gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); setRenaming(`folder-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-white border border-gray-200 rounded-md hover:bg-indigo-50 hover:border-indigo-200 flex items-center justify-center text-gray-500 hover:text-indigo-600 shadow-sm" title="Rename">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }} className="w-6 h-6 bg-white border border-gray-200 rounded-md hover:bg-rose-50 hover:border-rose-200 flex items-center justify-center text-gray-500 hover:text-rose-600 shadow-sm" title="Delete">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" /></svg>
+                      </button>
                       {canManage && (
                         <div className="relative" data-visibility-menu>
                           <button
@@ -339,45 +413,84 @@ export default function DocumentsPage() {
           {/* Files */}
           {filteredFiles.length > 0 && (
             <div>
-              <p className="text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Files</p>
+              <p className="text-[11px] text-gray-500 font-bold mb-2.5 uppercase tracking-wider flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                Files ({filteredFiles.length})
+              </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {filteredFiles.map(f => {
                   const canManage = isAdminOrManager || f.uploaded_by === currentUser?.id;
                   const isPublic = f.visibility === "public";
+                  const fname = f.filename || f.name || "";
+                  const ext = (fname.split(".").pop() || "").toLowerCase();
+                  const fileImg = isImage(fname) && f.file;
                   return (
-                  <div key={f.id} onClick={() => openPreview(f)} className="group bg-white border border-gray-200 rounded-xl p-4 hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors relative cursor-pointer">
-                    {/* Visibility badge */}
+                  <div
+                    key={f.id}
+                    onClick={() => openPreview(f)}
+                    className="group relative bg-white border border-gray-200 rounded-2xl overflow-hidden hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer flex flex-col"
+                  >
+                    {/* Visibility chip */}
                     <span
-                      className={`absolute top-2 left-2 px-1.5 py-0.5 text-[9px] font-bold rounded-full z-10 ${
+                      className={`absolute top-2.5 left-2.5 z-10 inline-flex items-center justify-center w-5 h-5 rounded-full border ${
                         isPublic
-                          ? "bg-green-100 text-green-700 border border-green-200"
-                          : "bg-gray-100 text-gray-600 border border-gray-200"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-gray-100 text-gray-600 border-gray-200"
                       }`}
                       title={isPublic ? "Visible to everyone" : "Visible to you + admin/manager"}
                     >
-                      {isPublic ? "🌐" : "🔒"}
+                      {isPublic ? (
+                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      ) : (
+                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                      )}
                     </span>
-                    <div className="text-center">
-                      {isImage(f.filename || f.name) && f.file ? (
-                        <div className="w-full h-20 mb-1 flex items-center justify-center overflow-hidden rounded-lg bg-gray-50">
-                          <img src={f.file.startsWith("http") ? f.file : BACKEND + f.file} alt={f.name} className="max-h-20 max-w-full object-contain" />
+
+                    {/* Preview area */}
+                    <div className={`aspect-[4/3] flex items-center justify-center border-b border-gray-100 ${fileImg ? "bg-gray-50" : "bg-gradient-to-br from-gray-50 to-slate-100"}`}>
+                      {fileImg ? (
+                        <img src={f.file.startsWith("http") ? f.file : BACKEND + f.file} alt={f.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5 text-gray-500">
+                          <span className="text-4xl">{getIcon(fname)}</span>
+                          <span className="text-[9px] uppercase tracking-widest font-bold">{ext || "FILE"}</span>
                         </div>
-                      ) : (
-                        <span className="text-4xl">{getIcon(f.filename || f.name)}</span>
                       )}
-                      {renaming === `file-${f.id}` ? (
-                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)} onBlur={() => handleRename(f.id, "file")} onKeyDown={e => { if (e.key === "Enter") handleRename(f.id, "file"); if (e.key === "Escape") setRenaming(null); }} autoFocus className="w-full text-center text-sm mt-1 border border-indigo-300 rounded px-1 outline-none" />
-                      ) : (
-                        <p className="text-sm font-medium text-gray-800 mt-1 truncate" title={f.name}>{f.name}</p>
-                      )}
-                      <p className="text-[10px] text-gray-400">{fmtSize(f.file_size)}{isSearching && f.folder_name ? ` · 📁 ${f.folder_name}` : ""}</p>
-                      <p className="text-[10px] text-gray-400">{f.created_at ? format(new Date(f.created_at), "MMM d, yyyy") : ""}</p>
-                      {f.uploaded_by_name && <p className="text-[10px] text-gray-400">by {f.uploaded_by_name}</p>}
                     </div>
-                    <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
-                      {f.file && <a href={f.file} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="w-6 h-6 bg-indigo-50 rounded text-[10px] hover:bg-indigo-100 flex items-center justify-center" title="Download">⬇</a>}
-                      <button onClick={(e) => { e.stopPropagation(); setRenaming(`file-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-gray-100 rounded text-[10px] hover:bg-gray-200" title="Rename">✏️</button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteFile(f.id); }} className="w-6 h-6 bg-red-50 rounded text-[10px] hover:bg-red-100" title="Delete">🗑️</button>
+
+                    {/* Footer */}
+                    <div className="p-2.5 flex flex-col gap-0.5">
+                      {renaming === `file-${f.id}` ? (
+                        <input value={renameVal} onChange={e => setRenameVal(e.target.value)} onBlur={() => handleRename(f.id, "file")} onKeyDown={e => { if (e.key === "Enter") handleRename(f.id, "file"); if (e.key === "Escape") setRenaming(null); }} autoFocus onClick={(e) => e.stopPropagation()} className="w-full text-center text-sm border border-indigo-300 rounded-md px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-indigo-500" />
+                      ) : (
+                        <p className="text-xs font-bold text-gray-900 truncate" title={f.name}>{f.name}</p>
+                      )}
+                      <p className="text-[10px] text-gray-500 truncate">
+                        <span className="font-semibold text-gray-600">{fmtSize(f.file_size) || "—"}</span>
+                        {f.created_at && <><span className="mx-1 text-gray-300">·</span>{format(new Date(f.created_at), "MMM d, yyyy")}</>}
+                      </p>
+                      {isSearching && f.folder_name && (
+                        <p className="text-[10px] text-indigo-600 truncate flex items-center gap-1">
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                          {f.folder_name}
+                        </p>
+                      )}
+                      {f.uploaded_by_name && <p className="text-[10px] text-gray-400 truncate">by {f.uploaded_by_name}</p>}
+                    </div>
+
+                    {/* Hover actions */}
+                    <div className="absolute top-2.5 right-2.5 hidden group-hover:flex gap-1">
+                      {f.file && (
+                        <a href={f.file} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="w-6 h-6 bg-white border border-gray-200 rounded-md hover:bg-indigo-50 hover:border-indigo-200 flex items-center justify-center text-gray-500 hover:text-indigo-600 shadow-sm" title="Download">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
+                        </a>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); setRenaming(`file-${f.id}`); setRenameVal(f.name); }} className="w-6 h-6 bg-white border border-gray-200 rounded-md hover:bg-indigo-50 hover:border-indigo-200 flex items-center justify-center text-gray-500 hover:text-indigo-600 shadow-sm" title="Rename">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteFile(f.id); }} className="w-6 h-6 bg-white border border-gray-200 rounded-md hover:bg-rose-50 hover:border-rose-200 flex items-center justify-center text-gray-500 hover:text-rose-600 shadow-sm" title="Delete">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" /></svg>
+                      </button>
                       {canManage && (
                         <div className="relative" data-visibility-menu>
                           <button
@@ -419,10 +532,14 @@ export default function DocumentsPage() {
           )}
 
           {filteredFolders.length === 0 && filteredFiles.length === 0 && (
-            <div className="text-center py-16">
-              <span className="text-5xl mb-4 block">📂</span>
-              <p className="text-gray-500 font-medium">This folder is empty</p>
-              <p className="text-sm text-gray-400 mt-1">Drag & drop files here, paste, or click Upload</p>
+            <div className="bg-white border-2 border-dashed border-gray-200 rounded-2xl p-16 text-center">
+              <div className="text-5xl mb-4">{isSearching ? "🔍" : "📂"}</div>
+              <p className="text-gray-700 font-semibold text-base">
+                {isSearching ? "No files match your search" : "This folder is empty"}
+              </p>
+              <p className="text-sm text-gray-500 mt-1.5 max-w-md mx-auto">
+                {isSearching ? "Try a different keyword or clear the search to browse." : "Drag & drop files here, paste an image, or click Upload."}
+              </p>
             </div>
           )}
         </div>

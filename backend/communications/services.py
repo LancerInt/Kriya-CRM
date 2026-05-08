@@ -381,7 +381,12 @@ class EmailService:
             logger.error(f'SMTP send failed: {e}')
             raise
 
-    # Folders to scan — covers Gmail, Outlook, and standard IMAP names
+    # Folders to scan — covers Gmail, Outlook, and standard IMAP names.
+    # NOTE: For Gmail, [Gmail]/All Mail is the archive folder where every
+    # message lives once it leaves the Inbox; without it, historical pulls
+    # only see currently-active threads and miss archived history. We scan
+    # All Mail LAST and rely on Message-ID dedup to skip already-imported
+    # mails that also appear in Inbox/Sent.
     FOLDER_MAP = [
         ('INBOX', 'inbound'),
         ('[Gmail]/Sent Mail', 'outbound'),
@@ -390,6 +395,9 @@ class EmailService:
         ('Sent Items', 'outbound'),
         ('Junk', 'inbound'),
         ('Spam', 'inbound'),
+        ('[Gmail]/All Mail', 'inbound'),  # Gmail archive — direction inferred from sender
+        ('Archive', 'inbound'),            # Outlook / standard IMAP archive
+        ('All Mail', 'inbound'),           # provider variations
     ]
 
     @staticmethod
@@ -425,10 +433,16 @@ class EmailService:
                 name = decoded.rsplit(' ', 1)[-1].strip('"')
                 available_folders.add(name)
 
+            # Per-folder cap. The default (delta) sync only needs a small
+            # window since it runs every 5 min. Historical pulls must NOT
+            # be capped — IMAP returns IDs in ascending order, so a small
+            # cap silently truncates the OLDEST emails (worst-case for a
+            # backfill). Bump to 100k which covers 10+ years of even
+            # heavy inboxes; the SINCE filter is the actual gate.
             per_folder_limit = max(max_count // 3, 20)
-            # For historical pulls, increase the per-folder limit
-            if days_back and days_back > 30:
-                per_folder_limit = max(max_count, 500)
+            historical = bool(days_back and days_back > 30)
+            if historical:
+                per_folder_limit = 100000
 
             for folder_name, default_direction in EmailService.FOLDER_MAP:
                 status, _ = mail.select(f'"{folder_name}"', readonly=True)
@@ -450,7 +464,10 @@ class EmailService:
                     _, message_ids = mail.search(None, f'(SINCE {since})')
 
                 ids = message_ids[0].split()
-                for msg_id in ids[-per_folder_limit:]:
+                if historical:
+                    logger.info(f'  → {folder_name}: IMAP SINCE returned {len(ids)} IDs (no cap, fetching all)')
+                pick = ids if historical else ids[-per_folder_limit:]
+                for msg_id in pick:
                     _, msg_data = mail.fetch(msg_id, '(RFC822)')
                     if msg_data[0] is None:
                         continue

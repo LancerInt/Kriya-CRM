@@ -113,98 +113,195 @@ export default function RecycleBinPage() {
   const types = ["all", ...new Set(items.map((i) => i.type))];
   const filtered = filter === "all" ? items : items.filter((i) => i.type === filter);
 
+  // Stats for the hero tiles
+  const expiringSoon = items.filter((i) => computePurge(i.deleted_at).daysLeft <= 5).length;
+  const recentCount = items.filter((i) => {
+    if (!i.deleted_at) return false;
+    return (Date.now() - new Date(i.deleted_at).getTime()) < 24 * 60 * 60 * 1000;
+  }).length;
+
+  const TYPE_TONES = {
+    all: { iconBg: "from-indigo-500 to-violet-500", soft: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+    email: { iconBg: "from-blue-500 to-blue-600", soft: "bg-blue-50 text-blue-700 ring-blue-200" },
+    inquiry: { iconBg: "from-purple-500 to-purple-600", soft: "bg-purple-50 text-purple-700 ring-purple-200" },
+    account: { iconBg: "from-emerald-500 to-emerald-600", soft: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+    quotation: { iconBg: "from-amber-500 to-amber-600", soft: "bg-amber-50 text-amber-700 ring-amber-200" },
+    order: { iconBg: "from-rose-500 to-rose-600", soft: "bg-rose-50 text-rose-700 ring-rose-200" },
+    invoice: { iconBg: "from-teal-500 to-teal-600", soft: "bg-teal-50 text-teal-700 ring-teal-200" },
+  };
+  const toneFor = (t) => TYPE_TONES[t?.toLowerCase()] || { iconBg: "from-slate-400 to-slate-500", soft: "bg-slate-100 text-slate-600 ring-slate-200" };
+
   return (
-    <div>
-      <PageHeader
-        title="Archive"
-        subtitle={`${items.length} archived item${items.length !== 1 ? "s" : ""}`}
-        action={
-          isAdminOrManager && items.length > 0 ? (
-            <button onClick={handleEmptyAll} className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700">
+    <div className="space-y-5">
+      {/* Hero Header */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-6 shadow-xl">
+        <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-violet-300/20 rounded-full blur-2xl" />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center ring-1 ring-white/30 shadow-lg">
+              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-white tracking-tight">Archive</h1>
+              <p className="text-indigo-100 text-sm mt-0.5">Restore or permanently remove deleted items \u00b7 30 day retention</p>
+            </div>
+          </div>
+          {isAdminOrManager && items.length > 0 && (
+            <button onClick={handleEmptyAll} className="flex items-center gap-1.5 px-4 py-2 bg-white/15 hover:bg-white/25 backdrop-blur text-white text-sm font-semibold rounded-xl ring-1 ring-white/30 transition-all shadow-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
               Empty Archive
             </button>
-          ) : null
-        }
-      />
+          )}
+        </div>
+      </div>
 
+      {/* Stat Tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-indigo-100">Total Archived</p>
+          <p className="relative text-3xl font-extrabold mt-1">{items.length}</p>
+          <p className="relative text-[11px] text-indigo-100 mt-0.5">items in archive</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-amber-50">Expiring Soon</p>
+          <p className="relative text-3xl font-extrabold mt-1">{expiringSoon}</p>
+          <p className="relative text-[11px] text-amber-50 mt-0.5">\u2264 5 days remaining</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-emerald-50">Archived Today</p>
+          <p className="relative text-3xl font-extrabold mt-1">{recentCount}</p>
+          <p className="relative text-[11px] text-emerald-50 mt-0.5">in last 24 hours</p>
+        </div>
+      </div>
+
+      {/* Filter Pills */}
       {items.length > 0 && (
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {types.map((t) => (
-            <button
-              key={t}
-              onClick={() => setFilter(t)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg ${
-                filter === t ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              {t === "all" ? "All" : t} {t !== "all" ? `(${items.filter((i) => i.type === t).length})` : ""}
-            </button>
-          ))}
+        <div className="flex gap-2 flex-wrap p-1.5 bg-white rounded-2xl border border-slate-200/70 shadow-sm w-fit">
+          {types.map((t) => {
+            const isActive = filter === t;
+            const count = t === "all" ? items.length : items.filter((i) => i.type === t).length;
+            return (
+              <button
+                key={t}
+                onClick={() => setFilter(t)}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all ${
+                  isActive
+                    ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <span className="capitalize">{t === "all" ? "All" : t}</span>
+                <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{count}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {loading ? (
-        <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
+        <div className="flex justify-center py-16">
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-400 to-violet-500 rounded-full blur-xl opacity-40" />
+            <div className="relative animate-spin rounded-full h-10 w-10 border-[3px] border-indigo-200 border-t-indigo-600" />
+          </div>
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-          <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-          <p className="text-gray-500 font-medium">Archive is empty</p>
-          <p className="text-sm text-gray-400 mt-1">Archived items will appear here for 30 days before permanent removal</p>
+        <div className="text-center py-20 bg-white rounded-3xl border border-slate-200/70 shadow-sm">
+          <div className="inline-flex w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-100 to-violet-100 items-center justify-center mb-4 shadow-inner">
+            <svg className="w-10 h-10 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </div>
+          <p className="text-slate-700 font-bold text-lg">Archive is empty</p>
+          <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Deleted items will appear here for 30 days before being permanently removed.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Type</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Deleted</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-700">Auto-purge in</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-700">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((item) => (
-                <tr key={`${item.model}-${item.id}`} className="hover:bg-gray-50 cursor-pointer" onClick={() => handlePreview(item)}>
-                  <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
-                  <td className="px-4 py-3"><StatusBadge status={item.type.toLowerCase()} /></td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {item.deleted_at ? format(new Date(item.deleted_at), "MMM d, yyyy h:mm a") : "\u2014"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const { label, daysLeft } = computePurge(item.deleted_at);
-                      const tone = daysLeft <= 5 ? "bg-red-50 text-red-700"
-                        : daysLeft <= 15 ? "bg-amber-50 text-amber-700"
-                        : "bg-gray-100 text-gray-600";
-                      return (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${tone}`} title={item.deleted_at ? `Deleted ${format(new Date(item.deleted_at), "MMM d, yyyy h:mm a")}` : ""}>
-                          {label}
-                        </span>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleRestore(item)}
-                        disabled={restoring === item.id}
-                        className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 disabled:opacity-50"
-                      >
-                        {restoring === item.id ? "Restoring..." : "Restore"}
-                      </button>
-                      <button
-                        onClick={() => handlePurge(item)}
-                        className="px-3 py-1 text-xs font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100"
-                      >
-                        Delete Forever
-                      </button>
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          {/* Header */}
+          <div className="hidden md:grid grid-cols-[2.5fr_1fr_1.3fr_1fr_1.4fr] gap-4 px-5 py-3 bg-gradient-to-r from-slate-50 to-slate-50/40 border-b border-slate-200/70 text-[10px] font-bold text-slate-500 uppercase tracking-[0.12em]">
+            <div>Name</div>
+            <div>Type</div>
+            <div>Deleted</div>
+            <div>Auto-purge in</div>
+            <div className="text-right">Actions</div>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {filtered.map((item) => {
+              const { label, daysLeft } = computePurge(item.deleted_at);
+              const purgeTone = daysLeft <= 5 ? "bg-rose-50 text-rose-700 ring-rose-200"
+                : daysLeft <= 15 ? "bg-amber-50 text-amber-700 ring-amber-200"
+                : "bg-slate-50 text-slate-600 ring-slate-200";
+              const stripeTone = daysLeft <= 5 ? "from-rose-500 to-rose-400"
+                : daysLeft <= 15 ? "from-amber-500 to-amber-400"
+                : "from-indigo-500 to-violet-500";
+              const tone = toneFor(item.type);
+              return (
+                <div
+                  key={`${item.model}-${item.id}`}
+                  onClick={() => handlePreview(item)}
+                  className="group relative grid grid-cols-1 md:grid-cols-[2.5fr_1fr_1.3fr_1fr_1.4fr] gap-3 md:gap-4 px-5 py-3.5 hover:bg-slate-50/60 cursor-pointer transition-colors items-center"
+                >
+                  <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r bg-gradient-to-b ${stripeTone} opacity-0 group-hover:opacity-100 transition-opacity`} />
+
+                  {/* Name */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br ${tone.iconBg} flex items-center justify-center shadow-sm`}>
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800 text-sm truncate group-hover:text-indigo-700 transition-colors">{item.name}</p>
+                      <p className="text-[11px] text-slate-400 md:hidden mt-0.5 capitalize">{item.type}</p>
+                    </div>
+                  </div>
+
+                  {/* Type */}
+                  <div className="hidden md:flex">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ring-1 ${tone.soft}`}>
+                      {item.type}
+                    </span>
+                  </div>
+
+                  {/* Deleted */}
+                  <div className="hidden md:flex items-center gap-1.5 text-[12px] text-slate-500">
+                    <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <span className="font-medium">{item.deleted_at ? format(new Date(item.deleted_at), "MMM d, yyyy h:mm a") : "\u2014"}</span>
+                  </div>
+
+                  {/* Auto-purge in */}
+                  <div className="hidden md:flex">
+                    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full ring-1 ${purgeTone}`} title={item.deleted_at ? `Deleted ${format(new Date(item.deleted_at), "MMM d, yyyy h:mm a")}` : ""}>
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      {label}
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleRestore(item)}
+                      disabled={restoring === item.id}
+                      className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg ring-1 ring-emerald-200/60 disabled:opacity-50 transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {restoring === item.id ? "Restoring..." : "Restore"}
+                    </button>
+                    <button
+                      onClick={() => handlePurge(item)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg ring-1 ring-rose-200/60 transition-colors"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      Delete Forever
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -284,49 +381,90 @@ export default function RecycleBinPage() {
 
       {/* Archived Senders Section */}
       {isAdminOrManager && archivedSenders.length > 0 && (
-        <div className="mt-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <h3 className="text-sm font-semibold text-gray-800">Auto-Archived Senders</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Future emails from these senders are automatically archived. Remove to stop auto-archiving.</p>
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-blue-50/60 to-indigo-50/40 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Auto-Archived Senders</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">Future emails from these senders are auto-archived. Remove to resume normal delivery.</p>
+            </div>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium text-gray-700">Sender Email</th>
-                <th className="text-left px-4 py-2 font-medium text-gray-700">Archived By</th>
-                <th className="text-left px-4 py-2 font-medium text-gray-700">Date</th>
-                <th className="text-right px-4 py-2 font-medium text-gray-700">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {archivedSenders.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-900">{s.email}</td>
-                  <td className="px-4 py-2 text-gray-500">{s.archived_by || "-"}</td>
-                  <td className="px-4 py-2 text-gray-500">{(() => { try { return format(new Date(s.created_at), "MMM d, yyyy"); } catch { return "-"; } })()}</td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => handleUnarchiveSender(s)} className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100">
-                      Unarchive Sender
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="hidden md:grid grid-cols-[2fr_1.5fr_1fr_1.2fr] gap-4 px-5 py-2.5 bg-slate-50/40 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-[0.12em]">
+            <div>Sender Email</div>
+            <div>Archived By</div>
+            <div>Date</div>
+            <div className="text-right">Action</div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {archivedSenders.map((s) => (
+              <div key={s.id} className="grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1.2fr] gap-3 md:gap-4 px-5 py-3 hover:bg-slate-50/60 transition-colors items-center">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-700 flex items-center justify-center text-xs font-bold ring-1 ring-blue-200/60">
+                    {s.email?.[0]?.toUpperCase() || "?"}
+                  </div>
+                  <p className="font-semibold text-slate-800 text-sm truncate">{s.email}</p>
+                </div>
+                <div className="text-[12px] text-slate-500 font-medium">{s.archived_by || "—"}</div>
+                <div className="text-[12px] text-slate-500">{(() => { try { return format(new Date(s.created_at), "MMM d, yyyy"); } catch { return "—"; } })()}</div>
+                <div className="flex items-center justify-end">
+                  <button onClick={() => handleUnarchiveSender(s)} className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg ring-1 ring-emerald-200/60 transition-colors">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    Unarchive
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-        <p className="font-medium">How Archive works:</p>
-        <ul className="list-disc list-inside mt-1 space-y-0.5 text-amber-700">
-          <li>Deleted items from <strong>Activities, Inquiries, Proforma Invoices, Accounts, Quotes, Sales Orders</strong> and all other modules are moved here</li>
-          <li><strong>Promotions, Spam, Social, Updates</strong> emails are <strong>auto-archived after 2 days</strong></li>
-          <li>All archived items are <strong>stored for 30 days</strong>, then permanently deleted</li>
-          <li>Click <strong>Restore</strong> to recover an item back to its original location</li>
-          <li>Click <strong>Delete Forever</strong> to permanently remove immediately</li>
-          {isAdminOrManager && <li><strong>Empty Archive</strong> permanently removes everything (admin/manager only)</li>}
-          {isAdminOrManager && <li><strong>Auto-Archived Senders</strong> shows senders whose emails are automatically archived. Click "Unarchive Sender" to stop.</li>}
-        </ul>
+      {/* How Archive Works Panel */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-50 via-orange-50/60 to-yellow-50/40 border border-amber-200/70 shadow-sm">
+        <div className="absolute -top-6 -right-6 w-32 h-32 bg-amber-200/30 rounded-full blur-2xl" />
+        <div className="relative p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-sm">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <h3 className="font-bold text-amber-900 text-sm">How Archive works</h3>
+          </div>
+          <ul className="space-y-2 text-sm text-amber-900/90 ml-1">
+            <li className="flex items-start gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span>Deleted items from <strong className="font-bold">Activities, Inquiries, Proforma Invoices, Accounts, Quotes, Sales Orders</strong> and all other modules are moved here</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span><strong className="font-bold">Promotions, Spam, Social, Updates</strong> emails are <strong className="font-bold">auto-archived after 2 days</strong></span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span>All archived items are <strong className="font-bold">stored for 30 days</strong>, then permanently deleted</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              <span>Click <strong className="font-bold text-emerald-700">Restore</strong> to recover an item back to its original location</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              <span>Click <strong className="font-bold text-rose-700">Delete Forever</strong> to permanently remove immediately</span>
+            </li>
+            {isAdminOrManager && (
+              <li className="flex items-start gap-2.5">
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                <span><strong className="font-bold">Empty Archive</strong> permanently removes everything (admin/manager only)</span>
+              </li>
+            )}
+            {isAdminOrManager && (
+              <li className="flex items-start gap-2.5">
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                <span><strong className="font-bold">Auto-Archived Senders</strong> shows senders whose emails are automatically archived. Click "Unarchive" to stop.</span>
+              </li>
+            )}
+          </ul>
+        </div>
       </div>
     </div>
   );

@@ -122,26 +122,36 @@ ${itemList ? `<ul>${itemList}</ul>` : ""}
     return `${(bytes / 1048576).toFixed(1)} MB`;
   };
 
+  const labelCls = "block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5";
+  const inputCls = "w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-transparent focus:bg-white outline-none transition-all";
+
   return (
     <Modal open={open} onClose={onClose} title="Compose Email" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">From *</label>
-          <select
-            value={form.email_account}
-            onChange={(e) => setForm({ ...form, email_account: e.target.value })}
-            required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-          >
-            <option value="">Select email account</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>{a.display_name ? `${a.display_name} <${a.email}>` : a.email}</option>
-            ))}
-          </select>
+          <label className={labelCls}>From <span className="text-rose-500">*</span></label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            </span>
+            <select
+              value={form.email_account}
+              onChange={(e) => setForm({ ...form, email_account: e.target.value })}
+              required
+              className={`${inputCls} pl-10 appearance-none bg-no-repeat bg-[right_0.75rem_center]`}
+              style={{ backgroundImage: "url(\"data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\")" }}
+            >
+              <option value="">Select email account</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.display_name ? `${a.display_name} <${a.email}>` : a.email}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">To *</label>
+            <label className={labelCls}>To <span className="text-rose-500">*</span></label>
             <EmailChips
               value={form.to}
               onChange={(val) => setForm({ ...form, to: val })}
@@ -149,7 +159,7 @@ ${itemList ? `<ul>${itemList}</ul>` : ""}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">CC</label>
+            <label className={labelCls}>CC</label>
             <EmailChips
               value={form.cc}
               onChange={(val) => setForm({ ...form, cc: val })}
@@ -157,54 +167,67 @@ ${itemList ? `<ul>${itemList}</ul>` : ""}
             />
           </div>
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Subject *</label>
+          <label className={labelCls}>Subject <span className="text-rose-500">*</span></label>
           <input
             value={form.subject}
             onChange={(e) => setForm({ ...form, subject: e.target.value })}
+            placeholder="What's this email about?"
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            className={inputCls}
           />
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Body *</label>
-          <RichTextEditor
-            value={form.body}
-            onChange={(val) => setForm({ ...form, body: val })}
-            placeholder="Compose your email..."
-            minHeight="150px"
-          />
+          <label className={labelCls}>Body <span className="text-rose-500">*</span></label>
+          <div className="rounded-xl ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-indigo-400 transition-all overflow-hidden">
+            <RichTextEditor
+              value={form.body}
+              onChange={(val) => setForm({ ...form, body: val })}
+              placeholder="Compose your email..."
+              minHeight="150px"
+            />
+          </div>
         </div>
 
         {/* Attachments */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Attachments</label>
-          <label className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+          <label className={labelCls}>Attachments</label>
+          <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 rounded-xl text-xs font-bold text-slate-700 hover:text-indigo-700 cursor-pointer transition-all">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
             Attach Files
             <input type="file" multiple onChange={handleAddFiles} className="hidden" />
           </label>
           {attachments.length > 0 && (
-            <div className="mt-2 space-y-1">
+            <div className="mt-2.5 space-y-1.5">
               {attachments.map((file, i) => (
-                <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    <span className="text-sm truncate">{file.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">({formatSize(file.size)})</span>
+                <div key={i} className="group flex items-center justify-between bg-gradient-to-r from-indigo-50/60 to-violet-50/40 border border-indigo-200/60 rounded-xl px-3 py-2 hover:shadow-sm transition-all">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-sm">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{file.name}</p>
+                      <p className="text-[10px] font-semibold text-slate-500">{formatSize(file.size)}</p>
+                    </div>
                   </div>
-                  <button type="button" onClick={() => handleRemoveFile(i)} className="text-red-500 hover:text-red-700 text-xs font-medium ml-2 shrink-0">Remove</button>
+                  <button type="button" onClick={() => handleRemoveFile(i)} className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg ring-1 ring-rose-200/60 ml-2 shrink-0 transition-colors">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    Remove
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        <div className="flex gap-3 pt-2">
-          <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">
+        <div className="flex gap-3 pt-3 border-t border-slate-100">
+          <button type="submit" className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-xl font-bold text-sm hover:shadow-md transition-all shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
             Send Email
           </button>
-          <button type="button" onClick={onClose} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+          <button type="button" onClick={onClose} className="px-5 py-2.5 border border-slate-200 rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-50">Cancel</button>
         </div>
       </form>
     </Modal>

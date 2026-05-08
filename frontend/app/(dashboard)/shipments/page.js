@@ -1,15 +1,24 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
 import AISummaryButton from "@/components/ai/AISummaryButton";
-import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
 import { getErrorMessage } from "@/lib/errorHandler";
+
+// Status → tone tokens. Mirrors Sales Orders so the visual language is shared.
+const SHIPMENT_TONE = {
+  pending:    { bar: "bg-slate-400",   text: "text-slate-700",   chip: "bg-slate-50 border-slate-200" },
+  packed:     { bar: "bg-amber-400",   text: "text-amber-700",   chip: "bg-amber-50 border-amber-200" },
+  dispatched: { bar: "bg-indigo-500",  text: "text-indigo-700",  chip: "bg-indigo-50 border-indigo-200" },
+  in_transit: { bar: "bg-blue-500",    text: "text-blue-700",    chip: "bg-blue-50 border-blue-200" },
+  delivered:  { bar: "bg-emerald-500", text: "text-emerald-700", chip: "bg-emerald-50 border-emerald-200" },
+};
 
 export default function ShipmentsPage() {
   const router = useRouter();
@@ -20,7 +29,7 @@ export default function ShipmentsPage() {
   const [orders, setOrders] = useState([]);
   const [clients, setClients] = useState([]);
   // Filters — keep them in one piece of state so "Clear" is a single reset.
-  const [filters, setFilters] = useState({ country: "", status: "", progress: "", dateFrom: "", dateTo: "" });
+  const [filters, setFilters] = useState({ country: "", status: "", progress: "", year: "" });
   const [form, setForm] = useState({
     order: "",
     client: "",
@@ -39,7 +48,7 @@ export default function ShipmentsPage() {
 
   const loadShipments = () => {
     setLoading(true);
-    api.get("/shipments/")
+    api.get("/shipments/", { params: { page_size: 5000 } })
       .then((r) => setShipments(r.data.results || r.data))
       .catch(() => toast.error("Failed to load shipments"))
       .finally(() => setLoading(false));
@@ -112,44 +121,32 @@ export default function ShipmentsPage() {
     return ORDER_STATUS_PROGRESS[row.order_status] ?? 0;
   };
 
-  const columns = [
-    { key: "order_number", label: "Order #", render: (row) => <span className="font-medium text-gray-900">{row.order_number || "—"}</span> },
-    { key: "client_name", label: "Account", render: (row) => row.client_name || "—" },
-    { key: "country", label: "Country", render: (row) => row.country || "—" },
-    { key: "port_of_loading", label: "Port of Loading", render: (row) => row.port_of_loading || "—" },
-    { key: "port_of_discharge", label: "Port of Discharge", render: (row) => row.port_of_discharge || "—" },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    {
-      key: "progress",
-      label: "Progress",
-      render: (row) => {
-        const pct = computeProgress(row);
-        const orderId = row.order_id || row.order;
-        const handleClick = (e) => {
-          e.stopPropagation();
-          if (orderId) router.push(`/orders/${orderId}`);
-        };
-        const barColor = pct >= 100 ? "bg-emerald-500" : pct >= 75 ? "bg-indigo-500" : pct >= 36 ? "bg-amber-500" : "bg-rose-400";
-        return (
-          <button onClick={handleClick} title={orderId ? "Open Sales Order" : "No linked order"} className="flex items-center gap-2 group min-w-[140px]">
-            <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-              <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
-            </div>
-            <span className="text-xs font-semibold text-gray-700 group-hover:text-indigo-600 tabular-nums">{pct}%</span>
-          </button>
-        );
-      },
-    },
-    { key: "dispatch_date", label: "Dispatch Date", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
-  ];
-
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
+
+  // Stat buckets — quick at-a-glance counts.
+  const stats = useMemo(() => {
+    const buckets = { total: shipments.length, in_transit: 0, delivered: 0, attention: 0 };
+    shipments.forEach((s) => {
+      if (s.status === "in_transit") buckets.in_transit += 1;
+      if (s.status === "delivered") buckets.delivered += 1;
+      // Past ETA + not delivered = attention
+      if (s.estimated_arrival && s.status !== "delivered") {
+        if (new Date(s.estimated_arrival) < new Date()) buckets.attention += 1;
+      }
+    });
+    return buckets;
+  }, [shipments]);
 
   // ── Filtering ─────────────────────────────────────────────────────
   // Build dropdown options from the actual shipment list so we never
   // show a value the user can't pick.
   const countryOptions = Array.from(new Set(shipments.map((s) => (s.country || "").trim()).filter(Boolean))).sort();
   const statusOptions = Array.from(new Set(shipments.map((s) => (s.status || "").trim()).filter(Boolean))).sort();
+  const yearOptions = Array.from(new Set(
+    shipments
+      .map((s) => (s.dispatch_date ? new Date(s.dispatch_date).getFullYear() : null))
+      .filter(Boolean)
+  )).sort((a, b) => b - a);
 
   const inProgressBucket = (pct) => {
     if (pct >= 100) return "complete";
@@ -162,19 +159,15 @@ export default function ShipmentsPage() {
     if (filters.country && (s.country || "") !== filters.country) return false;
     if (filters.status && (s.status || "") !== filters.status) return false;
     if (filters.progress && inProgressBucket(computeProgress(s)) !== filters.progress) return false;
-    if (filters.dateFrom && s.dispatch_date) {
-      if (new Date(s.dispatch_date) < new Date(filters.dateFrom)) return false;
+    if (filters.year) {
+      if (!s.dispatch_date) return false;
+      if (new Date(s.dispatch_date).getFullYear() !== Number(filters.year)) return false;
     }
-    if (filters.dateFrom && !s.dispatch_date) return false;
-    if (filters.dateTo && s.dispatch_date) {
-      if (new Date(s.dispatch_date) > new Date(filters.dateTo)) return false;
-    }
-    if (filters.dateTo && !s.dispatch_date) return false;
     return true;
   });
 
   const filtersActive = Object.values(filters).some(Boolean);
-  const clearFilters = () => setFilters({ country: "", status: "", progress: "", dateFrom: "", dateTo: "" });
+  const clearFilters = () => setFilters({ country: "", status: "", progress: "", year: "" });
 
   const filterInput = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none";
 
@@ -186,12 +179,36 @@ export default function ShipmentsPage() {
         action={
           <div className="flex gap-2">
             <AISummaryButton variant="button" title="Shipments Summary" prompt={`Write a tight Shipments summary using the pre-loaded shipment data. Structure with these sections (## headings):\n\n## Overview\nOne line: total shipments by status (pending, dispatched, in transit, delivered).\n\n## In Transit\nUp to 5 currently in transit: shipment# · client · POL → POD · ETA.\n\n## Delayed / Needs Attention\nUp to 5 shipments past their ETA, missing documents (BL/COO), or stuck without movement: shipment# · client · issue.\n\n## Upcoming Dispatches\nUp to 4 with a near-term dispatch date.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't list every shipment.`} />
-            <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+            <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all">
               + New Shipment
             </button>
           </div>
         }
       />
+
+      {/* Stat tiles ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📦</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Total</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.total}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">shipments on file</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🚢</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">In Transit</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.in_transit}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">at sea right now</p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">✅</span><span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Delivered</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.delivered}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">completed</p>
+        </div>
+        <div className="bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⚠️</span><span className="text-[11px] font-semibold uppercase tracking-wider text-rose-700">Past ETA</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.attention}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">need a follow-up</p>
+        </div>
+      </div>
 
       {/* Filter bar */}
       <div className="mb-4 bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
@@ -211,12 +228,10 @@ export default function ShipmentsPage() {
           <option value="high">75–99% · Late</option>
           <option value="complete">100% · Complete</option>
         </select>
-        <div className="flex items-center gap-1.5 ml-1">
-          <span className="text-xs text-gray-500">Dispatch</span>
-          <input type="date" value={filters.dateFrom} onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })} className={filterInput} />
-          <span className="text-xs text-gray-400">→</span>
-          <input type="date" value={filters.dateTo} onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })} className={filterInput} />
-        </div>
+        <select value={filters.year} onChange={(e) => setFilters({ ...filters, year: e.target.value })} className={filterInput} aria-label="Filter by dispatch year">
+          <option value="">All years</option>
+          {yearOptions.map((y) => (<option key={y} value={y}>{y}</option>))}
+        </select>
         {filtersActive && (
           <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50">
             ✕ Clear
@@ -224,14 +239,88 @@ export default function ShipmentsPage() {
         )}
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filtered}
-        loading={loading}
-        emptyTitle={filtersActive ? "No shipments match" : "No shipments yet"}
-        emptyDescription={filtersActive ? "Try clearing one of the filters above." : "Create your first shipment to get started"}
-        onRowClick={(row) => router.push(`/shipments/${row.id}`)}
-      />
+      {/* Shipment cards */}
+      {loading ? (
+        <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+          <div className="text-4xl mb-3">📭</div>
+          <p className="text-base font-semibold text-gray-800">{filtersActive ? "No shipments match" : "No shipments yet"}</p>
+          <p className="text-sm text-gray-500 mt-1">{filtersActive ? "Try clearing one of the filters above." : "Create your first shipment to get started."}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((row) => {
+            const tone = SHIPMENT_TONE[row.status] || SHIPMENT_TONE.pending;
+            const pct = computeProgress(row);
+            const orderId = row.order_id || row.order;
+            return (
+              <div
+                key={row.id}
+                onClick={() => router.push(`/shipments/${row.id}`)}
+                className={`group relative bg-white border ${tone.chip} rounded-xl px-4 py-3 cursor-pointer hover:shadow-md hover:-translate-y-px transition-all`}
+              >
+                {/* Left status stripe */}
+                <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
+
+                <div className="flex items-center gap-4 pl-2 flex-wrap md:flex-nowrap">
+                  {/* Order # + client */}
+                  <div className="min-w-0 flex-1 basis-full md:basis-auto">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-gray-900 tracking-tight">{row.order_number || "—"}</span>
+                      {row.bl_number && (
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">{row.bl_number}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
+                      <span className="font-medium text-gray-700">{row.client_name || "—"}</span>
+                      {row.country && (<><span className="mx-1.5 text-gray-300">·</span>{row.country}</>)}
+                    </p>
+                  </div>
+
+                  {/* POL → POD */}
+                  <div className="hidden md:flex items-center gap-2 text-xs w-56 shrink-0">
+                    <div className="text-right flex-1 min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">From</p>
+                      <p className="text-gray-800 font-medium truncate">{row.port_of_loading || "—"}</p>
+                    </div>
+                    <span className="text-gray-300">→</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">To</p>
+                      <p className="text-gray-800 font-medium truncate">{row.port_of_discharge || "—"}</p>
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <div className="hidden sm:block w-32 text-center shrink-0">
+                    <StatusBadge status={row.status} />
+                  </div>
+
+                  {/* Progress bar — clicking jumps to the linked Sales Order */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); if (orderId) router.push(`/orders/${orderId}`); }}
+                    title={orderId ? "Open Sales Order" : "No linked order"}
+                    className="hidden md:flex items-center gap-2 w-44 shrink-0"
+                  >
+                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full ${tone.bar} transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className={`text-xs font-bold tabular-nums ${tone.text}`}>{pct}%</span>
+                  </button>
+
+                  {/* Dispatch date */}
+                  <div className="text-right shrink-0 min-w-[88px]">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Dispatch</p>
+                    <p className="text-xs font-semibold text-gray-700">
+                      {row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Shipment" size="xl">
         <form onSubmit={handleCreate} className="space-y-4">
@@ -313,7 +402,7 @@ export default function ShipmentsPage() {
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className={inputClass} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={submitting} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            <button type="submit" disabled={submitting} className="px-5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow disabled:opacity-50 transition-all">
               {submitting ? "Creating..." : "Create Shipment"}
             </button>
             <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>

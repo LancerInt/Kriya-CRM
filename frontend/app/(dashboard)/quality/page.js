@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
-import DataTable from "@/components/ui/DataTable";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
@@ -147,12 +147,27 @@ export default function QualityPage() {
 
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
 
-  const tabClass = (tab) =>
-    `px-4 py-2 text-sm font-medium rounded-lg ${
-      activeTab === tab
-        ? "bg-indigo-600 text-white"
-        : "text-gray-600 hover:bg-gray-100"
-    }`;
+  // Stat buckets for the header tiles.
+  const stats = useMemo(() => ({
+    inspections: inspections.length,
+    passed: inspections.filter((i) => i.status === "passed").length,
+    failed: inspections.filter((i) => i.status === "failed").length,
+    documents: coas.length + msdsList.length,
+  }), [inspections, coas, msdsList]);
+
+  const TABS = [
+    { key: "inspections", label: "Inspections",    icon: "🔬", count: stats.inspections },
+    { key: "coa",         label: "COA Documents",  icon: "🧪", count: coas.length },
+    { key: "msds",        label: "MSDS Documents", icon: "⚗️", count: msdsList.length },
+  ];
+
+  const EmptyState = ({ icon, title, hint }) => (
+    <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+      <div className="text-4xl mb-3">{icon}</div>
+      <p className="text-base font-semibold text-gray-800">{title}</p>
+      <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{hint}</p>
+    </div>
+  );
 
   return (
     <div>
@@ -162,22 +177,58 @@ export default function QualityPage() {
         action={null}
       />
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6">
-        <button onClick={() => setActiveTab("inspections")} className={tabClass("inspections")}>Inspections</button>
-        <button onClick={() => setActiveTab("coa")} className={tabClass("coa")}>COA Documents</button>
-        <button onClick={() => setActiveTab("msds")} className={tabClass("msds")}>MSDS Documents</button>
+      {/* Stat tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🔬</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Inspections</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.inspections}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">recorded checks</p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">✅</span><span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Passed</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.passed}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">cleared inspections</p>
+        </div>
+        <div className="bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⚠️</span><span className="text-[11px] font-semibold uppercase tracking-wider text-rose-700">Failed</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.failed}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">need rework</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📁</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">Documents</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.documents}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">COA · MSDS combined</p>
+        </div>
+      </div>
+
+      {/* Tabs — segmented pill control */}
+      <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl p-1.5 inline-flex flex-wrap gap-1 w-full sm:w-auto">
+        {TABS.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 sm:flex-none px-4 py-2 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+                active
+                  ? "bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100"
+                  : "text-gray-500 hover:text-gray-800 hover:bg-white/60"
+              }`}
+            >
+              <span className="text-base leading-none">{tab.icon}</span>
+              <span>{tab.label}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${active ? "bg-indigo-100 text-indigo-700" : "bg-gray-200 text-gray-600"}`}>{tab.count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Inspections Tab — card grid with inline media previews */}
       {activeTab === "inspections" && (
         loadingInspections ? (
-          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+          <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
         ) : inspections.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-gray-700 font-medium">No inspections yet</p>
-            <p className="text-gray-400 text-sm mt-1">Create your first quality inspection</p>
-          </div>
+          <EmptyState icon="🔬" title="No inspections yet" hint="Inspection records show up here automatically when an order's photos are tagged Passed or Failed." />
         ) : (
           <InspectionGrid
             inspections={inspections}
@@ -198,12 +249,9 @@ export default function QualityPage() {
       {/* MSDS Tab — same card grid as COA, normalized to coa_type for the badge */}
       {activeTab === "msds" && (
         loadingMsds ? (
-          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+          <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
         ) : msdsList.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-gray-700 font-medium">No MSDS documents yet</p>
-            <p className="text-gray-400 text-sm mt-1">Generated/uploaded MSDS files from sales orders show up here automatically.</p>
-          </div>
+          <EmptyState icon="⚗️" title="No MSDS documents yet" hint="Generated or uploaded MSDS files from sales orders show up here automatically." />
         ) : (
           <CoaGrid
             coas={msdsList.map((m) => ({ ...m, coa_type: m.msds_type }))}
@@ -222,12 +270,9 @@ export default function QualityPage() {
       {/* COA Tab — card grid, opens PDF/image previews in the same lightbox */}
       {activeTab === "coa" && (
         loadingCoas ? (
-          <div className="flex justify-center items-center h-40 text-gray-400 text-sm">Loading…</div>
+          <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
         ) : coas.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-gray-700 font-medium">No COA documents yet</p>
-            <p className="text-gray-400 text-sm mt-1">Generated/uploaded COAs from sales orders show up here automatically.</p>
-          </div>
+          <EmptyState icon="🧪" title="No COA documents yet" hint="Generated or uploaded COAs from sales orders show up here automatically." />
         ) : (
           <CoaGrid coas={coas} onOpen={(coa) => setLightbox({
             inspection: {

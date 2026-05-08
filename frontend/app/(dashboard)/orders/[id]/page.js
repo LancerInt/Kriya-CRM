@@ -25,32 +25,127 @@ import { confirmDialog } from "@/lib/confirm";
 function fmtDate(d) { if (!d) return "—"; try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; } }
 function fmtDateTime(d) { if (!d) return ""; try { return format(new Date(d), "MMM d h:mm a"); } catch { return ""; } }
 
+// Edit / Generate label with matching SVG icon, used inside every action
+// button on the Documents Approval Checklist rows.
+function ActionLabel({ present }) {
+  return present ? (
+    <>
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+      </svg>
+      Edit
+    </>
+  ) : (
+    <>
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+      Generate
+    </>
+  );
+}
+
+// Replace / Upload label — used on upload-only rows (CRO, Insurance,
+// Transit Documents). Replace = circular-arrows icon, Upload = up-arrow.
+function UploadLabel({ present }) {
+  return present ? (
+    <>
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a8 8 0 0114-3m2 9a8 8 0 01-14 3" />
+      </svg>
+      Replace
+    </>
+  ) : (
+    <>
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4-4 4m4-4v13" />
+      </svg>
+      Upload
+    </>
+  );
+}
+
 function StatusStepper({ timeline }) {
+  // Compute completion %% for the underline progress bar.
+  const completedCount = timeline.filter((s) => s.state === "completed" || s.state === "current").length;
+  const pct = timeline.length ? Math.round(((completedCount - 0.5) / timeline.length) * 100) : 0;
+  const safePct = Math.max(0, Math.min(100, pct));
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6 overflow-x-auto">
-      <h3 className="font-semibold mb-4">Order Progress</h3>
-      <div className="flex gap-0 min-w-max">
-        {timeline.map((step, i) => (
-          <div key={step.status} className="flex items-center">
-            <div className="flex flex-col items-center">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
-                step.state === "completed" ? "bg-green-500 border-green-500 text-white" :
-                step.state === "current" ? "bg-indigo-600 border-indigo-600 text-white ring-4 ring-indigo-100" :
-                "bg-white border-gray-300 text-gray-400"
-              }`}>
-                {step.state === "completed" ? "\u2713" : i + 1}
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 mb-6 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-base">🛣️</span>
+          <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Order Progress</h3>
+        </div>
+        <span className="text-xs font-semibold text-indigo-700 tabular-nums">
+          Step {completedCount} of {timeline.length}
+        </span>
+      </div>
+
+      {/* Underline overall-progress bar */}
+      <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden mb-4">
+        <div
+          className="h-full bg-gradient-to-r from-emerald-500 via-indigo-500 to-violet-500 transition-all"
+          style={{ width: `${safePct}%` }}
+        />
+      </div>
+
+      {/* Step list — generous Y padding so the current step's box-shadow
+          glow + ring can render fully (overflow-x-auto also clips Y per
+          the CSS spec). px-3 keeps the leftmost / rightmost glow fully
+          visible at the edges. */}
+      <div className="overflow-x-auto py-5">
+        <div className="flex items-start min-w-max gap-1 px-3">
+          {timeline.map((step, i) => {
+            const isLast = i === timeline.length - 1;
+            const isCompleted = step.state === "completed";
+            const isCurrent = step.state === "current";
+            return (
+              <div key={step.status} className="flex items-start">
+                <div className="flex flex-col items-center w-24">
+                  <div
+                    className={`relative w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                      isCompleted
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : isCurrent
+                        ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white ring-2 ring-indigo-200"
+                        : "bg-white text-gray-400 border-2 border-gray-200"
+                    }`}
+                    style={isCurrent ? { boxShadow: "0 0 0 6px rgba(99,102,241,0.15), 0 0 18px 2px rgba(99,102,241,0.55)" } : undefined}
+                  >
+                    <span className="relative">{isCompleted ? "✓" : i + 1}</span>
+                  </div>
+                  <p
+                    className={`text-[10px] mt-2 text-center leading-tight px-1 ${
+                      isCurrent
+                        ? "text-indigo-700 font-bold"
+                        : isCompleted
+                        ? "text-gray-700 font-medium"
+                        : "text-gray-400"
+                    }`}
+                  >
+                    {step.label}
+                  </p>
+                  {step.timestamp && (
+                    <p className={`text-[9px] mt-0.5 ${isCompleted || isCurrent ? "text-gray-500" : "text-gray-300"}`}>
+                      {fmtDate(step.timestamp)}
+                    </p>
+                  )}
+                </div>
+                {!isLast && (
+                  <div className="mt-4 flex-1 min-w-[24px] h-0.5">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        isCompleted ? "bg-emerald-500" : "bg-gray-200"
+                      }`}
+                    />
+                  </div>
+                )}
               </div>
-              <p className={`text-[10px] mt-1 text-center w-20 leading-tight ${
-                step.state === "current" ? "text-indigo-700 font-semibold" :
-                step.state === "completed" ? "text-green-700" : "text-gray-400"
-              }`}>{step.label}</p>
-              {step.timestamp && <p className="text-[8px] text-gray-400">{fmtDate(step.timestamp)}</p>}
-            </div>
-            {i < timeline.length - 1 && (
-              <div className={`w-8 h-0.5 -mt-5 ${step.state === "completed" ? "bg-green-500" : "bg-gray-200"}`} />
-            )}
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1096,40 +1191,109 @@ export default function OrderDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (!order) return <p className="text-center text-gray-500 py-8">Order not found</p>;
 
+  // Status → hero gradient. Mirrors the Shipments-detail palette for
+  // visual consistency across the post-quotation flow.
+  const ORDER_HERO_THEME = {
+    confirmed:         "from-slate-700 to-slate-900",
+    pif_sent:          "from-purple-700 to-violet-900",
+    factory_ready:     "from-fuchsia-700 to-purple-900",
+    docs_preparing:    "from-amber-700 to-orange-900",
+    inspection:        "from-amber-700 to-rose-900",
+    inspection_passed: "from-yellow-700 to-amber-900",
+    container_booked:  "from-orange-700 to-red-900",
+    docs_approved:     "from-sky-700 to-indigo-900",
+    dispatched:        "from-indigo-700 to-violet-900",
+    in_transit:        "from-blue-700 to-cyan-900",
+    arrived:           "from-cyan-700 to-teal-900",
+    delivered:         "from-emerald-700 to-teal-900",
+    cancelled:         "from-rose-700 to-pink-900",
+  };
+  const heroGradient = ORDER_HERO_THEME[order.status] || ORDER_HERO_THEME.confirmed;
+  const hasPO = !!order.po_document;
+  const hasPIF = orderDocs.some((d) => d.doc_type === "pif");
+
   return (
     <div>
-      <PageHeader
-        title={`Order ${order.order_number}`}
-        subtitle={
-          <span className="inline-flex items-center gap-2">
-            <span>
-              {order.client_name}
-              {order.can_view_total ? ` · ${order.currency} ${Number(order.total || 0).toLocaleString()}` : ""}
-              {canSeeExecutive && order.client_primary_executive_name ? ` · Executive: ${order.client_primary_executive_name}` : ""}
-            </span>
-            {isAdminOrManager && (
+      {/* Hero strip ─────────────────────────────────────────── */}
+      <div className={`relative bg-gradient-to-br ${heroGradient} rounded-2xl p-6 text-white overflow-hidden shadow-sm mb-6`}>
+        <div
+          className="absolute inset-0 opacity-20 pointer-events-none"
+          style={{ backgroundImage: "radial-gradient(circle at 80% 20%, rgba(255,255,255,0.4) 0%, transparent 40%)" }}
+        />
+        <div className="relative flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-2">
               <button
-                type="button"
-                onClick={openHeaderEditor}
-                title="Edit client / currency / executive"
-                className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                onClick={() => router.back()}
+                className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                title="Back"
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              </button>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/15 border border-white/20 uppercase tracking-wider">
+                {(order.status || "").replace(/_/g, " ")}
+              </span>
+              {order.firc_received_at && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-400/30 border border-emerald-200/40 uppercase tracking-wider">
+                  FIRC ✓
+                </span>
+              )}
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight truncate">
+              Order {order.order_number}
+            </h1>
+            <div className="text-sm text-white/80 mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-medium text-white">{order.client_name}</span>
+              {order.can_view_total && (
+                <>
+                  <span className="text-white/40">·</span>
+                  <span className="font-semibold">{order.currency} {Number(order.total || 0).toLocaleString()}</span>
+                </>
+              )}
+              {canSeeExecutive && order.client_primary_executive_name && (
+                <>
+                  <span className="text-white/40">·</span>
+                  <span>Executive: <span className="font-medium text-white">{order.client_primary_executive_name}</span></span>
+                </>
+              )}
+              {isAdminOrManager && (
+                <button
+                  type="button"
+                  onClick={openHeaderEditor}
+                  title="Edit client / currency / executive"
+                  className="ml-1 p-1 rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {/* PO / PIF readiness chips */}
+            <div className="flex items-center gap-2 mt-3">
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 ${
+                hasPO ? "bg-emerald-400/25 text-emerald-50 border border-emerald-200/30" : "bg-white/10 text-white/70 border border-white/15"
+              }`}>
+                <span>{hasPO ? "✅" : "○"}</span> PO {hasPO ? "" : "Pending"}
+              </span>
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 ${
+                hasPIF ? "bg-emerald-400/25 text-emerald-50 border border-emerald-200/30" : "bg-white/10 text-white/70 border border-white/15"
+              }`}>
+                <span>{hasPIF ? "✅" : "○"}</span> PIF {hasPIF ? "" : "Pending"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex gap-2 shrink-0">
+            {order.status === "pif_sent" && (
+              <button onClick={() => setShowPifListModal(true)} className="px-4 py-2 bg-white text-gray-900 text-sm font-semibold rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                Generate PIF
               </button>
             )}
-          </span>
-        }
-        action={
-          <div className="flex gap-2">
-            {order.status === "pif_sent" && (
-              <button onClick={() => setShowPifListModal(true)} className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">Generate PIF</button>
-            )}
-            <button onClick={() => router.back()} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Back</button>
           </div>
-        }
-      />
+        </div>
+      </div>
 
       <StatusStepper timeline={timeline} />
 
@@ -1248,8 +1412,8 @@ export default function OrderDetailPage() {
                     {croPresent && (
                       <button onClick={() => viewOrderDoc("cro")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
                     )}
-                    <button onClick={() => { setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
-                      {croPresent ? "Replace" : "Upload"}
+                    <button onClick={() => { setUploadChecklistFor({ doc_type: "cro", label: "CRO" }); setChecklistUploadFile(null); }} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                      <UploadLabel present={croPresent} />
                     </button>
                   </div>
                 </div>
@@ -1284,8 +1448,8 @@ export default function OrderDetailPage() {
                             {present && (
                               <button onClick={() => viewOrderDoc(row.doc_type)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
                             )}
-                            <button onClick={() => { setUploadChecklistFor({ doc_type: row.doc_type, label: row.label }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
-                              {present ? "Replace" : "Upload"}
+                            <button onClick={() => { setUploadChecklistFor({ doc_type: row.doc_type, label: row.label }); setChecklistUploadFile(null); }} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                              <UploadLabel present={present} />
                             </button>
                           </div>
                         </div>
@@ -1338,20 +1502,25 @@ export default function OrderDetailPage() {
                             setChecklistUploadFile(null);
                           }}
                           title="Attach an existing PDF instead of generating one"
-                          className="px-2.5 py-1 text-xs border border-indigo-200 text-indigo-700 bg-indigo-50 rounded hover:bg-indigo-100"
-                        >📎 Attach</button>
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-indigo-200 text-indigo-700 bg-indigo-50 rounded hover:bg-indigo-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4-4 4m4-4v13" />
+                          </svg>
+                          Attach
+                        </button>
                       )}
                       {row.action === "generate-ci" && (
-                        <button onClick={handleGenerateCI} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={handleGenerateCI} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-li" && (
-                        <button onClick={handleGenerateLI} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={handleGenerateLI} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-cpl" && (
-                        <button onClick={() => setPackingListType("client")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setPackingListType("client")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-lpl" && (
-                        <button onClick={() => setPackingListType("logistic")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setPackingListType("logistic")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-coa" && (
                         <button
@@ -1369,8 +1538,8 @@ export default function OrderDetailPage() {
                               setScopeAskFor({ kind: "coa", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
                             }
                           }}
-                          className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                        >{present ? "Edit" : "Generate"}</button>
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        ><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-msds" && (
                         <button
@@ -1384,26 +1553,26 @@ export default function OrderDetailPage() {
                               setScopeAskFor({ kind: "msds", orderItemId: row.order_item_id || null, productName: row.product_name || "", side });
                             }
                           }}
-                          className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                        >{present ? "Edit" : "Generate"}</button>
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        ><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-dbk" && (
-                        <button onClick={() => setComplianceDocType("dbk_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("dbk_declaration")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-exam" && (
-                        <button onClick={() => setComplianceDocType("examination_report")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("examination_report")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-exportdecl" && (
-                        <button onClick={() => setComplianceDocType("export_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("export_declaration")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-factorystuffing" && (
-                        <button onClick={() => setComplianceDocType("factory_stuffing")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("factory_stuffing")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-nondg" && (
-                        <button onClick={() => setComplianceDocType("non_dg_declaration")} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Edit" : "Generate"}</button>
+                        <button onClick={() => setComplianceDocType("non_dg_declaration")} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "upload" && (
-                        <button onClick={() => { setUploadChecklistFor(row); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">{present ? "Replace" : "Upload"}</button>
+                        <button onClick={() => { setUploadChecklistFor(row); setChecklistUploadFile(null); }} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><UploadLabel present={present} /></button>
                       )}
                     </div>
                   </div>
@@ -1428,61 +1597,77 @@ export default function OrderDetailPage() {
               const insurancePresentInline = hasDoc("insurance");
               const showInsuranceInLogistic = ["docs_approved", "dispatched", "in_transit"].includes(order.status);
 
+              const clientDoneCount = clientRows.filter((r) => isRowPresent(r.scope ? r : { ...r, scope: "client" })).length;
+              const logisticDoneCount = logisticRows.filter((r) => isRowPresent(r.scope ? r : { ...r, scope: "logistic" })).length;
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Client */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h5 className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Client</h5>
-                      <span className="flex-1 h-px bg-emerald-200" />
-                    </div>
-                    {clientRows.map((r, i) => renderRow(r, i, "emerald", "client"))}
-                    {/* Inspection pictures pseudo-row */}
-                    <div
-                      className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer ${hasInspectionPics ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"}`}
-                      onClick={() => setActiveTab("documents")}
-                      title="Open Documents tab"
-                    >
+                  {/* CLIENT card */}
+                  <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${hasInspectionPics ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{hasInspectionPics ? "✓" : "○"}</span>
-                        <span className={`text-sm ${hasInspectionPics ? "text-emerald-800 font-medium" : "text-gray-800"}`}>Inspection Pictures</span>
-                        <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>
+                        <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm">📑</span>
+                        <h5 className="text-sm font-bold text-emerald-900 tracking-tight">Client</h5>
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-white border border-emerald-200 rounded-full px-2 py-0.5">
+                          {clientDoneCount}/{clientRows.length}
+                        </span>
                       </div>
-                      <div className="flex items-center gap-1 text-[10px]">
-                        {passedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Passed: {passedCount}</span>}
-                        {failedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Failed: {failedCount}</span>}
-                        {!hasInspectionPics && <span className="text-gray-400">No photos yet</span>}
+                    </div>
+                    <div className="p-3 space-y-2">
+                      {clientRows.map((r, i) => renderRow(r, i, "emerald", "client"))}
+                      {/* Inspection pictures pseudo-row */}
+                      <div
+                        className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer transition-colors ${hasInspectionPics ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100/60" : "bg-white border-gray-200 hover:bg-gray-50"}`}
+                        onClick={() => setActiveTab("documents")}
+                        title="Open Documents tab"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${hasInspectionPics ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{hasInspectionPics ? "✓" : "○"}</span>
+                          <span className={`text-sm ${hasInspectionPics ? "text-emerald-800 font-medium" : "text-gray-800"}`}>Inspection Pictures</span>
+                          <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px]">
+                          {passedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Passed: {passedCount}</span>}
+                          {failedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Failed: {failedCount}</span>}
+                          {!hasInspectionPics && <span className="text-gray-400">No photos yet</span>}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Logistic */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h5 className="text-xs font-semibold uppercase tracking-wider text-indigo-700">Logistic</h5>
-                      <span className="flex-1 h-px bg-indigo-200" />
-                    </div>
-                    {/* Insurance — required for Dispatch, only shown once
-                        the order is past Documents Approved. */}
-                    {showInsuranceInLogistic && (
-                      <div className={`flex items-center justify-between p-2.5 border rounded-lg ${insurancePresentInline ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${insurancePresentInline ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{insurancePresentInline ? "✓" : "○"}</span>
-                          <span className={`text-sm font-medium ${insurancePresentInline ? "text-emerald-800" : "text-amber-900"}`}>Insurance</span>
-                          <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
-                          <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5">Required for Dispatch</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {insurancePresentInline && (
-                            <button onClick={() => viewOrderDoc("insurance")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
-                          )}
-                          <button onClick={() => { setUploadChecklistFor({ doc_type: "insurance", label: "Insurance" }); setChecklistUploadFile(null); }} className="px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
-                            {insurancePresentInline ? "Replace" : "Upload"}
-                          </button>
-                        </div>
+                  {/* LOGISTIC card */}
+                  <div className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-sm">🚚</span>
+                        <h5 className="text-sm font-bold text-amber-900 tracking-tight">Logistic</h5>
+                        <span className="text-[10px] font-semibold text-amber-700 bg-white border border-amber-200 rounded-full px-2 py-0.5">
+                          {logisticDoneCount}/{logisticRows.length}
+                        </span>
                       </div>
-                    )}
-                    {logisticRows.map((r, i) => renderRow(r, i, "amber", "logistic"))}
+                    </div>
+                    <div className="p-3 space-y-2">
+                      {/* Insurance — required for Dispatch, only shown once
+                          the order is past Documents Approved. */}
+                      {showInsuranceInLogistic && (
+                        <div className={`flex items-center justify-between p-2.5 border rounded-lg ${insurancePresentInline ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${insurancePresentInline ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"}`}>{insurancePresentInline ? "✓" : "○"}</span>
+                            <span className={`text-sm font-medium ${insurancePresentInline ? "text-emerald-800" : "text-amber-900"}`}>Insurance</span>
+                            <span className="text-[9px] font-semibold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">Upload only</span>
+                            <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5">Required for Dispatch</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {insurancePresentInline && (
+                              <button onClick={() => viewOrderDoc("insurance")} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
+                            )}
+                            <button onClick={() => { setUploadChecklistFor({ doc_type: "insurance", label: "Insurance" }); setChecklistUploadFile(null); }} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                              <UploadLabel present={insurancePresentInline} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {logisticRows.map((r, i) => renderRow(r, i, "amber", "logistic"))}
+                    </div>
                   </div>
                 </div>
               );
@@ -1657,7 +1842,7 @@ export default function OrderDetailPage() {
                     }} disabled={transitioning || blocked}
                       title={pifHint || checklistHint || beforeDispatchPaymentHint}
                       className={`px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 ${blocked ? "bg-gray-300 text-gray-600 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
-                      {transitioning ? "..." : `\u2192 ${t.label}`}
+                      {transitioning ? "..." : `→ ${t.label}`}
                     </button>
                     {needsPO && (
                       <button onClick={() => setShowPoModal(true)} className="px-3 py-2 text-xs bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200 flex items-center gap-1">
@@ -2018,30 +2203,64 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="flex gap-0">
-          {[{ key: "details", label: "Details" }, { key: "history", label: "Status History" }, { key: "documents", label: "Documents" }, { key: "notes", label: "Notes" }].map((tab) => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 ${activeTab === tab.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
-              {tab.label}
+      {/* Tabs — pill-style, icon + label, accent matches the active panel */}
+      <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl p-1.5 inline-flex flex-wrap gap-1 w-full sm:w-auto">
+        {[
+          { key: "details",   label: "Details",        icon: "📋" },
+          { key: "history",   label: "Status History", icon: "🕓" },
+          { key: "documents", label: "Documents",      icon: "📄" },
+          { key: "notes",     label: "Notes",          icon: "📝" },
+        ].map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 sm:flex-none px-4 py-2 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+                active
+                  ? "bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100"
+                  : "text-gray-500 hover:text-gray-800 hover:bg-white/60"
+              }`}
+            >
+              <span className="text-base leading-none">{tab.icon}</span>
+              <span>{tab.label}</span>
             </button>
-          ))}
-        </nav>
+          );
+        })}
       </div>
 
       {activeTab === "details" && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold mb-4">Order Information</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-              <div><span className="text-gray-500 block text-xs">Order #</span>{order.order_number}</div>
-              <div><span className="text-gray-500 block text-xs">Client</span>{order.client_name}</div>
-              <div><span className="text-gray-500 block text-xs">Delivery Terms</span>{order.delivery_terms}</div>
-              <div><span className="text-gray-500 block text-xs">Payment Terms</span>{order.payment_terms || "—"}</div>
-              <div><span className="text-gray-500 block text-xs">Freight</span>{order.freight_terms || "—"}</div>
-              <div><span className="text-gray-500 block text-xs">Created</span>{fmtDate(order.created_at)}</div>
-              {order.po_number && <div><span className="text-gray-500 block text-xs">PO Number</span>{order.po_number}</div>}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-5">
+              <span className="text-base">📋</span>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Order Information</h3>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-4 text-sm">
+              {[
+                { label: "Order #",        value: order.order_number,            mono: true },
+                { label: "Client",         value: order.client_name },
+                { label: "Delivery Terms", value: order.delivery_terms,          chip: true },
+                { label: "Payment Terms",  value: order.payment_terms,           chip: true },
+                { label: "Freight",        value: order.freight_terms },
+                { label: "Created",        value: fmtDate(order.created_at) },
+                ...(order.po_number ? [{ label: "PO Number", value: order.po_number, mono: true }] : []),
+              ].map((field) => (
+                <div key={field.label} className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">{field.label}</p>
+                  {field.value ? (
+                    field.chip ? (
+                      <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        {field.value}
+                      </span>
+                    ) : (
+                      <p className={`text-gray-900 ${field.mono ? "font-mono font-medium" : "font-medium"} truncate`}>{field.value}</p>
+                    )
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
           <LineItemsCard order={order} reload={loadOrder} />
@@ -2049,15 +2268,25 @@ export default function OrderDetailPage() {
       )}
 
       {activeTab === "history" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Status History</h3>
-            <span className="text-xs text-gray-400">{history.length} change{history.length !== 1 ? "s" : ""}</span>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🕓</span>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Status History</h3>
+            </div>
+            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+              {history.length} change{history.length !== 1 ? "s" : ""}
+            </span>
           </div>
-          {history.length === 0 ? <p className="text-gray-400 text-sm">No changes yet</p> : (
+          {history.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">
+              <div className="text-3xl mb-2">📭</div>
+              <p className="text-sm">No status changes yet</p>
+            </div>
+          ) : (
             <div className="relative">
-              {/* Timeline line */}
-              <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
+              {/* Timeline line — soft gradient so the active stage feels reachable */}
+              <div className="absolute left-4 top-1 bottom-1 w-0.5 bg-gradient-to-b from-emerald-300 via-indigo-300 to-gray-200 rounded-full" />
               <div className="space-y-0">
                 {history.map((h, i) => {
                   const isRevert = h.remarks?.toLowerCase().includes("revert");
@@ -2075,10 +2304,14 @@ export default function OrderDetailPage() {
                   })() : null;
                   return (
                     <div key={h.id} className="relative pl-10 pb-6">
-                      {/* Dot */}
-                      <div className={`absolute left-2.5 top-1 w-3.5 h-3.5 rounded-full border-2 border-white z-10 ${
-                        isDocDelete ? "bg-red-400" : isDocRestore ? "bg-blue-400" : isRevert ? "bg-amber-400" : i === history.length - 1 ? "bg-indigo-600" : "bg-green-500"
-                      }`} />
+                      {/* Dot — wraps in a white halo + soft outer ring so the
+                          gradient timeline line shows through cleanly */}
+                      <div
+                        className={`absolute left-2 top-0.5 w-4 h-4 rounded-full border-2 border-white z-10 shadow-sm ${
+                          isDocDelete ? "bg-rose-500" : isDocRestore ? "bg-blue-500" : isRevert ? "bg-amber-500" : i === history.length - 1 ? "bg-gradient-to-br from-indigo-600 to-violet-600" : "bg-emerald-500"
+                        }`}
+                        style={i === history.length - 1 ? { boxShadow: "0 0 0 4px rgba(99,102,241,0.18)" } : undefined}
+                      />
                       {/* Content */}
                       <div className={`p-3 rounded-lg ${isDocDelete ? "bg-red-50 border border-red-200" : isDocRestore ? "bg-blue-50 border border-blue-200" : isRevert ? "bg-amber-50 border border-amber-200" : "bg-gray-50"}`}>
                         <div className="flex items-center gap-2 mb-1">
@@ -2183,63 +2416,137 @@ export default function OrderDetailPage() {
         });
         const stripPrefix = (name) => (name || "").replace(/^\[Inspection (Passed|Failed)\]\s*/, "");
         const inspectionTag = () => null;
-        const renderDocRow = (doc) => (
-          <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-            onClick={async () => {
-              if (!doc.file) return;
-              const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
-              try {
-                const res = await fetch(url);
-                const blob = await res.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
-                if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
-                  setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                } else if (ext === "pdf") {
-                  setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                } else {
-                  const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
-                }
-              } catch { toast.error("Failed to open document"); }
-            }}>
-            <div className="flex items-center gap-3">
-              <span className="text-xl">{{"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊","jpg":"🖼️","jpeg":"🖼️","png":"🖼️","pi":"📋","po":"📦"}[(doc.name || doc.file || "").split(".").pop()?.toLowerCase()] || {"pi":"📋","po":"📦","commercial_invoice":"📑","packing_list":"📦","bl":"🚢","coa":"🧪","insurance":"🛡️"}[doc.doc_type] || "📎"}</span>
-              <div>
-                <p className="text-sm font-medium text-gray-800 flex items-center gap-2">
-                  {stripPrefix(doc.name)}
-                  {inspectionTag(doc.name) && (
-                    <span className={`text-[10px] font-semibold border rounded-full px-1.5 py-0.5 ${inspectionTag(doc.name).classes}`}>
-                      {inspectionTag(doc.name).label}
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-gray-500">{doc.doc_type} · {fmtDateTime(doc.created_at)}</p>
+        // File-type swatch — tinted square with a contextual icon. Image
+        // files render their thumbnail in place of the swatch when possible.
+        const fileSwatch = (doc) => {
+          const ext = (doc.name || doc.file || "").split(".").pop()?.toLowerCase();
+          const isImage = ["jpg","jpeg","png","gif","webp","svg"].includes(ext);
+          if (isImage && doc.file) {
+            const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+            return (
+              <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 bg-gray-100 shrink-0">
+                <img src={url} alt={doc.name || "image"} className="w-full h-full object-cover" />
+              </div>
+            );
+          }
+          const ICON_TONE = {
+            pdf:  { bg: "bg-rose-100",   text: "text-rose-700",   icon: "📄" },
+            doc:  { bg: "bg-blue-100",   text: "text-blue-700",   icon: "📝" },
+            docx: { bg: "bg-blue-100",   text: "text-blue-700",   icon: "📝" },
+            xls:  { bg: "bg-emerald-100",text: "text-emerald-700",icon: "📊" },
+            xlsx: { bg: "bg-emerald-100",text: "text-emerald-700",icon: "📊" },
+          };
+          const TYPE_TONE = {
+            pi: "📋", po: "📦", commercial_invoice: "📑", client_invoice: "📑", logistic_invoice: "📑",
+            packing_list: "📦", client_packing_list: "📦", logistic_packing_list: "📦",
+            bl: "🚢", coa: "🧪", msds: "⚗️", insurance: "🛡️", cro: "🚢", coo: "📜",
+          };
+          const tone = ICON_TONE[ext] || { bg: "bg-indigo-100", text: "text-indigo-700", icon: TYPE_TONE[doc.doc_type] || "📎" };
+          return (
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-base ${tone.bg} ${tone.text} shrink-0`}>
+              {tone.icon}
+            </div>
+          );
+        };
+
+        const renderDocRow = (doc) => {
+          const canEdit = ["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type);
+          return (
+            <div
+              key={doc.id}
+              className="group flex items-center justify-between gap-3 p-3 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 hover:shadow-sm cursor-pointer transition-all"
+              onClick={async () => {
+                if (!doc.file) return;
+                const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+                try {
+                  const res = await fetch(url);
+                  const blob = await res.blob();
+                  const blobUrl = URL.createObjectURL(blob);
+                  const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
+                  if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
+                    setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                  } else if (ext === "pdf") {
+                    setPreviewDoc(doc); setPreviewUrl(blobUrl);
+                  } else {
+                    const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
+                  }
+                } catch { toast.error("Failed to open document"); }
+              }}
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                {fileSwatch(doc)}
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{stripPrefix(doc.name)}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-1.5">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium uppercase tracking-wide">{doc.doc_type}</span>
+                    <span>·</span>
+                    <span>{fmtDateTime(doc.created_at)}</span>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className="px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100"
+                  title="Click anywhere on the row to view"
+                >
+                  View
+                </button>
+                {canEdit && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }}
+                    className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50"
+                  >
+                    Edit
+                  </button>
+                )}
+                <button
+                  onClick={async (e) => { e.stopPropagation(); if (!(await confirmDialog("Delete this document?"))) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }}
+                  className="p-1.5 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-60 group-hover:opacity-100"
+                  title="Delete"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                  </svg>
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-indigo-600 font-medium">View</span>
-              {["client_invoice","logistic_invoice","client_packing_list","logistic_packing_list","coa","msds","dbk_declaration","examination_report","export_declaration","factory_stuffing","non_dg_declaration","pif"].includes(doc.doc_type) && (
-                <button onClick={(e) => { e.stopPropagation(); openEditorForDocType(doc.doc_type); }} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Edit</button>
-              )}
-              <button onClick={async (e) => { e.stopPropagation(); if (!(await confirmDialog("Delete this document?"))) return; try { await api.post(`/orders/${id}/delete-document/`, { doc_id: doc.id }); toast.success("Deleted"); loadOrder(); } catch { toast.error("Failed to delete"); } }} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
-            </div>
-          </div>
-        );
+          );
+        };
+
         const renderFolder = (label, docs, accent) => (
-          <details open className={`border ${accent.border} rounded-lg ${accent.bg}`}>
-            <summary className={`px-3 py-2 cursor-pointer flex items-center justify-between ${accent.headerText} font-medium text-sm`}>
-              <span className="flex items-center gap-2">📁 {label} <span className={`text-[11px] ${accent.badge} px-1.5 py-0.5 rounded`}>{docs.length}</span></span>
+          <details open className={`group border ${accent.border} rounded-2xl ${accent.bg} overflow-hidden`}>
+            <summary className={`px-4 py-3 cursor-pointer flex items-center justify-between ${accent.headerText} font-semibold text-sm select-none list-none`}>
+              <span className="flex items-center gap-2.5">
+                <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <span className="text-base">📁</span>
+                <span className="tracking-tight">{label}</span>
+                <span className={`text-[11px] font-bold ${accent.badge} px-2 py-0.5 rounded-full`}>{docs.length}</span>
+              </span>
             </summary>
             <div className="p-3 pt-0 space-y-2">
-              {docs.length === 0 ? <p className="text-xs text-gray-500">No documents in this folder yet.</p> : docs.map(renderDocRow)}
+              {docs.length === 0 ? <p className="text-xs text-gray-500 px-2 py-3">No documents in this folder yet.</p> : docs.map(renderDocRow)}
             </div>
           </details>
         );
         return (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">Documents ({orderDocs.length})</h3>
-              <button onClick={() => setShowDocModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg">+ Upload</button>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📁</span>
+                <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Documents</h3>
+                <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+                  {orderDocs.length}
+                </span>
+              </div>
+              <button onClick={() => setShowDocModal(true)} className="inline-flex items-center gap-1 px-3.5 py-1.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-shadow">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 8l-4-4-4 4m4-4v13" />
+                </svg>
+                Upload
+              </button>
             </div>
             {orderDocs.length === 0 ? <p className="text-gray-400 text-sm">No documents uploaded</p> : (
               <div className="space-y-3">
@@ -2266,8 +2573,16 @@ export default function OrderDetailPage() {
       })()}
 
       {activeTab === "notes" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h3 className="font-semibold mb-4">Notes</h3>
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-base">📝</span>
+              <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Notes</h3>
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+                {orderNotes.length}
+              </span>
+            </div>
+          </div>
           <div
             className={`mb-4 p-3 rounded-lg border-2 border-dashed transition-colors ${isDraggingNote ? "border-indigo-400 bg-indigo-50" : "border-transparent"}`}
             onDragOver={(e) => { e.preventDefault(); if (!isDraggingNote) setIsDraggingNote(true); }}
@@ -2283,18 +2598,42 @@ export default function OrderDetailPage() {
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitNote(); } }}
               />
-              <button onClick={submitNote} disabled={!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40">Add</button>
+              <button onClick={submitNote} disabled={!newNote.trim() && noteAttachments.length === 0 && noteExistingDocs.length === 0} className="px-5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:shadow disabled:opacity-40 disabled:shadow-none transition-all">Add</button>
             </div>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <button type="button" onClick={pickNoteFile} title="Attach file(s) from device" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📎 <span className="text-xs">File</span></button>
-              <button type="button" onClick={openCamera} title="Take photo with camera" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📷 <span className="text-xs">Photo</span></button>
+            <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+              <button type="button" onClick={pickNoteFile} title="Attach file(s) from device" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+                File
+              </button>
+              <button type="button" onClick={openCamera} title="Take photo with camera" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Photo
+              </button>
               {!recording ? (
-                <button type="button" onClick={startVoiceRecording} title="Record voice" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">🎤 <span className="text-xs">Voice</span></button>
+                <button type="button" onClick={startVoiceRecording} title="Record voice" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m0-3a7 7 0 007-7m-7 7a7 7 0 01-7-7m7 7v0M12 1a3 3 0 00-3 3v7a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                  </svg>
+                  Voice
+                </button>
               ) : (
-                <button type="button" onClick={stopVoiceRecording} className="px-2.5 py-1.5 text-sm border border-red-400 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 animate-pulse">⏹ <span className="text-xs">Stop ({recordElapsed}s)</span></button>
+                <button type="button" onClick={stopVoiceRecording} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-300 rounded-lg hover:bg-rose-100 transition-colors animate-pulse">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-rose-600" />
+                  Stop ({recordElapsed}s)
+                </button>
               )}
-              <button type="button" onClick={openLibraryPicker} title="Pick from Documents library" className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📂 <span className="text-xs">From Docs</span></button>
-              <span className="text-xs text-gray-400 ml-1 hidden sm:inline">or drag & drop / paste files</span>
+              <button type="button" onClick={openLibraryPicker} title="Pick from Documents library" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                From Docs
+              </button>
+              <span className="text-[11px] text-gray-400 ml-1 hidden sm:inline">or drag & drop / paste files</span>
             </div>
             {(noteAttachments.length > 0 || noteExistingDocs.length > 0) && (
               <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -2338,38 +2677,61 @@ export default function OrderDetailPage() {
                 const isAudio = a.kind === "voice" || ["mp3","wav","ogg","webm","m4a"].includes(ext);
                 return { url, name, isImage, isAudio };
               });
+              const author = note.triggered_by_name || "System";
+              const initial = author.trim()[0]?.toUpperCase() || "?";
+              const dateStr = note.created_at ? format(new Date(note.created_at), "MMM d, yyyy h:mm a") : "";
               return (
-                <div key={note.id} className="p-3 bg-gray-50 rounded-lg">
-                  {editingNoteId === note.id ? (
-                    <div className="flex gap-2">
-                      <input value={editingNoteText} onChange={(e) => setEditingNoteText(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none" onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("saveNoteBtn")?.click(); if (e.key === "Escape") setEditingNoteId(null); }} />
-                      <button id="saveNoteBtn" onClick={async () => {
-                        try { await api.patch(`/orders/${id}/events/${note.id}/`, { description: editingNoteText }); setEditingNoteId(null); loadOrder(); toast.success("Note updated"); } catch { toast.error("Failed to update"); }
-                      }} className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">Save</button>
-                      <button onClick={() => setEditingNoteId(null)} className="px-2 py-1 border border-gray-300 text-xs rounded hover:bg-gray-50">Cancel</button>
+                <div key={note.id} className="group flex gap-3 p-4 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 hover:shadow-sm transition-all">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-white text-xs font-bold flex items-center justify-center shrink-0 shadow-sm">
+                    {initial}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-gray-800">{author}</span>
+                      <span className="text-[11px] text-gray-400">·</span>
+                      <span className="text-[11px] text-gray-400">{dateStr}</span>
+                      {editingNoteId !== note.id && (
+                        <button
+                          onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.description); }}
+                          className="ml-auto text-[11px] font-medium text-indigo-600 hover:text-indigo-800 opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Edit
+                        </button>
+                      )}
                     </div>
-                  ) : (
-                    note.description && <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.description}</p>
-                  )}
-                  {atts.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {atts.map((a, i) => a.url && (
-                        a.isImage ? (
-                          <a key={i} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} className="max-h-48 rounded border border-gray-200" /></a>
-                        ) : a.isAudio ? (
-                          <audio key={i} controls src={a.url} className="max-w-full" />
-                        ) : (
-                          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-indigo-700 hover:bg-indigo-50">📎 <span className="truncate max-w-[240px]">{a.name}</span></a>
-                        )
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
-                    <span className="font-medium text-gray-600">{note.triggered_by_name || "System"}</span>
-                    <span>·</span>
-                    <span>{note.created_at ? format(new Date(note.created_at), "MMM d, yyyy h:mm a") : ""}</span>
-                    {editingNoteId !== note.id && atts.length === 0 && (
-                      <button onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.description); }} className="text-indigo-500 hover:text-indigo-700 ml-1">Edit</button>
+                    {editingNoteId === note.id ? (
+                      <div className="flex gap-2 mt-2">
+                        <input value={editingNoteText} onChange={(e) => setEditingNoteText(e.target.value)} className="flex-1 px-3 py-1.5 border border-indigo-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" autoFocus onKeyDown={(e) => { if (e.key === "Enter") document.getElementById("saveNoteBtn")?.click(); if (e.key === "Escape") setEditingNoteId(null); }} />
+                        <button id="saveNoteBtn" onClick={async () => {
+                          try { await api.patch(`/orders/${id}/events/${note.id}/`, { description: editingNoteText }); setEditingNoteId(null); loadOrder(); toast.success("Note updated"); } catch { toast.error("Failed to update"); }
+                        }} className="px-3 py-1.5 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm">Save</button>
+                        <button onClick={() => setEditingNoteId(null)} className="px-3 py-1.5 border border-gray-200 text-xs rounded-lg hover:bg-gray-50">Cancel</button>
+                      </div>
+                    ) : (
+                      note.description && <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{note.description}</p>
+                    )}
+                    {atts.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {atts.map((a, i) => a.url && (
+                          a.isImage ? (
+                            <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all">
+                              <img src={a.url} alt={a.name} className="max-h-44 object-cover" />
+                            </a>
+                          ) : a.isAudio ? (
+                            <audio key={i} controls src={a.url} className="max-w-full" />
+                          ) : (
+                            <a key={i} href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <span className="truncate max-w-[240px]">{a.name}</span>
+                            </a>
+                          )
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -3001,15 +3363,39 @@ export default function OrderDetailPage() {
                   placeholder="Optional caption (drag & drop or paste files here)"
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
-                <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <button type="button" onClick={pickNoteFile} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📎 <span className="text-xs">File</span></button>
-                  <button type="button" onClick={openCamera} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📷 <span className="text-xs">Photo</span></button>
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <button type="button" onClick={pickNoteFile} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    File
+                  </button>
+                  <button type="button" onClick={openCamera} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Photo
+                  </button>
                   {!recording ? (
-                    <button type="button" onClick={startVoiceRecording} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">🎤 <span className="text-xs">Voice</span></button>
+                    <button type="button" onClick={startVoiceRecording} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m0-3a7 7 0 007-7m-7 7a7 7 0 01-7-7m7 7v0M12 1a3 3 0 00-3 3v7a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                      </svg>
+                      Voice
+                    </button>
                   ) : (
-                    <button type="button" onClick={stopVoiceRecording} className="px-2.5 py-1.5 text-sm border border-red-400 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 animate-pulse">⏹ <span className="text-xs">Stop ({recordElapsed}s)</span></button>
+                    <button type="button" onClick={stopVoiceRecording} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-300 rounded-lg hover:bg-rose-100 transition-colors animate-pulse">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-rose-600" />
+                      Stop ({recordElapsed}s)
+                    </button>
                   )}
-                  <button type="button" onClick={openLibraryPicker} className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">📂 <span className="text-xs">From Docs</span></button>
+                  <button type="button" onClick={openLibraryPicker} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    From Docs
+                  </button>
                 </div>
                 {(noteAttachments.length > 0 || noteExistingDocs.length > 0) && (
                   <div className="flex items-center gap-2 mt-2 flex-wrap">

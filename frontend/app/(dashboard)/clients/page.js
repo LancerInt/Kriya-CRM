@@ -89,44 +89,89 @@ export default function ClientsPage() {
     { key: "primary_executive_name", label: "Account Owner", render: (row) => row.primary_executive_name || "-" },
   ];
 
+  // Stats
+  const activeCount = list.filter(c => c.status === "active").length;
+  const tier1Count = list.filter(c => c.tier === "tier_1").length;
+  const tier2Count = list.filter(c => c.tier === "tier_2").length;
+  const totalContacts = list.reduce((sum, c) => sum + (c.contact_count || 0), 0);
+
   return (
-    <div>
-      <PageHeader
-        title="Accounts"
-        subtitle={`${displayList.length} account${displayList.length !== 1 ? "s" : ""}`}
-        action={
+    <div className="space-y-5">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-6 shadow-xl">
+        <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-violet-300/20 rounded-full blur-2xl" />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center ring-1 ring-white/30 shadow-lg">
+              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-white tracking-tight">Accounts</h1>
+              <p className="text-indigo-100 text-sm mt-0.5">{displayList.length} {displayList.length === 1 ? "account" : "accounts"} · {totalContacts} total contacts</p>
+            </div>
+          </div>
           <Link
             href="/clients/new"
-            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700"
+            className="flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 text-sm font-bold rounded-xl ring-1 ring-white/30 hover:shadow-lg hover:scale-[1.02] transition-all shadow-md"
           >
-            + New Account
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            New Account
           </Link>
-        }
-      />
+        </div>
+      </div>
+
+      {/* Stat Tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-indigo-100">Total Accounts</p>
+          <p className="relative text-3xl font-extrabold mt-1">{list.length}</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-emerald-50">Active</p>
+          <p className="relative text-3xl font-extrabold mt-1">{activeCount}</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 to-rose-600 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-rose-50">Tier 1 · VIP</p>
+          <p className="relative text-3xl font-extrabold mt-1">{tier1Count}</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 p-4 text-white shadow-md">
+          <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full blur-2xl" />
+          <p className="relative text-[10px] uppercase tracking-[0.12em] font-bold text-amber-50">Tier 2 · Priority</p>
+          <p className="relative text-3xl font-extrabold mt-1">{tier2Count}</p>
+        </div>
+      </div>
 
       {/* Executive tabs: My Clients / Shadow Clients */}
       {isExecutive && (
-        <div className="flex gap-2 mb-4">
-          <button onClick={() => setTab("all")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "all" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            All ({list.length})
+        <div className="flex gap-1 p-1.5 bg-white rounded-2xl border border-slate-200/70 shadow-sm w-fit">
+          <button onClick={() => setTab("all")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${tab === "all" ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+            All <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${tab === "all" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{list.length}</span>
           </button>
-          <button onClick={() => setTab("my")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "my" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            My Accounts ({myClients.length})
+          <button onClick={() => setTab("my")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${tab === "my" ? "bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+            My Accounts <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${tab === "my" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{myClients.length}</span>
           </button>
-          <button onClick={() => setTab("shadow")} className={`px-4 py-1.5 text-sm font-medium rounded-lg ${tab === "shadow" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}>
-            Shared Accounts ({shadowClients.length})
+          <button onClick={() => setTab("shadow")} className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl transition-all ${tab === "shadow" ? "bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+            Shared <span className={`px-1.5 py-px rounded-full text-[10px] font-bold ${tab === "shadow" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>{shadowClients.length}</span>
           </button>
         </div>
       )}
 
-      <DataTable
-        columns={columns}
-        data={displayList}
-        loading={loading}
-        emptyTitle="No accounts"
-        emptyDescription={isExecutive ? "No accounts assigned to you" : "Create your first account to get started"}
-        onRowClick={(row) => router.push(`/clients/${row.id}`)}
-      />
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <DataTable
+          columns={columns}
+          data={displayList}
+          loading={loading}
+          emptyTitle="No accounts"
+          emptyDescription={isExecutive ? "No accounts assigned to you" : "Create your first account to get started"}
+          onRowClick={(row) => router.push(`/clients/${row.id}`)}
+        />
+      </div>
     </div>
   );
 }

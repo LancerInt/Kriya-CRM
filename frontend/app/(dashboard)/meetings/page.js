@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/ui/PageHeader";
-import DataTable from "@/components/ui/DataTable";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
-import { format } from "date-fns";
+import { format, isToday, isFuture, isPast, differenceInMinutes, isThisWeek } from "date-fns";
 import api from "@/lib/axios";
 import { getErrorMessage } from "@/lib/errorHandler";
 
@@ -13,6 +13,23 @@ function fmtDateTime(d) {
   if (!d) return "—";
   try { return format(new Date(d), "MMM d, yyyy h:mm a"); } catch { return "—"; }
 }
+
+// Status -> tone tokens for the row stripe + chip.
+const STATUS_TONE = {
+  scheduled: { bar: "bg-indigo-500",  chip: "bg-indigo-50 border-indigo-100" },
+  completed: { bar: "bg-emerald-500", chip: "bg-emerald-50 border-emerald-100" },
+  missed:    { bar: "bg-rose-500",    chip: "bg-rose-50 border-rose-100" },
+  cancelled: { bar: "bg-gray-400",    chip: "bg-gray-50 border-gray-200" },
+};
+const PLATFORM_META = {
+  google_meet: { label: "Google Meet", icon: "📹", color: "bg-emerald-100 text-emerald-700" },
+  zoom:        { label: "Zoom",        icon: "🎥", color: "bg-blue-100 text-blue-700" },
+  teams:       { label: "Teams",       icon: "💼", color: "bg-violet-100 text-violet-700" },
+  whatsapp:    { label: "WhatsApp",    icon: "💬", color: "bg-green-100 text-green-700" },
+  phone:       { label: "Phone",       icon: "📞", color: "bg-amber-100 text-amber-700" },
+  in_person:   { label: "In Person",   icon: "🤝", color: "bg-rose-100 text-rose-700" },
+  other:       { label: "Other",       icon: "📅", color: "bg-gray-100 text-gray-700" },
+};
 
 export default function MeetingsPage() {
   const [meetings, setMeetings] = useState([]);
@@ -66,107 +83,269 @@ export default function MeetingsPage() {
 
   const isUpcoming = (row) => row.status === "scheduled" && new Date(row.scheduled_at) > new Date();
 
-  const columns = [
-    { key: "platform", label: "Platform", render: (row) => <StatusBadge status={row.platform || "other"} /> },
-    { key: "client_name", label: "Client", render: (row) => <span className="font-medium">{row.client_name || "—"}</span> },
-    { key: "agenda", label: "Agenda", render: (row) => row.agenda || "—" },
-    { key: "scheduled_at", label: "Scheduled", render: (row) => fmtDateTime(row.scheduled_at) },
-    { key: "duration_minutes", label: "Duration", render: (row) => row.duration_minutes ? `${row.duration_minutes} min` : "—" },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "meeting_link", label: "", render: (row) => {
-      if (row.status === "completed" || row.status === "cancelled" || row.status === "missed") {
-        return <span className="text-xs text-gray-400 font-medium">{row.status === "completed" ? "Meet Ended" : row.status === "cancelled" ? "Cancelled" : "Missed"}</span>;
-      }
-      if (row.meeting_link) {
-        // Check if meeting time has passed (scheduled_at + duration)
-        const endTime = new Date(new Date(row.scheduled_at).getTime() + (row.duration_minutes || 60) * 60000);
-        if (new Date() > endTime) {
-          return <span className="text-xs text-gray-400 font-medium">Meet Ended</span>;
-        }
-        return <a href={row.meeting_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">Join</a>;
-      }
-      if (row.platform === "zoom" || row.platform === "google_meet") {
-        return <button
-          onClick={async (e) => {
-            e.stopPropagation();
-            try {
-              const r = await api.post(`/meetings/${row.id}/generate-link/`);
-              toast.success("Link generated — review the draft before sending");
-              fetchMeetings();
-              const d = r.data?.draft || {};
-              setInviteDraft({
-                meetingId: row.id,
-                subject: d.subject || "",
-                to: d.to || "",
-                cc: Array.isArray(d.cc) ? d.cc.join(", ") : (d.cc || ""),
-                body: d.body_html || "",
-                sending: false,
-              });
-            } catch (err) {
-              toast.error(err.response?.data?.error || "Failed to generate link");
-            }
-          }}
-          className="text-xs text-green-600 hover:text-green-700 font-medium"
-        >Generate Link</button>;
-      }
-      return null;
-    }},
-    { key: "actions", label: "", render: (row) => (
-      <div className="flex items-center gap-2">
-        {row.status === "scheduled" && (
-          <select
-            value={row.status}
-            onClick={(e) => e.stopPropagation()}
-            onChange={async (e) => {
-              e.stopPropagation();
-              const newStatus = e.target.value;
-              try {
-                await api.patch(`/meetings/${row.id}/`, { status: newStatus });
-                toast.success(`Meeting marked as ${newStatus}`);
-                fetchMeetings();
-              } catch (err) { toast.error(getErrorMessage(err, "Failed to update status")); }
-            }}
-            className="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="scheduled">Scheduled</option>
-            <option value="completed">Completed</option>
-            <option value="missed">Missed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        )}
-        <button onClick={(e) => { e.stopPropagation(); setSelectedMeeting(row); }} className="px-3 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100">Details</button>
-      </div>
-    )},
-  ];
+  // Filters
+  const [filters, setFilters] = useState({ search: "", status: "", platform: "" });
+  const filterInput = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none";
 
-  const sortedMeetings = [...meetings].sort((a, b) => {
-    const aUp = isUpcoming(a), bUp = isUpcoming(b);
-    if (aUp && !bUp) return -1;
-    if (!aUp && bUp) return 1;
-    return new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0);
-  });
+  const stats = useMemo(() => {
+    const buckets = { total: meetings.length, upcoming: 0, today: 0, week: 0, completed: 0 };
+    meetings.forEach((m) => {
+      const dt = m.scheduled_at ? new Date(m.scheduled_at) : null;
+      if (!dt) return;
+      if (m.status === "scheduled" && isFuture(dt)) buckets.upcoming += 1;
+      if (isToday(dt)) buckets.today += 1;
+      if (isThisWeek(dt) && m.status === "scheduled") buckets.week += 1;
+      if (m.status === "completed") buckets.completed += 1;
+    });
+    return buckets;
+  }, [meetings]);
+
+  const filtered = useMemo(() => {
+    return meetings.filter((m) => {
+      if (filters.search) {
+        const q = filters.search.toLowerCase();
+        const hay = `${m.client_name || ""} ${m.agenda || ""} ${m.user_name || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filters.status && m.status !== filters.status) return false;
+      if (filters.platform && m.platform !== filters.platform) return false;
+      return true;
+    }).sort((a, b) => {
+      // Upcoming first, then most recent
+      const aUp = isUpcoming(a), bUp = isUpcoming(b);
+      if (aUp && !bUp) return -1;
+      if (!aUp && bUp) return 1;
+      // Within upcoming, soonest first
+      if (aUp && bUp) return new Date(a.scheduled_at) - new Date(b.scheduled_at);
+      // Within past, most recent first
+      return new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0);
+    });
+  }, [meetings, filters]);
+
+  const filtersActive = Object.values(filters).some(Boolean);
+  const clearFilters = () => setFilters({ search: "", status: "", platform: "" });
+
+  const timeUntilLabel = (dt) => {
+    if (!dt) return "";
+    const diffMin = differenceInMinutes(new Date(dt), new Date());
+    if (diffMin < 0) return null;
+    if (diffMin < 60) return `in ${diffMin}m`;
+    if (diffMin < 1440) return `in ${Math.floor(diffMin / 60)}h`;
+    if (diffMin < 10080) return `in ${Math.floor(diffMin / 1440)}d`;
+    return null;
+  };
 
   return (
     <div>
       <PageHeader
         title="Meetings & Calls"
-        subtitle={`${meetings.length} meetings`}
+        subtitle={filtersActive ? `${filtered.length} of ${meetings.length} meetings` : `${meetings.length} meetings`}
         action={
-          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all">
             + Schedule Meeting
           </button>
         }
       />
 
-      {sortedMeetings.some(isUpcoming) && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm font-medium text-blue-800">
-            {sortedMeetings.filter(isUpcoming).length} upcoming meeting{sortedMeetings.filter(isUpcoming).length !== 1 ? "s" : ""} scheduled
-          </p>
+      {/* Stat tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📅</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Upcoming</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.upcoming}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">scheduled ahead</p>
+        </div>
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🔥</span><span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">Today</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.today}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">on the calendar</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📆</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">This Week</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.week}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">7-day window</p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">✅</span><span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Completed</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.completed}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">closed out</p>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="mb-4 bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide pr-1">Filters</span>
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.5 10.5a6 6 0 11-12 0 6 6 0 0112 0z" />
+          </svg>
+          <input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Client, agenda, host..." className={`${filterInput} w-full pl-8`} />
+        </div>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterInput}>
+          <option value="">All statuses</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="completed">Completed</option>
+          <option value="missed">Missed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select value={filters.platform} onChange={(e) => setFilters({ ...filters, platform: e.target.value })} className={filterInput}>
+          <option value="">All platforms</option>
+          {Object.entries(PLATFORM_META).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+        {filtersActive && (
+          <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50">
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Meeting cards */}
+      {loading ? (
+        <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+          <div className="text-4xl mb-3">📅</div>
+          <p className="text-base font-semibold text-gray-800">{filtersActive ? "No meetings match" : "No meetings yet"}</p>
+          <p className="text-sm text-gray-500 mt-1">{filtersActive ? "Try clearing one of the filters above." : "Schedule your first meeting to get started."}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((row) => {
+            const tone = STATUS_TONE[row.status] || STATUS_TONE.scheduled;
+            const platform = PLATFORM_META[row.platform] || PLATFORM_META.other;
+            const dt = row.scheduled_at ? new Date(row.scheduled_at) : null;
+            const upcoming = isUpcoming(row);
+            const today = dt && isToday(dt);
+            const timeBadge = upcoming ? timeUntilLabel(dt) : null;
+            const endTime = dt ? new Date(dt.getTime() + (row.duration_minutes || 60) * 60000) : null;
+            const ended = endTime && new Date() > endTime;
+            return (
+              <div
+                key={row.id}
+                onClick={() => setSelectedMeeting(row)}
+                className={`group relative bg-white border ${tone.chip} rounded-xl px-4 py-3 cursor-pointer hover:shadow-md hover:-translate-y-px transition-all`}
+              >
+                <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
+
+                <div className="flex items-center gap-4 pl-2 flex-wrap md:flex-nowrap">
+                  {/* Platform icon */}
+                  <div className={`w-11 h-11 rounded-xl ${platform.color} flex items-center justify-center text-lg shrink-0`}>
+                    {platform.icon}
+                  </div>
+
+                  {/* Identity */}
+                  <div className="min-w-0 flex-1 basis-full md:basis-auto">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-gray-900 tracking-tight">{row.client_name || "—"}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-1.5 py-0.5">{platform.label}</span>
+                      {today && upcoming && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500 text-white">Today</span>
+                      )}
+                      {timeBadge && !today && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500 text-white">{timeBadge}</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-700 mt-0.5 truncate">{row.agenda || <span className="text-gray-400 italic">No agenda</span>}</p>
+                  </div>
+
+                  {/* Date/time */}
+                  <div className="hidden md:block text-right shrink-0 min-w-[140px]">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">When</p>
+                    <p className={`text-xs font-semibold ${upcoming ? "text-indigo-700" : "text-gray-700"}`}>
+                      {dt ? format(dt, "MMM d, h:mm a") : "—"}
+                    </p>
+                    {row.duration_minutes && (
+                      <p className="text-[10px] text-gray-400">{row.duration_minutes} min</p>
+                    )}
+                  </div>
+
+                  {/* Status */}
+                  <div className="hidden sm:block w-28 text-center shrink-0">
+                    <StatusBadge status={row.status} />
+                  </div>
+
+                  {/* Action */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Join / Generate / Ended */}
+                    {(row.status === "completed" || row.status === "cancelled" || row.status === "missed") ? (
+                      <span className="text-[11px] text-gray-400 italic px-2">
+                        {row.status === "completed" ? "Ended" : row.status === "cancelled" ? "Cancelled" : "Missed"}
+                      </span>
+                    ) : row.meeting_link && !ended ? (
+                      <a
+                        href={row.meeting_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100"
+                      >
+                        ↗ Join
+                      </a>
+                    ) : ended ? (
+                      <span className="text-[11px] text-gray-400 italic px-2">Ended</span>
+                    ) : (row.platform === "zoom" || row.platform === "google_meet") ? (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            const r = await api.post(`/meetings/${row.id}/generate-link/`);
+                            toast.success("Link generated — review the draft before sending");
+                            fetchMeetings();
+                            const d = r.data?.draft || {};
+                            setInviteDraft({
+                              meetingId: row.id,
+                              subject: d.subject || "",
+                              to: d.to || "",
+                              cc: Array.isArray(d.cc) ? d.cc.join(", ") : (d.cc || ""),
+                              body: d.body_html || "",
+                              sending: false,
+                            });
+                          } catch (err) {
+                            toast.error(err.response?.data?.error || "Failed to generate link");
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-violet-700 bg-violet-50 border border-violet-100 rounded-md hover:bg-violet-100"
+                      >
+                        ✨ Generate Link
+                      </button>
+                    ) : null}
+
+                    {/* Status quick-change */}
+                    {row.status === "scheduled" && (
+                      <select
+                        value={row.status}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await api.patch(`/meetings/${row.id}/`, { status: e.target.value });
+                            toast.success(`Marked ${e.target.value}`);
+                            fetchMeetings();
+                          } catch (err) { toast.error(getErrorMessage(err, "Failed to update")); }
+                        }}
+                        className="text-[11px] font-medium border border-gray-200 rounded-md px-1.5 py-1 outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                        <option value="missed">Missed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    )}
+
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedMeeting(row); }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100"
+                    >
+                      Details
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-
-      <DataTable columns={columns} data={sortedMeetings} loading={loading} emptyTitle="No meetings yet" emptyDescription="Schedule your first meeting" />
 
       {/* Create Meeting Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Schedule Meeting" size="lg">
@@ -226,7 +405,7 @@ export default function MeetingsPage() {
             </div>
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Schedule</button>
+            <button type="submit" className="px-5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow transition-all">Schedule</button>
             <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
         </form>

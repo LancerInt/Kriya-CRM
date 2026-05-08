@@ -1,22 +1,59 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "next/navigation";
 import { fetchOrders } from "@/store/slices/orderSlice";
 import PageHeader from "@/components/ui/PageHeader";
 import AISummaryButton from "@/components/ai/AISummaryButton";
-import DataTable from "@/components/ui/DataTable";
 import StatusBadge from "@/components/ui/StatusBadge";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
 import { format } from "date-fns";
 
+// Order status -> overall progress %. Mirrors the Shipments page so progress
+// visualization stays consistent across the app. FIRC overrides to 100%.
+const ORDER_STATUS_PROGRESS = {
+  pif_sent: 9,
+  factory_ready: 18,
+  docs_preparing: 27,
+  inspection: 36,
+  inspection_passed: 50,
+  container_booked: 60,
+  docs_approved: 70,
+  dispatched: 75,
+  in_transit: 80,
+  arrived: 90,
+  delivered: 90,
+};
+
+const STATUS_TONE = {
+  pif_sent:          { bar: "bg-violet-400",   text: "text-violet-700",   chip: "bg-violet-50 border-violet-200" },
+  factory_ready:     { bar: "bg-purple-400",   text: "text-purple-700",   chip: "bg-purple-50 border-purple-200" },
+  docs_preparing:    { bar: "bg-amber-400",    text: "text-amber-700",    chip: "bg-amber-50 border-amber-200" },
+  inspection:        { bar: "bg-amber-500",    text: "text-amber-800",    chip: "bg-amber-50 border-amber-200" },
+  inspection_passed: { bar: "bg-yellow-500",   text: "text-yellow-700",   chip: "bg-yellow-50 border-yellow-200" },
+  container_booked:  { bar: "bg-orange-400",   text: "text-orange-700",   chip: "bg-orange-50 border-orange-200" },
+  docs_approved:     { bar: "bg-sky-400",      text: "text-sky-700",      chip: "bg-sky-50 border-sky-200" },
+  dispatched:        { bar: "bg-indigo-500",   text: "text-indigo-700",   chip: "bg-indigo-50 border-indigo-200" },
+  in_transit:        { bar: "bg-blue-500",     text: "text-blue-700",     chip: "bg-blue-50 border-blue-200" },
+  arrived:           { bar: "bg-cyan-500",     text: "text-cyan-700",     chip: "bg-cyan-50 border-cyan-200" },
+  delivered:         { bar: "bg-emerald-500",  text: "text-emerald-700",  chip: "bg-emerald-50 border-emerald-200" },
+  cancelled:         { bar: "bg-rose-400",     text: "text-rose-700",     chip: "bg-rose-50 border-rose-200" },
+};
+
+const computeProgress = (row) => row.firc_received_at ? 100 : (ORDER_STATUS_PROGRESS[row.status] ?? 0);
+const fmtDate = (d) => { try { return format(new Date(d), "MMM d, yyyy"); } catch { return "—"; } };
+
 export default function OrdersPage() {
   const dispatch = useDispatch();
   const router = useRouter();
   const { list, loading } = useSelector((state) => state.orders);
+  const user = useSelector((state) => state.auth?.user);
+  const canDeleteOrder = user?.role === "admin" || user?.role === "manager";
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
@@ -30,10 +67,13 @@ export default function OrdersPage() {
     client: "", product_name: "", quantity: "", unit: "KG", unit_price: "",
     currency: "USD", delivery_terms: "FOB", freight_terms: "", payment_terms: "",
   });
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    dispatch(fetchOrders());
-  }, []);
+  // Filters
+  const [filters, setFilters] = useState({ search: "", status: "", year: "" });
+
+  useEffect(() => { dispatch(fetchOrders()); }, []);
 
   const openCreate = () => {
     setForm({ client: "", product_name: "", quantity: "", unit: "KG", unit_price: "", currency: "USD", delivery_terms: "FOB", freight_terms: "", payment_terms: "" });
@@ -47,7 +87,6 @@ export default function OrdersPage() {
     if (products.length === 0) {
       api.get("/products/").then(r => setProducts(r.data.results || r.data)).catch(() => {});
     }
-    // Fetch next order number
     const count = list.length + 1;
     setNextOrderNum(`ORD-${String(count).padStart(5, "0")}`);
     setShowCreateModal(true);
@@ -59,14 +98,10 @@ export default function OrdersPage() {
     setSubmitting(true);
     try {
       const res = await api.post("/orders/", {
-        client: form.client,
-        order_type: "direct",
-        currency: form.currency || "USD",
-        delivery_terms: form.delivery_terms,
-        freight_terms: form.freight_terms,
+        client: form.client, order_type: "direct", currency: form.currency || "USD",
+        delivery_terms: form.delivery_terms, freight_terms: form.freight_terms,
         payment_terms: form.payment_terms,
       });
-      // Create order item if product specified
       if (form.product_name) {
         await api.post(`/orders/${res.data.id}/add-item/`, {
           product_name: form.product_name,
@@ -82,11 +117,6 @@ export default function OrdersPage() {
     finally { setSubmitting(false); }
   };
 
-  const user = useSelector((state) => state.auth?.user);
-  const canDeleteOrder = user?.role === "admin" || user?.role === "manager";
-  const [deleteTarget, setDeleteTarget] = useState(null); // order row pending delete
-  const [deleting, setDeleting] = useState(false);
-
   const confirmDeleteOrder = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -99,41 +129,174 @@ export default function OrdersPage() {
     finally { setDeleting(false); }
   };
 
-  const columns = [
-    { key: "order_number", label: "Order #", render: (row) => <span className="font-medium">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span> },
-    { key: "client_name", label: "Account" },
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "created_at", label: "Date", render: (row) => { try { return format(new Date(row.created_at), "MMM d, yyyy"); } catch { return "—"; } } },
-    ...(canDeleteOrder ? [{
-      key: "actions", label: "", render: (row) => (
-        <button
-          onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
-          title="Delete order"
-          className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-          </svg>
-        </button>
-      ),
-    }] : []),
-  ];
+  // Derived buckets for the stat strip
+  const stats = useMemo(() => {
+    const buckets = { total: list.length, in_motion: 0, docs: 0, completed: 0 };
+    list.forEach((o) => {
+      if (["dispatched", "in_transit", "arrived"].includes(o.status)) buckets.in_motion += 1;
+      if (["pif_sent", "factory_ready", "docs_preparing", "inspection", "inspection_passed", "container_booked", "docs_approved"].includes(o.status)) buckets.docs += 1;
+      if (o.status === "delivered") buckets.completed += 1;
+    });
+    return buckets;
+  }, [list]);
+
+  // Filter options derived from the live data
+  const statusOptions = Array.from(new Set(list.map((o) => o.status).filter(Boolean))).sort();
+  const yearOptions = Array.from(new Set(
+    list.map((o) => (o.created_at ? new Date(o.created_at).getFullYear() : null)).filter(Boolean)
+  )).sort((a, b) => b - a);
+
+  const filtered = useMemo(() => list.filter((o) => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const hay = `${o.order_number || ""} ${o.client_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (filters.status && o.status !== filters.status) return false;
+    if (filters.year) {
+      if (!o.created_at) return false;
+      if (new Date(o.created_at).getFullYear() !== Number(filters.year)) return false;
+    }
+    return true;
+  }), [list, filters]);
+
+  const filtersActive = Object.values(filters).some(Boolean);
+  const clearFilters = () => setFilters({ search: "", status: "", year: "" });
 
   const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm";
+  const filterInput = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none";
 
   return (
     <div>
-      <PageHeader title="Sales Orders" subtitle={`${list.length} orders`} action={
-        <div className="flex gap-2">
-          <button onClick={openCreate} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Create Order</button>
-          <AISummaryButton variant="button" title="Orders Summary" prompt={`Write a tight Orders summary using the pre-loaded order data. Structure with these sections (## headings):\n\n## Overview\nOne line: total active orders, total value (by currency), and counts in each major stage (docs preparing, dispatched, in transit, arrived).\n\n## In Motion\nUp to 5 orders dispatched / in transit / arrived: order# · client · status · value.\n\n## Needs Attention\nUp to 5 orders stuck or risk-flagged (e.g. waiting on documents, payment overdue, no movement in days): order# · client · why.\n\n## Top Clients\nUp to 4 clients by active-order value.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't enumerate every order.`} />
+      <PageHeader
+        title="Sales Orders"
+        subtitle={filtersActive ? `${filtered.length} of ${list.length} orders` : `${list.length} orders`}
+        action={
+          <div className="flex gap-2">
+            <button onClick={openCreate} className="px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all">
+              + Create Order
+            </button>
+            <AISummaryButton variant="button" title="Orders Summary" prompt={`Write a tight Orders summary using the pre-loaded order data. Structure with these sections (## headings):\n\n## Overview\nOne line: total active orders, total value (by currency), and counts in each major stage (docs preparing, dispatched, in transit, arrived).\n\n## In Motion\nUp to 5 orders dispatched / in transit / arrived: order# · client · status · value.\n\n## Needs Attention\nUp to 5 orders stuck or risk-flagged (e.g. waiting on documents, payment overdue, no movement in days): order# · client · why.\n\n## Top Clients\nUp to 4 clients by active-order value.\n\n### Next Steps\n2-3 concrete actions.\n\nKeep under 300 words. Don't enumerate every order.`} />
+          </div>
+        }
+      />
+
+      {/* Stat strip ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📦</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Total</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.total}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">orders on file</p>
         </div>
-      } />
-      <DataTable columns={columns} data={list} loading={loading} emptyTitle="No orders yet" emptyDescription="Orders are created from approved quotations or manually" onRowClick={(row) => router.push(`/orders/${row.id}`)} />
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📝</span><span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">In Production</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.docs}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">PIF → Docs Approved</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🚚</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">In Motion</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.in_motion}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">Dispatched · In Transit · Arrived</p>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="mb-4 bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide pr-1">Filters</span>
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          <input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Order # or client…" className={`${filterInput} w-full pl-8`} />
+        </div>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterInput}>
+          <option value="">All statuses</option>
+          {statusOptions.map((s) => (
+            <option key={s} value={s}>{s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</option>
+          ))}
+        </select>
+        <select value={filters.year} onChange={(e) => setFilters({ ...filters, year: e.target.value })} className={filterInput}>
+          <option value="">All years</option>
+          {yearOptions.map((y) => (<option key={y} value={y}>{y}</option>))}
+        </select>
+        {filtersActive && (
+          <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50">
+            ✕ Clear
+          </button>
+        )}
+      </div>
+
+      {/* Order cards */}
+      {loading ? (
+        <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+          <div className="text-4xl mb-3">📭</div>
+          <p className="text-base font-semibold text-gray-800">{filtersActive ? "No orders match" : "No orders yet"}</p>
+          <p className="text-sm text-gray-500 mt-1">{filtersActive ? "Try clearing one of the filters above." : "Orders are created from approved quotations or manually."}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((row) => {
+            const tone = STATUS_TONE[row.status] || STATUS_TONE.pif_sent;
+            const pct = computeProgress(row);
+            return (
+              <div
+                key={row.id}
+                onClick={() => router.push(`/orders/${row.id}`)}
+                className={`group relative bg-white border ${tone.chip} rounded-xl px-4 py-3 cursor-pointer hover:shadow-md hover:-translate-y-px transition-all`}
+              >
+                {/* Left status stripe */}
+                <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
+
+                <div className="flex items-center gap-4 pl-2">
+                  {/* Order # + client */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-gray-900 tracking-tight">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span>
+                      {row.firc_received_at && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">FIRC ✓</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
+                      <span className="font-medium text-gray-700">{row.client_name || "—"}</span>
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      {fmtDate(row.created_at)}
+                    </p>
+                  </div>
+
+                  {/* Status */}
+                  <div className="hidden sm:block w-32 text-center">
+                    <StatusBadge status={row.status} />
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="hidden md:flex items-center gap-2 w-56">
+                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full ${tone.bar} transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className={`text-xs font-bold tabular-nums ${tone.text}`}>{pct}%</span>
+                  </div>
+
+                  {/* Delete */}
+                  {canDeleteOrder && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
+                      title="Delete order"
+                      className="p-2 rounded-lg text-gray-300 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create Sales Order" size="md">
         <form onSubmit={handleCreate} className="space-y-4">
-          {/* Order # + Created Date */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Order</label>
@@ -145,7 +308,6 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* Product — searchable dropdown with add new */}
           <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
             <input
@@ -186,7 +348,6 @@ export default function OrdersPage() {
             )}
           </div>
 
-          {/* Quantity / Unit / Unit Price — populates Order.total */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
@@ -220,7 +381,6 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* Client — searchable dropdown */}
           <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
             <input
@@ -249,7 +409,6 @@ export default function OrdersPage() {
             )}
           </div>
 
-          {/* Delivery Terms + Payment Terms + Freight */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Terms</label>
@@ -280,7 +439,7 @@ export default function OrdersPage() {
           </div>
 
           <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={submitting} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
+            <button type="submit" disabled={submitting} className="px-6 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg font-medium shadow-sm hover:shadow disabled:opacity-50">
               {submitting ? "Creating..." : "Create Order"}
             </button>
             <button type="button" onClick={() => setShowCreateModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
@@ -288,7 +447,6 @@ export default function OrdersPage() {
         </form>
       </Modal>
 
-      {/* Delete confirmation modal */}
       <Modal open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} title="Delete Sales Order" size="sm">
         {deleteTarget && (
           <div className="space-y-4">
@@ -303,21 +461,15 @@ export default function OrdersPage() {
                   Are you sure you want to delete <span className="font-semibold">{deleteTarget.order_number || "this order"}</span>?
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  The order will be removed from the list. Linked shipments and documents are kept.
+                  The order will be removed from the list. Remaining orders will be re-numbered automatically so the sequence stays contiguous.
                 </p>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                disabled={deleting}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
-              >Cancel</button>
-              <button
-                onClick={confirmDeleteOrder}
-                disabled={deleting}
-                className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700 disabled:opacity-50"
-              >{deleting ? "Deleting..." : "Yes, Delete"}</button>
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button onClick={confirmDeleteOrder} disabled={deleting} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700 disabled:opacity-50">
+                {deleting ? "Deleting..." : "Yes, Delete"}
+              </button>
             </div>
           </div>
         )}

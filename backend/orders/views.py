@@ -13,28 +13,55 @@ from .serializers import (
 from notifications.helpers import notify
 
 
+def _renumber_live_orders():
+    """Renumber every live (non-deleted) order to a contiguous ``ORD-NNNNN``
+    sequence ordered by ``created_at`` ASC.
+
+    Two passes inside a transaction so the unique constraint on
+    ``order_number`` can't collide mid-update — first move every row to
+    a guaranteed-unique temp value, then assign the final number.
+    """
+    from django.db import transaction
+    with transaction.atomic():
+        live = list(
+            Order.objects.filter(is_deleted=False)
+            .order_by('created_at', 'id')
+            .only('id', 'order_number')
+        )
+        # Pass 1 — temporary unique values keyed off the row's UUID so
+        # there's no chance of two rows sharing a temp number.
+        for o in live:
+            tmp = f'TMP-{str(o.id)[:8]}'
+            if o.order_number != tmp:
+                Order.objects.filter(pk=o.pk).update(order_number=tmp)
+        # Pass 2 — final sequential ORD-NNNNN.
+        for i, o in enumerate(live, start=1):
+            final = f'ORD-{i:05d}'
+            Order.objects.filter(pk=o.pk).update(order_number=final)
+
+
 class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     filterset_fields = ['client', 'status']
     search_fields = ['order_number']
 
     def get_queryset(self):
-        return Order.objects.filter(is_deleted=False).select_related('client', 'created_by', 'quotation').prefetch_related('items')
+        # Hide orders attached to auto-created placeholder clients (e.g.
+        # "mailer-daemon (Auto-created)") so they don't pollute the Sales
+        # Orders list. These rows are kept in the DB but excluded from
+        # the API surface — they appear in Archive if explicitly needed.
+        return (Order.objects
+                .filter(is_deleted=False)
+                .exclude(client__company_name__icontains='(Auto-created)')
+                .select_related('client', 'created_by', 'quotation')
+                .prefetch_related('items'))
 
     def perform_create(self, serializer):
-        # Auto-generate the next ORD-NNNNN number. order_number is read-only
-        # on the serializer, so the frontend never sends one; we mint it here.
-        # Use the highest existing zero-padded number rather than count() so
-        # gaps from soft-deletes don't cause collisions.
-        from django.db.models import Max
-        existing = Order.objects.filter(
-            order_number__regex=r'^ORD-\d+$',
-        ).aggregate(m=Max('order_number'))['m'] or 'ORD-00000'
-        try:
-            next_n = int(existing.split('-', 1)[1]) + 1
-        except (IndexError, ValueError):
-            next_n = Order.objects.count() + 1
-        # Defensive: walk forward if the candidate is somehow already taken
+        # Auto-generate the next ORD-NNNNN number. With auto-renumbering on
+        # delete, the live set is always contiguous, so the next number is
+        # simply (count of live orders) + 1. We still walk forward defensively
+        # in case of a race during renumber.
+        next_n = Order.objects.filter(is_deleted=False).count() + 1
         while Order.objects.filter(order_number=f'ORD-{next_n:05d}').exists():
             next_n += 1
         order_number = f'ORD-{next_n:05d}'
@@ -46,6 +73,23 @@ class OrderViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             notification_type='system', link='/sales-orders',
             actor=self.request.user, client=order.client,
         )
+
+    def perform_destroy(self, instance):
+        """Soft-delete the order, then renumber the remaining live orders so
+        the sequence stays contiguous (ORD-00018 → 00017 → ... → 00014 etc).
+
+        Step 1 — release the deleted order's number by prefixing it with
+        ``DEL-`` so the live ORD-NNNNN slot opens up.
+        Step 2 — renumber every live order to a contiguous sequence.
+        """
+        from django.db import transaction
+        with transaction.atomic():
+            old_number = instance.order_number
+            instance.soft_delete()
+            # Free the slot. Truncate so we don't blow past max_length=50.
+            freed = f'DEL-{str(instance.id)[:8]}-{(old_number or "")[:30]}'
+            Order.objects.filter(pk=instance.pk).update(order_number=freed)
+            _renumber_live_orders()
 
     @action(detail=True, methods=['post'], url_path='add-item')
     def add_item(self, request, pk=None):

@@ -4,6 +4,53 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+@shared_task(name='communications.historical_sync_emails')
+def historical_sync_emails(email_account_id, days_back):
+    """Backfill mail for ONE account up to ``days_back`` days into the past.
+
+    Wraps ``sync_emails`` but stamps progress fields on the EmailAccount so
+    the UI can show a banner / progress chip while the long-running pull
+    is in flight. Always exits cleanly (success OR failure) so the status
+    field never gets stuck on 'running'.
+    """
+    from communications.models import EmailAccount
+    from django.utils import timezone
+
+    account = EmailAccount.objects.filter(id=email_account_id).first()
+    if not account:
+        return {'error': 'account not found'}
+
+    EmailAccount.objects.filter(pk=account.pk).update(
+        historical_sync_status='running',
+        historical_sync_started_at=timezone.now(),
+        historical_sync_completed_at=None,
+        historical_sync_days_back=days_back,
+        historical_sync_imported=0,
+        historical_sync_error='',
+    )
+
+    try:
+        result = sync_emails(email_account_id=str(account.id), days_back=days_back)
+        imported = (result or {}).get('synced', 0) if isinstance(result, dict) else 0
+        EmailAccount.objects.filter(pk=account.pk).update(
+            historical_sync_status='completed',
+            historical_sync_completed_at=timezone.now(),
+            historical_sync_imported=imported,
+        )
+        # Reset last_synced so the regular delta task only picks up new mail
+        # going forward — otherwise it would re-scan history.
+        EmailAccount.objects.filter(pk=account.pk).update(last_synced=timezone.now())
+        return {'status': 'completed', 'imported': imported, 'days_back': days_back}
+    except Exception as e:
+        logger.exception(f'Historical sync failed for {account.email}')
+        EmailAccount.objects.filter(pk=account.pk).update(
+            historical_sync_status='failed',
+            historical_sync_completed_at=timezone.now(),
+            historical_sync_error=str(e)[:500],
+        )
+        return {'status': 'failed', 'error': str(e)}
+
+
 @shared_task(name='communications.sync_emails')
 def sync_emails(email_account_id=None, days_back=None):
     """Sync emails from IMAP for one or all active EmailAccounts.
@@ -21,9 +68,12 @@ def sync_emails(email_account_id=None, days_back=None):
     else:
         accounts = EmailAccount.objects.filter(is_active=True)
 
+    historical = bool(days_back and days_back > 30)
     total_synced = 0
     for account in accounts:
         emails = EmailService.fetch_emails(account, days_back=days_back)
+        if historical:
+            logger.info(f'Historical sync for {account.email}: fetched {len(emails)} emails from IMAP')
         for em in emails:
             # Dedup by message_id (primary)
             if em['message_id'] and Communication.objects.filter(
@@ -198,11 +248,20 @@ def sync_emails(email_account_id=None, days_back=None):
 
             total_synced += 1
 
+            # Live progress on historical pulls — flush the running counter
+            # to the EmailAccount every 50 imports so the UI shows the
+            # number climbing instead of staying at 0 until completion.
+            if historical and total_synced % 50 == 0:
+                try:
+                    EmailAccount.objects.filter(pk=account.pk).update(historical_sync_imported=total_synced)
+                except Exception:
+                    pass
+
         account.last_synced = timezone.now()
         account.save(update_fields=['last_synced'])
 
     logger.info(f'Email sync complete: {total_synced} new emails synced')
-    return f'{total_synced} emails synced'
+    return {'synced': total_synced, 'message': f'{total_synced} emails synced'}
 
 
 def _auto_revise_if_needed(communication):

@@ -39,40 +39,47 @@ function MediaIcon({ kind }) {
 function InspectionCard({ inspection, onOpenViewer }) {
   const passed = inspection.status === "passed";
   const failed = inspection.status === "failed";
-  const headerCls = passed
-    ? "bg-emerald-50 border-emerald-200"
+  const tone = passed
+    ? { card: "border-emerald-100", stripe: "bg-emerald-500", chip: "bg-emerald-600 text-white", icon: "✓" }
     : failed
-      ? "bg-red-50 border-red-200"
-      : "bg-gray-50 border-gray-200";
-  const pillCls = passed
-    ? "bg-emerald-600 text-white"
-    : failed
-      ? "bg-red-600 text-white"
-      : "bg-gray-500 text-white";
+      ? { card: "border-rose-100", stripe: "bg-rose-500", chip: "bg-rose-600 text-white", icon: "✗" }
+      : { card: "border-gray-200", stripe: "bg-gray-400", chip: "bg-gray-500 text-white", icon: "•" };
   const media = inspection.media || [];
   return (
-    <div className={`rounded-xl border ${headerCls} p-4 flex flex-col gap-3`}>
-      <div className="flex items-start justify-between gap-3">
+    <div className={`relative bg-white rounded-2xl border ${tone.card} p-4 pl-5 shadow-sm hover:shadow-md transition-all`}>
+      {/* Left status stripe */}
+      <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.stripe}`} />
+
+      <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-gray-900 text-sm">
+            <span className="font-bold text-gray-900 tracking-tight">
               {inspection.order_number || inspection.shipment_number || "—"}
             </span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${pillCls}`}>
-              {passed ? "✓ Passed" : failed ? "✗ Failed" : (inspection.status || "Pending")}
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${tone.chip}`}>
+              {tone.icon} {passed ? "Passed" : failed ? "Failed" : (inspection.status || "Pending")}
             </span>
           </div>
-          <p className="text-xs text-gray-600 mt-0.5 truncate">{inspection.client_name || "—"}</p>
+          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
+            <span className="font-medium text-gray-700 truncate">{inspection.client_name || "—"}</span>
+          </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-[11px] text-gray-500 capitalize">{(inspection.inspection_type || "").replace(/_/g, " ") || "—"}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">
+          {(inspection.inspection_type || "") && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-1.5 py-0.5">
+              {(inspection.inspection_type || "").replace(/_/g, " ")}
+            </span>
+          )}
+          <p className="text-[11px] text-gray-400 mt-1">
             {inspection.created_at ? new Date(inspection.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""}
           </p>
         </div>
       </div>
+
       {media.length === 0 ? (
-        <p className="text-xs italic text-gray-400">No media attached.</p>
+        <div className="border border-dashed border-gray-200 rounded-xl py-6 text-center text-xs text-gray-400 italic">
+          No media attached.
+        </div>
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
           {media.map((m, idx) => {
@@ -82,25 +89,42 @@ function InspectionCard({ inspection, onOpenViewer }) {
               <button
                 key={m.id}
                 onClick={() => onOpenViewer(inspection, idx)}
-                className="group relative aspect-square rounded-lg overflow-hidden bg-white border border-gray-200 hover:border-indigo-400 transition"
+                className="group relative aspect-square rounded-lg overflow-hidden bg-gray-50 border border-gray-200 hover:border-indigo-400 hover:shadow-sm transition-all"
                 title={`Open ${kind}`}
               >
                 {kind === "image" ? (
                   <img src={url} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-2xl bg-gray-50">
-                    <MediaIcon kind={kind} />
-                    <span className="text-[10px] text-gray-500 uppercase mt-1">{kind}</span>
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+                    <span className="text-2xl"><MediaIcon kind={kind} /></span>
+                    <span className="text-[9px] text-gray-500 uppercase mt-1 tracking-wide font-semibold">{kind}</span>
                   </div>
                 )}
-                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition" />
+                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition" />
+                {/* Tiny kind label on image tiles */}
+                {kind !== "image" && (
+                  <span className="absolute top-1 right-1 text-[9px] font-semibold bg-white/90 text-gray-700 rounded px-1 py-0.5 shadow-sm">
+                    {kind.toUpperCase()}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
       )}
-      <div className="text-[11px] text-gray-500 mt-1">
-        {media.length} {media.length === 1 ? "file" : "files"}
+
+      <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+        <span className="text-[11px] text-gray-500">
+          {media.length} {media.length === 1 ? "file" : "files"}
+        </span>
+        {media.length > 0 && (
+          <button
+            onClick={() => onOpenViewer(inspection, 0)}
+            className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+          >
+            Open viewer →
+          </button>
+        )}
       </div>
     </div>
   );

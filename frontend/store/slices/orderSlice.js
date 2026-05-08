@@ -3,7 +3,10 @@ import api from "@/lib/axios";
 
 export const fetchOrders = createAsyncThunk("orders/fetchAll", async (params, { rejectWithValue }) => {
   try {
-    const res = await api.get("/orders/", { params });
+    // page_size=5000 keeps the Sales Orders list contiguous regardless of
+    // how many rows exist (default DRF pagination would cap at 20 and the
+    // page would only show the most recent slice).
+    const res = await api.get("/orders/", { params: { page_size: 5000, ...(params || {}) } });
     return res.data;
   } catch (err) {
     return rejectWithValue(err.response?.data);

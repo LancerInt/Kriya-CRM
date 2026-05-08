@@ -420,6 +420,78 @@ class EmailAccountViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'], url_path='historical-sync')
+    def historical_sync(self, request, pk=None):
+        """Kick off a one-time backfill for an account, going `days_back` days
+        into the past. Runs in a background thread so the HTTP request
+        returns immediately; progress lives on the EmailAccount and is
+        polled by the UI.
+
+        Body: {"days_back": 365 | 730 | 1825 | 3650 | <int>}
+        """
+        import threading
+        from .tasks import historical_sync_emails
+        from .serializers import EmailAccountSerializer
+        from django.utils import timezone
+
+        account = self.get_object()
+
+        # Allow restart even when a previous backfill is still 'running' —
+        # IMAP fetches occasionally hang silently (Gmail throttle, network
+        # blip, dead Celery worker), so the user must be able to retry.
+        # The frontend already shows a confirm dialog before sending us a
+        # restart, so by the time we get here the user has explicitly
+        # asked for a fresh run. The new thread will overwrite the
+        # progress fields below.
+
+        # Validate / cap days_back. 30 minimum (smaller ranges are the regular
+        # delta sync's territory), 3650 maximum (10 years — beyond that most
+        # IMAP servers won't have the data anyway).
+        try:
+            days_back = int(request.data.get('days_back') or 1825)
+        except (TypeError, ValueError):
+            return Response({'error': 'days_back must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
+        if days_back < 30 or days_back > 3650:
+            return Response({'error': 'days_back must be between 30 and 3650'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Stamp 'running' immediately so the UI shows progress even before
+        # the thread starts work — the task itself will overwrite this.
+        EmailAccount.objects.filter(pk=account.pk).update(
+            historical_sync_status='running',
+            historical_sync_started_at=timezone.now(),
+            historical_sync_completed_at=None,
+            historical_sync_days_back=days_back,
+            historical_sync_imported=0,
+            historical_sync_error='',
+        )
+
+        # Run in a background thread. We deliberately avoid Celery here —
+        # in dev environments .delay() succeeds even without a worker,
+        # leaving the task queued indefinitely. A daemon thread runs in
+        # the same Django process, picks up DB-driven progress flushes,
+        # and ends when the task completes (or fails).
+        def _run():
+            from django.db import close_old_connections
+            try:
+                historical_sync_emails(str(account.id), days_back)
+            finally:
+                # Each thread holds its own DB connection — close it so
+                # the connection pool doesn't leak.
+                close_old_connections()
+
+        t = threading.Thread(target=_run, name=f'historical-sync-{account.id}', daemon=True)
+        t.start()
+
+        account.refresh_from_db()
+        return Response(
+            {
+                'queued': True,
+                'days_back': days_back,
+                'account': EmailAccountSerializer(account).data,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
 
 class EmailDraftViewSet(viewsets.ModelViewSet):
     serializer_class = EmailDraftSerializer
@@ -814,8 +886,18 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
         # matches what the recipient received. Stamp the threading metadata
         # so any further reply we send (PI, dispatch, transit, etc.) keeps
         # the same References chain.
+        # If the draft itself wasn't anchored to a client, try to match the
+        # recipient address to a known contact — otherwise the row shows
+        # "Assign Account" even when we already know who it belongs to.
+        outgoing_client = draft.client
+        outgoing_contact = None
+        if not outgoing_client and draft.to_email:
+            from .services import ContactMatcher
+            outgoing_client, outgoing_contact = ContactMatcher.match_by_email(draft.to_email.strip())
+
         Communication.objects.create(
-            client=draft.client,
+            client=outgoing_client,
+            contact=outgoing_contact,
             user=request.user,
             comm_type='email',
             direction='outbound',

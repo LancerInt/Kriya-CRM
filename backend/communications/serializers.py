@@ -53,8 +53,15 @@ class EmailAccountSerializer(serializers.ModelSerializer):
         model = EmailAccount
         fields = ['id', 'email', 'display_name', 'imap_host', 'imap_port',
                   'smtp_host', 'smtp_port', 'username', 'password', 'use_ssl',
-                  'is_active', 'last_synced', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'last_synced', 'created_at', 'updated_at']
+                  'is_active', 'last_synced',
+                  'historical_sync_status', 'historical_sync_started_at',
+                  'historical_sync_completed_at', 'historical_sync_days_back',
+                  'historical_sync_imported', 'historical_sync_error',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'last_synced', 'created_at', 'updated_at',
+                            'historical_sync_status', 'historical_sync_started_at',
+                            'historical_sync_completed_at', 'historical_sync_days_back',
+                            'historical_sync_imported', 'historical_sync_error']
         extra_kwargs = {
             'password': {'write_only': True},
         }

@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
-import DataTable from "@/components/ui/DataTable";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
@@ -11,6 +11,19 @@ import api from "@/lib/axios";
 import { getErrorMessage } from "@/lib/errorHandler";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import AISummaryButton from "@/components/ai/AISummaryButton";
+
+// Sample status -> visual tone. Used by the row stripe + chip on the card.
+const SAMPLE_TONE = {
+  requested:         { bar: "bg-amber-400",   chip: "bg-amber-50 border-amber-100" },
+  replied:           { bar: "bg-blue-500",    chip: "bg-blue-50 border-blue-100" },
+  prepared:          { bar: "bg-indigo-500",  chip: "bg-indigo-50 border-indigo-100" },
+  payment_received:  { bar: "bg-purple-500",  chip: "bg-purple-50 border-purple-100" },
+  dispatched:        { bar: "bg-emerald-500", chip: "bg-emerald-50 border-emerald-100" },
+  delivered:         { bar: "bg-teal-500",    chip: "bg-teal-50 border-teal-100" },
+  feedback_pending:  { bar: "bg-orange-400",  chip: "bg-orange-50 border-orange-100" },
+  feedback_received: { bar: "bg-gray-400",    chip: "bg-gray-50 border-gray-200" },
+};
+const sampleTone = (s) => SAMPLE_TONE[s] || { bar: "bg-gray-300", chip: "bg-white border-gray-200" };
 
 // Free samples skip "replied" and "payment_received" — paid samples include them.
 const FREE_STATUS_OPTIONS = [
@@ -74,7 +87,7 @@ export default function SamplesPage() {
   const fetchSamples = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/samples/");
+      const res = await api.get("/samples/", { params: { page_size: 5000 } });
       setSamples(res.data.results || res.data);
     } catch (err) { toast.error(getErrorMessage(err, "Failed to load samples")); } finally {
       setLoading(false);
@@ -203,119 +216,232 @@ export default function SamplesPage() {
     return qtys;
   };
 
-  const columns = [
-    { key: "sample_number", label: "Shipment No", render: (row) => (
-      <span className="font-medium text-gray-900">{row.sample_number || "—"}</span>
-    )},
-    { key: "product_name", label: "Product", render: (row) => {
-      const names = productNames(row);
-      if (names.length === 0) return <span className="text-gray-400">—</span>;
-      return (
-        <div className="flex flex-col gap-0.5">
-          {names.map((n, i) => <span key={i} className="font-medium">{n}</span>)}
-        </div>
-      );
-    }},
-    { key: "client_name", label: "Client", render: (row) => row.client_name || "—" },
-    { key: "sample_type", label: "Type", render: (row) => {
-      const locked = !!row.sample_type_locked;
-      const value = row.sample_type || "";
-      const isPaid = value === "paid";
-      const isFree = value === "free";
-
-      // Locked → static badge
-      if (locked && (isPaid || isFree)) {
-        return (
-          <span
-            title="Sample type is locked"
-            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${isPaid ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}
-          >
-            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-            {isPaid ? "Paid" : "Free"}
-          </span>
-        );
-      }
-
-      // Unlocked → open the type-assignment modal
-      const openAssign = (e) => {
-        e.stopPropagation();
-        setTypeAssignFor({ id: row.id, currentType: value });
-      };
-      return (
-        <button
-          onClick={openAssign}
-          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:bg-indigo-100"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-          </svg>
-          {isFree || isPaid ? `Confirm ${isPaid ? "Paid" : "Free"}` : "Set Type"}
-        </button>
-      );
-    }},
-    { key: "quantity", label: "Quantity", render: (row) => {
-      const qtys = itemQuantities(row);
-      if (qtys.length === 0) return "—";
-      return (
-        <div className="flex flex-col gap-0.5">
-          {qtys.map((q, i) => <span key={i}>{q}</span>)}
-        </div>
-      );
-    }},
-    { key: "status", label: "Status", render: (row) => <StatusBadge status={row.status} /> },
-    { key: "created_at", label: "Requested", render: (row) => row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "—" },
-    { key: "dispatch_date", label: "Dispatched", render: (row) => row.dispatch_date ? format(new Date(row.dispatch_date), "MMM d, yyyy") : "—" },
-    { key: "tracking_number", label: "Tracking #", render: (row) => row.tracking_number || "—" },
-    { key: "feedback", label: "Feedback", render: (row) => row.feedback ? (
-      <span className="text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">{row.feedback.comments ? row.feedback.comments.slice(0, 30) + (row.feedback.comments.length > 30 ? "..." : "") : `Rating: ${row.feedback.rating}/5`}</span>
-    ) : <span className="text-gray-400">{"—"}</span> },
-    { key: "actions", label: "", render: (row) => (
-      <div className="flex gap-1 items-center">
-        {(row.status === "delivered" || row.status === "feedback_pending") && !row.feedback && (
-          <button onClick={(e) => { e.stopPropagation(); openFeedback(row); }} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 px-2 py-1 rounded">
-            Add Feedback
-          </button>
-        )}
-        <button
-          onClick={(e) => { e.stopPropagation(); openEdit(row); }}
-          className="text-xs text-blue-600 hover:text-blue-700 font-medium bg-blue-50 px-2 py-1 rounded"
-        >
-          Edit
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); setDeletingSample(row); }}
-          className="text-xs text-red-600 hover:text-red-700 font-medium bg-red-50 px-2 py-1 rounded"
-        >
-          Delete
-        </button>
-      </div>
-    )},
-  ];
-
   const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none";
+
+  // Filters
+  const [filters, setFilters] = useState({ search: "", status: "", type: "" });
+  const filterInput = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300 outline-none";
+
+  const stats = useMemo(() => {
+    const buckets = { total: samples.length, awaiting: 0, dispatched: 0, delivered: 0, feedback: 0 };
+    samples.forEach((s) => {
+      if (["requested", "replied", "prepared", "payment_received"].includes(s.status)) buckets.awaiting += 1;
+      if (s.status === "dispatched") buckets.dispatched += 1;
+      if (s.status === "delivered" || s.status === "feedback_pending") buckets.delivered += 1;
+      if (s.status === "feedback_received") buckets.feedback += 1;
+    });
+    return buckets;
+  }, [samples]);
+
+  const statusOptions = useMemo(() =>
+    Array.from(new Set(samples.map((s) => s.status).filter(Boolean))).sort(),
+    [samples]);
+
+  const filtered = useMemo(() => samples.filter((s) => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const hay = `${s.sample_number || ""} ${s.client_name || ""} ${productNames(s).join(" ")} ${s.tracking_number || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (filters.status && s.status !== filters.status) return false;
+    if (filters.type && (s.sample_type || "") !== filters.type) return false;
+    return true;
+  }), [samples, filters]);
+
+  const filtersActive = Object.values(filters).some(Boolean);
+  const clearFilters = () => setFilters({ search: "", status: "", type: "" });
 
   return (
     <div>
       <PageHeader
         title="Samples"
-        subtitle={`${samples.length} samples`}
+        subtitle={filtersActive ? `${filtered.length} of ${samples.length} samples` : `${samples.length} samples`}
         action={
           <div className="flex gap-2">
-            <button onClick={() => setShowTypeChooser(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">
+            <button onClick={() => setShowTypeChooser(true)} className="px-4 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-sm font-semibold rounded-xl shadow-sm hover:shadow transition-all">
               + New Sample
             </button>
             <AISummaryButton variant="button" title="Samples Summary" prompt={`Write a tight Samples summary using the pre-loaded sample data. Structure the response with these sections (use ## headings):\n\n## Overview\nOne sentence with total count and a one-line breakdown by status (e.g. "11 delivered, 4 dispatched, 3 payment received, 2 feedback received, 1 requested").\n\n## Needs Attention\nUp to 5 bullets — only samples that need action: awaiting our reply, awaiting client feedback past 7 days, or stuck in the same stage too long. Each bullet: SMP-### · client · product · why it needs attention.\n\n## By Client\nUp to 4 bullets listing clients with the most active samples and how many.\n\n### Next Steps\n2-3 concrete next actions for the executive.\n\nKeep the whole thing under 300 words. Don't enumerate every sample.`} />
           </div>
         }
       />
-      <DataTable
-        columns={columns}
-        data={samples}
-        loading={loading}
-        emptyTitle="No samples yet"
-        emptyDescription="Create your first sample request"
-        onRowClick={(row) => router.push(`/samples/${row.id}`)}
-      />
+
+      {/* Stat tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+        <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🧪</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Total</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.total}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">samples on file</p>
+        </div>
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⏳</span><span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">Awaiting</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.awaiting}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">reply / prep / payment</p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">🚚</span><span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Dispatched</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.dispatched}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">in transit</p>
+        </div>
+        <div className="bg-gradient-to-br from-teal-50 to-cyan-50 border border-teal-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">📬</span><span className="text-[11px] font-semibold uppercase tracking-wider text-teal-700">Delivered</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.delivered}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">awaiting feedback</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2"><span className="text-lg">⭐</span><span className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">Feedback In</span></div>
+          <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.feedback}</p>
+          <p className="text-[11px] text-gray-500 mt-1.5">closed loop</p>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="mb-4 bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide pr-1">Filters</span>
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M16.5 10.5a6 6 0 11-12 0 6 6 0 0112 0z" />
+          </svg>
+          <input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="SMP-#, client, product, tracking..." className={`${filterInput} w-full pl-8`} />
+        </div>
+        <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterInput}>
+          <option value="">All statuses</option>
+          {statusOptions.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</option>))}
+        </select>
+        <select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })} className={filterInput}>
+          <option value="">All types</option>
+          <option value="free">Free</option>
+          <option value="paid">Paid</option>
+        </select>
+        {filtersActive && (
+          <button onClick={clearFilters} className="ml-auto text-xs font-medium text-gray-500 hover:text-rose-600 px-2 py-1 rounded hover:bg-rose-50">
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Sample cards */}
+      {loading ? (
+        <div className="py-12 flex justify-center"><LoadingSpinner size="lg" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+          <div className="text-4xl mb-3">🧪</div>
+          <p className="text-base font-semibold text-gray-800">{filtersActive ? "No samples match" : "No samples yet"}</p>
+          <p className="text-sm text-gray-500 mt-1">{filtersActive ? "Try clearing one of the filters above." : "Create your first sample request."}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((row) => {
+            const tone = sampleTone(row.status);
+            const names = productNames(row);
+            const qtys = itemQuantities(row);
+            const isPaid = row.sample_type === "paid";
+            const isFree = row.sample_type === "free";
+            const locked = !!row.sample_type_locked;
+            return (
+              <div
+                key={row.id}
+                onClick={() => router.push(`/samples/${row.id}`)}
+                className={`group relative bg-white border ${tone.chip} rounded-xl px-4 py-3 cursor-pointer hover:shadow-md hover:-translate-y-px transition-all`}
+              >
+                <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
+
+                <div className="flex items-center gap-4 pl-2 flex-wrap md:flex-nowrap">
+                  {/* SMP number + product + client */}
+                  <div className="min-w-0 flex-1 basis-full md:basis-auto">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-gray-900 tracking-tight">{row.sample_number || "—"}</span>
+                      {/* Type chip */}
+                      {locked && (isPaid || isFree) ? (
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${isPaid ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                          {isPaid ? "Paid" : "Free"}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setTypeAssignFor({ id: row.id, currentType: row.sample_type || "" }); }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full border border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:bg-indigo-100"
+                        >
+                          {isFree || isPaid ? `Confirm ${isPaid ? "Paid" : "Free"}` : "Set Type"}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-gray-800 mt-1 truncate">
+                      {names.length > 0 ? names.join(" · ") : <span className="text-gray-400">No product</span>}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
+                      <span className="font-medium text-gray-700">{row.client_name || "—"}</span>
+                      {qtys.length > 0 && <><span className="mx-1.5 text-gray-300">·</span>{qtys.join(", ")}</>}
+                      {row.tracking_number && <><span className="mx-1.5 text-gray-300">·</span><span className="font-mono text-[10px] px-1 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">{row.tracking_number}</span></>}
+                    </p>
+                  </div>
+
+                  {/* Status */}
+                  <div className="hidden sm:block w-32 text-center shrink-0">
+                    <StatusBadge status={row.status} />
+                  </div>
+
+                  {/* Dates — Requested + Dispatched */}
+                  <div className="hidden md:block text-right shrink-0 min-w-[120px]">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Requested</p>
+                    <p className="text-xs font-semibold text-gray-700">
+                      {row.created_at ? format(new Date(row.created_at), "MMM d, yyyy") : "—"}
+                    </p>
+                    {row.dispatch_date && (
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        Dispatched {format(new Date(row.dispatch_date), "MMM d")}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Feedback chip */}
+                  <div className="hidden lg:block text-right shrink-0 max-w-[180px]">
+                    {row.feedback ? (
+                      <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full inline-block max-w-full truncate">
+                        {row.feedback.comments
+                          ? (row.feedback.comments.length > 28 ? row.feedback.comments.slice(0, 28) + "…" : row.feedback.comments)
+                          : `★ ${row.feedback.rating}/5`}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-gray-300">No feedback</span>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {(row.status === "delivered" || row.status === "feedback_pending") && !row.feedback && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openFeedback(row); }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md hover:bg-emerald-100"
+                      >
+                        + Feedback
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openEdit(row); }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeletingSample(row); }}
+                      title="Delete sample"
+                      className="p-1.5 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-60 group-hover:opacity-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal
         open={showModal}
@@ -410,7 +536,7 @@ export default function SamplesPage() {
             </div>
           )}
           <div className="flex gap-3 pt-2">
-            <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+            <button type="submit" className="px-5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow transition-all">
               {editingSample ? "Save Changes" : "Create Sample"}
             </button>
             <button

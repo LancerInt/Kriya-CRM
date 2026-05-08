@@ -102,16 +102,25 @@ export default function LineItemsCard({ order, reload }) {
   const items = order.items || [];
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">Line Items</h3>
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <span className="text-base">📦</span>
+          <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-700">Line Items</h3>
+          <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-2.5 py-0.5">
+            {items.length}
+          </span>
+        </div>
         {!editing && (
           <button
             onClick={startEdit}
-            className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded"
+            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-2.5 py-1 rounded-lg"
             title="Edit line items — adding or removing products auto-updates the per-product COA / MSDS / PIF rows in the Documents Checklist."
           >
-            ✎ Edit
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            Edit
           </button>
         )}
       </div>
@@ -120,31 +129,37 @@ export default function LineItemsCard({ order, reload }) {
       {!editing && (
         <>
           {items.length === 0 ? (
-            <p className="text-sm text-gray-500 italic">No line items yet. Click <span className="font-medium">Edit</span> to add the first product.</p>
+            <div className="text-center py-8 text-gray-400 border border-dashed border-gray-200 rounded-xl">
+              <div className="text-2xl mb-2">📋</div>
+              <p className="text-sm">No line items yet. Click <span className="font-medium text-indigo-600">Edit</span> to add the first product.</p>
+            </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2 text-gray-500">#</th>
-                  <th className="text-left py-2 text-gray-500">Product</th>
-                  <th className="text-right py-2 text-gray-500">Qty</th>
-                  {order.can_view_total && <th className="text-right py-2 text-gray-500">Total</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, i) => (
-                  <tr key={item.id} className="border-b border-gray-100">
-                    <td className="py-2">{i + 1}</td>
-                    <td className="py-2">{item.product_name}</td>
-                    <td className="py-2 text-right">{Number(item.quantity).toLocaleString()} {item.unit}</td>
-                    {order.can_view_total && <td className="py-2 text-right font-medium">{Number(item.total_price).toLocaleString()}</td>}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="space-y-2">
+              {items.map((item, i) => (
+                <div key={item.id} className="flex items-center gap-4 p-3 bg-gray-50 hover:bg-indigo-50/40 rounded-xl border border-gray-100 transition-colors">
+                  <span className="w-7 h-7 rounded-full bg-white border border-gray-200 text-xs font-bold text-gray-600 flex items-center justify-center shrink-0">
+                    {i + 1}
+                  </span>
+                  <p className="text-sm font-semibold text-gray-900 flex-1 min-w-0 truncate">{item.product_name}</p>
+                  <span className="text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-full px-2.5 py-0.5 tabular-nums shrink-0">
+                    {Number(item.quantity).toLocaleString()} {item.unit}
+                  </span>
+                  {order.can_view_total && (
+                    <span className="text-sm font-bold text-gray-900 tabular-nums w-24 text-right shrink-0">
+                      {Number(item.total_price).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
           {order.can_view_total && items.length > 0 && (
-            <div className="text-right mt-2 pt-2 border-t font-bold">{order.currency} {Number(order.total || 0).toLocaleString()}</div>
+            <div className="flex items-center justify-end gap-3 mt-4 pt-4 border-t border-gray-200">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total</span>
+              <span className="text-lg font-bold text-gray-900 tabular-nums">
+                {order.currency} {Number(order.total || 0).toLocaleString()}
+              </span>
+            </div>
           )}
         </>
       )}

@@ -10,7 +10,10 @@ class ShipmentViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
     filterset_fields = ['client', 'order', 'status']
     search_fields = ['shipment_number', 'container_number', 'bl_number']
     def get_queryset(self):
-        qs = Shipment.objects.filter(is_deleted=False).select_related('client', 'order')
+        qs = (Shipment.objects
+              .filter(is_deleted=False)
+              .exclude(client__company_name__icontains='(Auto-created)')
+              .select_related('client', 'order'))
         user = self.request.user
         if user.role == 'executive':
             from clients.views import get_client_qs_for_user

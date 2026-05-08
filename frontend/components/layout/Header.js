@@ -82,8 +82,16 @@ export default function Header({ onMenuClick }) {
       let totalSynced = 0;
       for (const acc of accs) {
         const res = await api.post(`/communications/email-accounts/${acc.id}/sync-now/`);
-        const match = res.data?.status?.match(/(\d+)/);
-        if (match) totalSynced += parseInt(match[1]);
+        // Backend's sync-now wraps the task return value in `{status: ...}`.
+        // The task now returns `{synced: N, message: "N emails synced"}`
+        // (dict). Older builds returned a plain string. Handle both shapes.
+        const s = res.data?.status;
+        if (s && typeof s === "object" && typeof s.synced === "number") {
+          totalSynced += s.synced;
+        } else if (typeof s === "string") {
+          const match = s.match(/(\d+)/);
+          if (match) totalSynced += parseInt(match[1]);
+        }
       }
       setLastSync(new Date());
       // Refresh header counts (bell badge picks up any new notifications) and
@@ -97,8 +105,11 @@ export default function Header({ onMenuClick }) {
       if (!silent) {
         toast.success(totalSynced > 0 ? `${totalSynced} new email(s) synced!` : "No new emails");
       }
-    } catch {
-      if (!silent) toast.error("Sync failed");
+    } catch (err) {
+      if (!silent) {
+        const msg = err?.response?.data?.error || err?.message || "Sync failed";
+        toast.error(msg.length > 120 ? "Sync failed — check email account settings" : msg);
+      }
     } finally {
       setSyncing(false);
     }

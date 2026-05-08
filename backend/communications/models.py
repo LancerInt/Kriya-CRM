@@ -16,6 +16,15 @@ class EmailAccount(TimeStampedModel):
     use_ssl = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     last_synced = models.DateTimeField(null=True, blank=True)
+    # Historical (backfill) sync progress — set when the user kicks off a
+    # multi-year mail import. `historical_sync_status` flips to 'running'
+    # while the Celery worker is fetching, then 'completed' or 'failed'.
+    historical_sync_status = models.CharField(max_length=20, blank=True, default='')
+    historical_sync_started_at = models.DateTimeField(null=True, blank=True)
+    historical_sync_completed_at = models.DateTimeField(null=True, blank=True)
+    historical_sync_days_back = models.IntegerField(null=True, blank=True)
+    historical_sync_imported = models.IntegerField(default=0)
+    historical_sync_error = models.TextField(blank=True, default='')
 
     class Meta:
         db_table = 'email_accounts'
