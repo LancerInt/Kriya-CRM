@@ -12,11 +12,54 @@ const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
  * - AI-powered grammar/spelling check via "Check Grammar" button
  *   that highlights errors inline and shows suggestions on click
  */
-export default function RichTextEditor({ value, onChange, placeholder, minHeight = "200px" }) {
+export default function RichTextEditor({ value, onChange, placeholder, minHeight = "200px", contactName = "" }) {
   const quillRef = useRef(null);
   const [checking, setChecking] = useState(false);
   const [corrections, setCorrections] = useState([]); // [{original, corrected, reason, index}]
   const [activeFix, setActiveFix] = useState(null); // index into corrections
+  // Refine dropdown (Polish / Formalize / Elaborate / Shorten)
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refining, setRefining] = useState(null);
+  const refineRef = useRef(null);
+  useEffect(() => {
+    if (!refineOpen) return;
+    const handler = (e) => { if (refineRef.current && !refineRef.current.contains(e.target)) setRefineOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [refineOpen]);
+
+  const handleRefine = async (action) => {
+    const plain = (value || "").replace(/<[^>]*>/g, "").trim();
+    if (!plain) {
+      const toast = (await import("react-hot-toast")).default;
+      toast.error("Write something first");
+      return;
+    }
+    setRefining(action);
+    try {
+      const r = await api.post("/communications/refine-email/", {
+        body: value,
+        action,
+        contact_name: contactName || "",
+      });
+      onChange(r.data.refined);
+      const toast = (await import("react-hot-toast")).default;
+      const verb = action === "polish" ? "polished" : action === "formalize" ? "formalized" : action === "elaborate" ? "elaborated" : "shortened";
+      toast.success(`Text ${verb}!`);
+    } catch {
+      const toast = (await import("react-hot-toast")).default;
+      toast.error("Failed to refine");
+    } finally {
+      setRefining(null);
+      setRefineOpen(false);
+    }
+  };
+  const REFINE_OPTIONS = [
+    { key: "polish",    icon: "✨", label: "Polish",    desc: "Fix grammar & improve clarity" },
+    { key: "formalize", icon: "👔", label: "Formalize", desc: "Make it more professional" },
+    { key: "elaborate", icon: "📝", label: "Elaborate", desc: "Add more detail" },
+    { key: "shorten",   icon: "✂️", label: "Shorten",   desc: "Make it concise" },
+  ];
 
   const modules = useMemo(() => ({
     toolbar: [
@@ -128,6 +171,45 @@ export default function RichTextEditor({ value, onChange, placeholder, minHeight
             <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Check Grammar</>
           )}
         </button>
+        {/* Refine dropdown: Polish / Formalize / Elaborate / Shorten */}
+        <div className="relative" ref={refineRef}>
+          <button
+            type="button"
+            onClick={() => setRefineOpen((o) => !o)}
+            disabled={!!refining}
+            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
+            title="AI rewrite — Polish, Formalize, Elaborate, Shorten"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            Refine
+            <svg className={`w-3 h-3 transition-transform ${refineOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {refineOpen && (
+            <div className="absolute bottom-full left-0 mb-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1">
+              {REFINE_OPTIONS.map(({ key, icon, label, desc }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleRefine(key)}
+                  disabled={!!refining}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+                >
+                  <span className="text-sm">{icon}</span>
+                  <div>
+                    <span className="text-xs font-medium text-gray-800">{label}</span>
+                    <p className="text-[10px] text-gray-400">{desc}</p>
+                  </div>
+                  {refining === key && (
+                    <svg className="w-3.5 h-3.5 animate-spin ml-auto text-indigo-500" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {corrections.length > 0 && corrections[0].index === -1 && (
           <span className="text-[11px] text-green-600 font-medium flex items-center gap-1">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>

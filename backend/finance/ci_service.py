@@ -117,8 +117,16 @@ def create_ci_from_order(order, user):
     return ci
 
 
-def generate_ci_pdf(ci):
-    """Generate PDF matching the Kriya Biosys Commercial Invoice template."""
+def generate_ci_pdf(ci, template='normal'):
+    """Generate PDF matching the Kriya Biosys Commercial Invoice template.
+
+    template:
+      'normal' — Exporter + Consignee top row only. No Notify section.
+      'notify' — Exporter + Consignee top row, Notify full-width row below.
+      'buyer'  — Exporter | Buyer (top row), Notify | Consignee (bottom row).
+                 Buyer details come from the existing notify_* fields.
+                 (You can rename / add dedicated buyer fields later.)
+    """
     import os
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -130,12 +138,12 @@ def generate_ci_pdf(ci):
     buffer = io.BytesIO()
     pdf_title = f'CI {ci.invoice_number} - {ci.client_company_name}'
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=8*mm, bottomMargin=8*mm,
-                            leftMargin=10*mm, rightMargin=10*mm,
+                            leftMargin=7*mm, rightMargin=7*mm,
                             title=pdf_title, author='Kriya Biosys Private Limited')
     styles = getSampleStyleSheet()
     el = []
 
-    G = colors.HexColor('#558b2f')   # Kriya green
+    G = colors.HexColor('#548b2e')   # Kriya green
     GR = colors.HexColor('#cccccc')  # grid grey
     W = colors.white
     B = colors.black
@@ -158,7 +166,7 @@ def generate_ci_pdf(ci):
             c.translate(self.width/2, self.height/2); c.rotate(90)
             c.drawCentredString(0, -self.fs/3, self.text); c.restoreState()
 
-    PW = 190*mm  # page width
+    PW = 196*mm  # page width (A4 210mm - 7mm side margins × 2)
 
     # Register fonts
     from reportlab.pdfbase import pdfmetrics
@@ -182,89 +190,151 @@ def generate_ci_pdf(ci):
     except Exception:
         pass
 
-    # Styles
-    s8 = ParagraphStyle('s8', parent=styles['Normal'], fontSize=8, leading=10, fontName=_br)
-    s7 = ParagraphStyle('s7', parent=styles['Normal'], fontSize=7, leading=9, fontName=_br)
-    s8b = ParagraphStyle('s8b', parent=styles['Normal'], fontSize=8, leading=10, fontName=_bf)
-    lb = ParagraphStyle('lb', parent=styles['Normal'], fontSize=8, leading=11, fontName=_bf, textColor=NAVY)
-    vl = ParagraphStyle('vl', parent=styles['Normal'], fontSize=8, leading=11, fontName=_br)
+    # ── Style sizes — tuned to fit one A4 page comfortably ──
+    body  = ParagraphStyle('body',  parent=styles['Normal'], fontSize=8,    leading=10, fontName=_br)
+    bodyb = ParagraphStyle('bodyb', parent=styles['Normal'], fontSize=8,    leading=10, fontName=_bf)
+    head  = ParagraphStyle('head',  parent=styles['Normal'], fontSize=10,   leading=12, fontName=_bf)
+    metaL = ParagraphStyle('metaL', parent=styles['Normal'], fontSize=8.5,  leading=10, fontName=_bf, alignment=1)  # bold black on gray strip
+    metaV = ParagraphStyle('metaV', parent=styles['Normal'], fontSize=8.5,  leading=10, fontName=_br, alignment=1)
+    lb    = ParagraphStyle('lb',    parent=styles['Normal'], fontSize=8,    leading=10, fontName=_bf, textColor=NAVY)
+    vl    = ParagraphStyle('vl',    parent=styles['Normal'], fontSize=8,    leading=10, fontName=_br)
+    bkH   = ParagraphStyle('bkH',   parent=styles['Normal'], fontSize=10,   leading=12, fontName=_bf)
+    bkL   = ParagraphStyle('bkL',   parent=styles['Normal'], fontSize=7,    leading=9,  fontName=_bf)
+    bkV   = ParagraphStyle('bkV',   parent=styles['Normal'], fontSize=7,    leading=9,  fontName=_br)
+    # Aliases so any other downstream code keeps working.
+    s8  = body
+    s7  = body
+    s8b = bodyb
 
     # ═══ ROW 1: Logo + INVOICE title (DistinctStyleSans-Light) ═══
     # Use RW=50mm — same width as the Invoice Number / Date panel below
-    logo = Image(logo_path, width=38*mm, height=23*mm) if os.path.exists(logo_path) else ''
+    logo = Image(logo_path, width=44*mm, height=25*mm, hAlign='LEFT') if os.path.exists(logo_path) else ''
+    # Reducing Consignee column width shrinks the gray strip horizontally.
+    # The freed-up space goes into GAP (white), so total page width and the
+    # right meta panel position both stay the same.
     RW = 50*mm
-    GAP = 3*mm
+    GAP = 23*mm   # was 3mm
     EW = 60*mm
-    CW2 = PW - EW - GAP - RW
-    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=18, textColor=W, fontName=_mt, alignment=1, leading=20))
-    title_box = Table([[title_p]], colWidths=[RW], rowHeights=[23*mm])
+    CW2 = PW - EW - GAP - RW   # = 73mm (was 83mm) — 10mm shorter strip
+    title_p = Paragraph('INVOICE', ParagraphStyle('ti', fontSize=20, textColor=W, fontName=_mt, alignment=1, leading=24))
+    title_box = Table([[title_p]], colWidths=[RW], rowHeights=[25*mm])
     title_box.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), G),
-        ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),   # vertical centre
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
     ]))
     # Use same 4-column layout as exporter row: EW | CW2 | GAP | RW
     h0 = Table([[logo, '', '', title_box]], colWidths=[EW, CW2, GAP, RW])
     h0.setStyle(TableStyle([
+        # Zero-pad every cell so the logo cell's default 6pt padding doesn't
+        # inflate the row height past 25mm. Without this the row stretches
+        # to ~29mm and a white gap appears below the green INVOICE box.
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('SPAN', (0,0), (1,0)),
-        ('LEFTPADDING', (3,0), (3,0), 0),
-        ('RIGHTPADDING', (3,0), (3,0), 0),
-        ('TOPPADDING', (3,0), (3,0), 0),
-        ('BOTTOMPADDING', (3,0), (3,0), 0),
     ]))
     el.append(h0)
-    el.append(Spacer(1, 1*mm))
+    # No spacer — green INVOICE box must touch the gray Invoice Number strip
+    # below it. Same applies to padding inside the rc table (handled below).
 
     # ═══ ROW 2: Exporter | Consignee + Notify | Invoice No + Date ═══
     MDG = colors.HexColor('#d5d5d5')
     VLG = colors.HexColor('#f0f0f0')
 
-    # Right column: Invoice Number + Date
+    # Right column: Invoice Number / value / Date / value (alternating green-strip & white)
     right_rows = [
-        [Paragraph('<b>Invoice Number</b>', ParagraphStyle('pn', fontSize=10, fontName=_bf, alignment=1))],
-        [Paragraph(f'{ci.invoice_number}', ParagraphStyle('pv', fontSize=10, fontName=_br, alignment=1))],
-        [Paragraph('<b>Date</b>', ParagraphStyle('dl', fontSize=10, fontName=_bf, alignment=1))],
-        [Paragraph(f'{ci.invoice_date.strftime("%d-%m-%Y")}', ParagraphStyle('dv', fontSize=10, fontName=_br, alignment=1))],
+        [Paragraph('Invoice Number', metaL)],
+        [Paragraph(f'{ci.invoice_number}', metaV)],
+        [Paragraph('Date (DD/MM/YYYY)', metaL)],
+        [Paragraph(f'{ci.invoice_date.strftime("%d/%m/%Y")}', metaV)],
     ]
-    rc = Table(right_rows, colWidths=[RW], rowHeights=[7*mm, 7*mm, 7*mm, 7*mm])
+    rc = Table(right_rows, colWidths=[RW], rowHeights=[6*mm, 6*mm, 6*mm, 6*mm])
     rc.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (0,0), MDG),
-        ('BACKGROUND', (0,1), (0,1), VLG),
-        ('BACKGROUND', (0,2), (0,2), MDG),
-        ('BACKGROUND', (0,3), (0,3), VLG),
+        # Reference layout: medium-gray label strips with bold black text,
+        # light-gray value cells. (Replaces earlier green/white scheme.)
+        ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d0d0d0')),  # Invoice Number label
+        ('BACKGROUND', (0,1), (0,1), colors.HexColor('#f3f3f3')),  # value row
+        ('BACKGROUND', (0,2), (0,2), colors.HexColor('#d0d0d0')),  # Date label
+        ('BACKGROUND', (0,3), (0,3), colors.HexColor('#f3f3f3')),  # value row
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('TOPPADDING', (0,0), (-1,-1), 2),
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
 
-    rows = [
-        [Paragraph('Exporter', s8b), Paragraph('Notify', s8b), '', rc],
-        [Paragraph(EXPORTER["name"], s8b), Paragraph(ci.notify_company_name or '', s8b), '', ''],
-        [Paragraph('D.no : 233, Aarthi Nagar,', s7), Paragraph(ci.notify_address or '', s7), '', ''],
-        [Paragraph('Mohan Nagar, Narasothipatti,', s7), Paragraph(ci.client_city_state_country or '', s7), '', ''],
-        [Paragraph('Salem - 636004, Tamilnadu', s7), Paragraph(ci.client_tax_number or '', s7), '', ''],
-        [Paragraph(f'Contact : +91 6385848466', s7), Paragraph(ci.client_pincode or '', s7), '', ''],
-        [Paragraph(f'Email : {EXPORTER["email"]}', s7), Paragraph(ci.notify_phone or '', s7), '', ''],
-        [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', s7), '', '', ''],
-        [Paragraph(f'IEC : {EXPORTER["iec"]}', s7), '', '', ''],
-    ]
-    t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[7*mm]+[None]*8)
+    # Per the reference PDF: top row is Exporter | Consignee | (Invoice meta).
+    # Notify appears OPTIONALLY as a full-width row below.
+    # For the 'buyer' template, the right-column of the top block is Buyer
+    # (not Consignee); Consignee + Notify are rendered as a 2-column row below.
+    # Strip color = #d9d9d9 (light gray) per spec.
+    LIGHT_GREEN = colors.HexColor('#d9d9d9')
+    if template == 'buyer':
+        # Top block: Exporter | Buyer | Invoice meta.
+        buyer_company = (getattr(ci, 'buyer_company_name', '') or '').upper()
+        buyer_addr    = getattr(ci, 'buyer_address', '') or ''
+        buyer_city    = getattr(ci, 'buyer_city_state_country', '') or ''
+        buyer_pin     = getattr(ci, 'buyer_pincode', '') or ''
+        buyer_ref     = getattr(ci, 'buyer_reference', '') or ''
+        buyer_phone   = getattr(ci, 'buyer_phone', '') or ''
+        rows = [
+            [Paragraph('Exporter', head), Paragraph('Buyer', head), '', rc],
+            [Paragraph((EXPORTER["name"] or '').upper(), bodyb),
+             Paragraph(buyer_company, bodyb), '', ''],
+            [Paragraph('D.no : 233, Aarthi Nagar,', body),
+             Paragraph(buyer_addr, body), '', ''],
+            [Paragraph('Mohan Nagar, Narasothipatti,', body),
+             Paragraph(buyer_city, body), '', ''],
+            [Paragraph('Salem - 636004, Tamilnadu', body),
+             Paragraph(buyer_pin, body), '', ''],
+            [Paragraph('Contact : +91 6385848466', body),
+             Paragraph(f'Phone: {buyer_phone}' if buyer_phone else '', body), '', ''],
+            [Paragraph(f'Email : {EXPORTER["email"]}', body),
+             Paragraph(buyer_ref, body), '', ''],
+            [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', body), '', '', ''],
+            [Paragraph(f'IEC : {EXPORTER["iec"]}', body), '', '', ''],
+        ]
+    else:
+        client_email = (getattr(ci, 'client_email', '') or '').strip()
+        rows = [
+            [Paragraph('Exporter', head), Paragraph('Consignee', head), '', rc],
+            [Paragraph((EXPORTER["name"] or '').upper(), bodyb),
+             Paragraph((ci.client_company_name or '').upper(), bodyb), '', ''],
+            [Paragraph('D.no : 233, Aarthi Nagar,', body),
+             Paragraph(ci.client_address or '', body), '', ''],
+            [Paragraph('Mohan Nagar, Narasothipatti,', body),
+             Paragraph(ci.client_city_state_country or '', body), '', ''],
+            [Paragraph('Salem - 636004, Tamilnadu', body),
+             Paragraph(ci.client_pincode or '', body), '', ''],
+            [Paragraph('Contact : +91 6385848466', body),
+             Paragraph(f'Phone: {ci.client_phone}' if ci.client_phone else '', body), '', ''],
+            [Paragraph(f'Email : {EXPORTER["email"]}', body),
+             Paragraph(ci.client_tax_number or '', body), '', ''],
+            [Paragraph(f'GSTIN : {EXPORTER["gstin"]}', body),
+             Paragraph(f'Email : {client_email}' if client_email else '', body), '', ''],
+            [Paragraph(f'IEC : {EXPORTER["iec"]}', body), '', '', ''],
+        ]
+    t1 = Table(rows, colWidths=[EW, CW2, GAP, RW], rowHeights=[6.5*mm]+[None]*8)
     t1.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (1,0), colors.HexColor('#d5d5d5')),
+        # Gray strip ends at the right edge of the Consignee column (x=143mm).
+        # GAP column (col 2) stays white so the gray never crosses the red
+        # line into the right meta panel area.
+        ('BACKGROUND', (0,0), (1,0), LIGHT_GREEN),
         ('BACKGROUND', (2,0), (2,0), W),
         ('BACKGROUND', (3,0), (3,0), W),
-        ('LINEBELOW', (0,0), (1,0), 0.3, GR),
+        ('LINEBELOW', (0,0), (1,0), 1.5, colors.HexColor('#d9d9d9'), 0, None, 0),
         ('VALIGN', (0,0), (1,0), 'MIDDLE'),
         ('SPAN', (3,0), (3,8)),
         ('VALIGN', (0,1), (-1,-1), 'TOP'),
         ('VALIGN', (3,0), (3,0), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-        ('LEFTPADDING', (0,0), (1,-1), 3),
+        ('TOPPADDING', (0,0), (-1,-1), 1.5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+        ('LEFTPADDING', (0,0), (1,-1), 6),
         ('LEFTPADDING', (3,0), (3,0), 0),
         ('RIGHTPADDING', (3,0), (3,0), 0),
         ('TOPPADDING', (3,0), (3,0), 0),
@@ -273,26 +343,146 @@ def generate_ci_pdf(ci):
         ('RIGHTPADDING', (2,0), (2,-1), 0),
     ]))
     el.append(t1)
-    el.append(Spacer(1, 1*mm))
-
-    # ═══ CONSIGNEE (To the Order) — width matches exporter+notify columns ═══
-    consignee_rows = [
-        [Paragraph('<b>Consignee</b>', s8b)],
-        [Paragraph(ci.client_company_name or '', s7)],
-    ]
-    cn = Table(consignee_rows, colWidths=[PW])
-    cn.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (0,0), colors.HexColor('#d5d5d5')),
-        ('LINEBELOW', (0,0), (0,0), 0.3, GR),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-        ('LEFTPADDING', (0,0), (-1,-1), 3),
-        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-    ]))
-    cn.hAlign = 'LEFT'
-    el.append(cn)
     el.append(Spacer(1, 2*mm))
+
+    # ═══ NOTIFY (optional, full-width) ═══
+    # Template gating:
+    #   'normal' → skip Notify entirely
+    #   'notify' → render if notify_* fields populated (current behaviour)
+    #   'buyer'  → render Notify | Consignee as a 2-column row spanning the
+    #             full Exporter+Consignee gray-strip width (RW reserved on
+    #             the right so it aligns with the table above).
+    # Build the full Notify text block from all notify_* fields (in order).
+    def _build_notify_lines():
+        out = []
+        if ci.notify_company_name:
+            out.append((ci.notify_company_name or '').upper())
+        if ci.notify_address:
+            out.append(ci.notify_address)
+        if getattr(ci, 'notify_city_state_country', ''):
+            out.append(ci.notify_city_state_country)
+        if getattr(ci, 'notify_pincode', ''):
+            out.append(ci.notify_pincode)
+        if getattr(ci, 'notify_tax_number', ''):
+            out.append(ci.notify_tax_number)
+        _ne = (getattr(ci, 'notify_email', '') or '').strip()
+        if _ne:
+            out.append(f'Email : {_ne}')
+        if ci.notify_phone:
+            out.append(f'Phone: {ci.notify_phone}')
+        return out
+    notify_lines = _build_notify_lines()
+    if template == 'buyer':
+        # Combined Notify | Consignee row — same outer dimensions as t1 above
+        # so the gray header strip lines up across the page.
+        HALF = (EW + CW2) / 2.0  # split the left+middle area in half
+        # Honour optional-row hides set in the editor (X button → display_overrides._hide_<key>)
+        _ov = ci.display_overrides if isinstance(ci.display_overrides, dict) else {}
+        def _hidden(k):
+            return bool(_ov.get(f'_hide_{k}'))
+        # Notify column — exact order requested by the user.
+        nl_lines = []
+        if ci.notify_company_name:
+            nl_lines.append((ci.notify_company_name or '').upper())
+        if ci.notify_address:
+            nl_lines.append(ci.notify_address)
+        if getattr(ci, 'notify_city_state_country', ''):
+            nl_lines.append(ci.notify_city_state_country)
+        if getattr(ci, 'notify_pincode', '') and not _hidden('notify_cep'):
+            nl_lines.append(ci.notify_pincode)
+        if getattr(ci, 'notify_tax_number', ''):
+            nl_lines.append(ci.notify_tax_number)
+        if ci.notify_phone:
+            nl_lines.append(f'Phone: {ci.notify_phone}')
+        if getattr(ci, 'notify_mobile', '') and not _hidden('notify_mobile'):
+            nl_lines.append(f'Mobile: {ci.notify_mobile}')
+        _ne = (getattr(ci, 'notify_email', '') or '').strip()
+        if _ne:
+            nl_lines.append(f'Email : {_ne}')
+        # Consignee column — only the requested 5 rows (no phone/email).
+        cl_lines = []
+        if ci.client_company_name:
+            cl_lines.append((ci.client_company_name or '').upper())
+        if ci.client_address:
+            cl_lines.append(ci.client_address)
+        if ci.client_city_state_country:
+            cl_lines.append(ci.client_city_state_country)
+        if ci.client_pincode and not _hidden('client_cep'):
+            cl_lines.append(ci.client_pincode)
+        if ci.client_tax_number:
+            cl_lines.append(ci.client_tax_number)
+        nmax = max(len(nl_lines), len(cl_lines), 1)
+        # Shrink the body font for this block so long values (esp. emails) fit
+        # on a single line inside the HALF-width columns. Each line auto-scales
+        # further if it would still wrap at the base 7pt size.
+        from reportlab.lib.styles import ParagraphStyle as _PS
+        from reportlab.pdfbase.pdfmetrics import stringWidth as _sw
+        _BASE = 7.0
+        _MIN  = 5.0
+        _USABLE = HALF - 8  # 6pt left pad + small right safety
+        def _fit_size(txt, fontname):
+            if not txt:
+                return _BASE
+            size = _BASE
+            while size > _MIN and _sw(txt, fontname, size) > _USABLE:
+                size -= 0.25
+            return size
+        def _para(txt, bold):
+            fn = _bf if bold else _br
+            sz = _fit_size(txt, fn)
+            st = _PS('nf', fontName=fn, fontSize=sz, leading=sz + 1.5,
+                     textColor=colors.black, alignment=0)
+            return Paragraph(txt, st)
+        nc_rows = [[Paragraph('Notify', head), Paragraph('Consignee', head), '']]
+        for i in range(nmax):
+            n_txt = nl_lines[i] if i < len(nl_lines) else ''
+            c_txt = cl_lines[i] if i < len(cl_lines) else ''
+            n_bold = (i == 0)
+            c_bold = (i == 0)
+            nc_rows.append([_para(n_txt, n_bold), _para(c_txt, c_bold), ''])
+        nc = Table(nc_rows, colWidths=[HALF, HALF, GAP + RW], rowHeights=[6.5*mm] + [None]*nmax)
+        nc.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (1,0), LIGHT_GREEN),
+            ('BACKGROUND', (2,0), (2,-1), W),
+            ('LINEBELOW',  (0,0), (1,0), 1.5, colors.HexColor('#d9d9d9'), 0, None, 0),
+            ('VALIGN', (0,0), (1,0), 'MIDDLE'),
+            ('VALIGN', (0,1), (-1,-1), 'TOP'),
+            ('TOPPADDING', (0,0), (-1,-1), 1.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+            ('LEFTPADDING', (0,0), (1,-1), 6),
+            ('LEFTPADDING', (2,0), (2,-1), 0),
+            ('RIGHTPADDING', (2,0), (2,-1), 0),
+        ]))
+        el.append(nc)
+        el.append(Spacer(1, 3*mm))
+    elif notify_lines and template == 'notify':
+        # Notify table spans the FULL page width (so it positions identically
+        # to the Exporter table above — no implicit centering). The gray
+        # strip + bottom line are applied only to the first cell, which is
+        # the same width as the Exporter column above (EW = 60mm). Strip
+        # ends flush with where Exporter ends / Consignee begins.
+        NOTIFY_W = EW              # = 60mm — gray strip extent
+        SPACER_W = PW - NOTIFY_W   # remaining empty white space on the right
+        nf_rows = [[Paragraph('Notify', head), '']]
+        for i, line in enumerate(notify_lines):
+            text = (line or '').upper() if i == 0 else line
+            nf_rows.append([Paragraph(text, bodyb if i == 0 else body), ''])
+        nf = Table(nf_rows, colWidths=[NOTIFY_W, SPACER_W])
+        nf.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (0,0), LIGHT_GREEN),
+            ('LINEBELOW',  (0,0), (0,0), 1.5, colors.HexColor('#d9d9d9'), 0, None, 0),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 1.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+            ('LEFTPADDING', (0,0), (0,-1), 6),       # only left col gets text padding
+            ('LEFTPADDING', (1,0), (1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (0,0), 4),
+            ('BOTTOMPADDING', (0,0), (0,0), 4),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ]))
+        el.append(nf)
+        el.append(Spacer(1, 3*mm))
 
     # ═══ SHIPMENT DETAILS (left) + BANK DETAILS (right) — unified grid like reference ═══
     _rh = 7*mm
@@ -317,13 +507,8 @@ def generate_ci_pdf(ci):
                 k, v = line.split(':', 1)
                 bk_data[k.strip()] = v.strip()
 
-    # 4 columns: ShipLabel(38) | ShipValue(55) | BankLabel(25) | BankValue(rest) = 180mm
-    _sw = PW - 10*mm  # 180mm after sidebar
-    sc = [38*mm, 55*mm, 25*mm, _sw - 38*mm - 55*mm - 25*mm]
-
-    # Flexible bank data lookup
     def bk(key):
-        """Look up bank detail by key, trying common variations."""
+        """Flexible bank-detail lookup with key variations."""
         for k in [key, key.lower(), key.replace(' ', ''), key.title()]:
             if k in bk_data:
                 return bk_data[k]
@@ -332,50 +517,76 @@ def generate_ci_pdf(ci):
                 return v
         return ''
 
-    # Helper: format bank value with colon only if value exists
-    def bkv(key):
-        v = bk(key)
-        return f': {v}' if v else ''
+    # Reference PDF layout — three blocks side-by-side after the sidebar:
+    #   [SHIPMENT sidebar 10mm] | [bordered Shipment table] | [borderless Bank block]
+    # 180mm budget after sidebar split as 95mm + 85mm (gap absorbed inside).
+    _sw = PW - 10*mm
+    SHIP_W = 110*mm
+    BANK_W = _sw - SHIP_W   # = 76mm
 
-    # Helper: shipment value with colon
-    def sv(val):
-        return f': {val}' if val else ''
-
-    grid = [
-        [Paragraph('<b>Country of Origin</b>', lb), Paragraph(sv(ci.country_of_origin or 'India'), vl),
-         Paragraph('<b>Bank Details</b>', s8b), ''],
-        [Paragraph('<b>Port of Loading</b>', lb), Paragraph(sv(ci.port_of_loading), vl),
-         Paragraph('<b>Bank Name</b>', lb), Paragraph(bkv("Bank name"), vl)],
-        [Paragraph('<b>Vessel / Flight No</b>', lb), Paragraph(sv(ci.vessel_flight_no), vl),
-         Paragraph('<b>Branch name</b>', lb), Paragraph(bkv("Branch name"), vl)],
-        [Paragraph('<b>Port of Discharge</b>', lb), Paragraph(sv(ci.port_of_discharge), vl),
-         Paragraph('<b>Beneficiary</b>', lb), Paragraph(bkv("Beneficiary"), vl)],
-        [Paragraph('<b>Country of Final Dest.</b>', lb), Paragraph(sv(ci.country_of_final_destination), vl),
-         Paragraph('<b>IFSC Code</b>', lb), Paragraph(bkv("IFSC Code"), vl)],
-        [Paragraph('<b>Incoterms</b>', lb), Paragraph(sv(ci.terms_of_delivery), vl),
-         Paragraph('<b>Swift Code</b>', lb), Paragraph(bkv("Swift Code"), vl)],
-        [Paragraph('<b>Terms of Trade</b>', lb), Paragraph(sv(ci.terms_of_trade or ci.payment_terms), vl),
-         Paragraph('<b>A/C No.</b>', lb), Paragraph(bkv("A/C No"), vl)],
-        [Paragraph('<b>Buyer Reference</b>', lb), Paragraph(sv(ci.buyer_order_no), vl),
-         Paragraph('<b>A/C Type</b>', lb), Paragraph(bkv("A/C Type"), vl)],
-        [Paragraph('<b>Batch No.</b>', lb), Paragraph(sv(ci.batch_no) if hasattr(ci, 'batch_no') else '', vl),
-         '', ''],
+    # Shipment table (bordered, NAVY labels)
+    ship_rows = [
+        [Paragraph('Country of Origin',   lb), Paragraph(ci.country_of_origin or 'India', vl)],
+        [Paragraph('Port of Loading',     lb), Paragraph(ci.port_of_loading or '', vl)],
+        [Paragraph('Vessel/Flight No.',   lb), Paragraph(ci.vessel_flight_no or '', vl)],
+        [Paragraph('Port of Discharge',   lb), Paragraph(ci.port_of_discharge or '', vl)],
+        [Paragraph('Final Destination',   lb), Paragraph(ci.country_of_final_destination or '', vl)],
+        [Paragraph('Terms of Delivery',   lb), Paragraph(ci.terms_of_delivery or '', vl)],
+        [Paragraph('Payment Terms',       lb), Paragraph(ci.terms_of_trade or ci.payment_terms or '', vl)],
+        [Paragraph('Batch No',            lb), Paragraph(getattr(ci, 'batch_no', '') or '', vl)],
     ]
-    st = Table(grid, colWidths=sc, rowHeights=[_rh]*len(grid))
+    # Label column = 50mm so the value column begins at x = 10mm (sidebar)
+    # + 50mm = 60mm — exactly where the Consignee column starts above.
+    st = Table(ship_rows, colWidths=[50*mm, SHIP_W - 50*mm])
     st.setStyle(TableStyle([
-        ('FONTSIZE', (0,0), (-1,-1), 7),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-        ('LEFTPADDING', (0,0), (-1,-1), 3),
-        ('SPAN', (2,0), (3,0)),  # "Bank Details" header spans 2 cols
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
     ]))
 
-    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, 10*_rh, G, 9, _mt)
-    combo = Table([[sidebar, st]], colWidths=[10*mm, _sw])
-    combo.setStyle(TableStyle([
+    # Bank block (borderless, "Label : Value"). When no bank is selected
+    # (every value blank) render the value cell as a clean empty string —
+    # avoid leaving stray ": " hanging next to the labels.
+    def _bv(label):
+        v = bk(label)
+        return f': {v}' if v else ''
+
+    bk_rows = [
+        [Paragraph('Bank Details', bkH), ''],
+        [Paragraph('Bank Name',   bkL), Paragraph(_bv("Bank name"),   bkV)],
+        [Paragraph('Branch name', bkL), Paragraph(_bv("Branch name"), bkV)],
+        [Paragraph('Beneficiary', bkL), Paragraph(_bv("Beneficiary"), bkV)],
+        [Paragraph('IFSCode',     bkL), Paragraph(_bv("IFSC Code"),   bkV)],
+        [Paragraph('Swift Code',  bkL), Paragraph(_bv("Swift Code"),  bkV)],
+        [Paragraph('A/C No.',     bkL), Paragraph(_bv("A/C No"),      bkV)],
+        [Paragraph('A/C Type',    bkL), Paragraph(_bv("A/C Type"),    bkV)],
+    ]
+    bt = Table(bk_rows, colWidths=[28*mm, BANK_W - 28*mm - 6*mm])
+    bt.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('SPAN', (0,0), (1,0)),
+        ('BOTTOMPADDING', (0,0), (-1,0), 5),
+    ]))
+
+    # Vertical green sidebar — height matches the actual rendered table.
+    # At 8pt body + 3pt padding each row is ~5.5mm, so 8 rows ≈ 44mm.
+    # Keep it slightly tighter so the sidebar doesn't extend past the data.
+    _sidebar_h = 5.5 * mm * len(ship_rows)  # ≈ 44mm for 8 rows
+    sidebar = RotatedText('SHIPMENT  DETAILS', 10*mm, _sidebar_h, G, 9, _mt)
+    combo = Table([[sidebar, st, bt]], colWidths=[10*mm, SHIP_W, BANK_W])
+    combo.setStyle(TableStyle([
+        # Paint the sidebar cell green — this fills the FULL cell height
+        # regardless of how tall the shipment table renders, so the green
+        # strip never falls short of the data rows beside it.
+        ('BACKGROUND', (0,0), (0,0), G),
+        ('VALIGN', (0,0), (0,0), 'MIDDLE'),
+        ('VALIGN', (1,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (2,0), (2,0), 18),  # bigger gap before bank block
+        ('LEFTPADDING', (0,0), (1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ('TOPPADDING', (0,0), (-1,-1), 0),
         ('BOTTOMPADDING', (0,0), (-1,-1), 0),
@@ -393,28 +604,41 @@ def generate_ci_pdf(ci):
             _ar = 'Arial-Regular'
     except Exception:
         pass
-    pd_title = Table([[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=18, textColor=colors.HexColor('#aaaaaa'), alignment=2, fontName=_ar))]], colWidths=[PW])
+    pd_title = Table(
+        [[Paragraph('PACKING DETAILS', ParagraphStyle('pd', fontSize=20, textColor=colors.HexColor('#b8b8b8'), alignment=2, fontName=_ar, leading=24))]],
+        colWidths=[PW],
+    )
+    pd_title.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), -5),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
     el.append(pd_title)
     el.append(Spacer(1, 1*mm))
 
-    # Product Details(22) | No.&Kind of Packages(48) | Description of Goods(42) | Qty(18) | Price/Ltr(25) | Amount(35) = 190mm
-    CW = [22*mm, 48*mm, 42*mm, 18*mm, 25*mm, 35*mm]
+    # Widened so multi-line packaging text ("1000 Ltr IBC Container", etc.)
+    # never wraps mid-word. Total spans the full usable page (196mm).
+    CW = [30*mm, 52*mm, 45*mm, 20*mm, 24*mm, 25*mm]  # = 196mm
 
-    hs = ParagraphStyle('hs', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=1)
-    hsr = ParagraphStyle('hsr', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=2)
-    hsc = ParagraphStyle('hsc', fontSize=7, fontName=_bf, textColor=W, leading=9, alignment=1)
+    # Header column styles — first column left-aligned ("Product Details"),
+    # the remaining five headers centered per spec.
+    hs  = ParagraphStyle('hs',  fontSize=7.5, fontName=_bf, textColor=W, leading=10, alignment=0)  # left
+    hsc = ParagraphStyle('hsc', fontSize=7.5, fontName=_bf, textColor=W, leading=10, alignment=1)  # center
+    hsr = ParagraphStyle('hsr', fontSize=7.5, fontName=_bf, textColor=W, leading=10, alignment=1)  # center (kept name for back-compat)
     hdr = [
-        Paragraph('Product<br/>Details', hs),
-        Paragraph('No. & Kind of<br/>Packages', hs),
-        Paragraph('Description<br/>of Goods', hs),
+        Paragraph('Product Details', hs),
+        Paragraph('No. &amp; Kind of Packages', hsc),
+        Paragraph('Description of Goods', hsc),
         Paragraph('Quantity', hsc),
-        Paragraph('Price/Ltr', hsr),
-        Paragraph('Amount', hsr),
+        Paragraph('Price/Ltr', hsc),
+        Paragraph('Amount', hsc),
     ]
 
-    _bs = ParagraphStyle('bs', fontSize=6.5, leading=8, fontName=_br)
-    _bsc = ParagraphStyle('bsc', fontSize=6.5, leading=8, fontName=_br)
-    _bsb = ParagraphStyle('bsb', fontSize=6.5, leading=8, fontName=_bf)
+    # Body styles — every cell BOLD per spec (was: only product_name bold).
+    _bs  = ParagraphStyle('bs',  fontSize=7, leading=9, fontName=_bf)
+    _bsc = ParagraphStyle('bsc', fontSize=7, leading=9, fontName=_bf)
+    _bsb = ParagraphStyle('bsb', fontSize=7, leading=9, fontName=_bf)
     data = [hdr]
     xrate = float(ci.exchange_rate) if ci.exchange_rate else 0
 
@@ -431,34 +655,53 @@ def generate_ci_pdf(ci):
             _ci_wrap(item.product_name, _bsb),
             _ci_wrap(item.packages_description, _bsc),
             _ci_wrap(item.description_of_goods, _bsc),
-            Paragraph(f'{item.quantity:,.0f} {item.unit}', _bsc),
-            Paragraph(f'$ {item.unit_price:,.2f}', ParagraphStyle('pr', fontSize=7, leading=9, fontName=_br, alignment=2)),
-            Paragraph(f'$ {item.total_price:,.2f}', ParagraphStyle('au', fontSize=7, leading=9, fontName=_br, alignment=2)),
+            Paragraph(f'{item.quantity:,.0f} {item.unit}', ParagraphStyle('qc', fontSize=7, leading=9, fontName=_bf, alignment=1)),
+            Paragraph(f'$ {item.unit_price:,.2f}', ParagraphStyle('pr', fontSize=7, leading=9, fontName=_bf, alignment=1)),
+            Paragraph(f'$ {item.total_price:,.2f}', ParagraphStyle('au', fontSize=7, leading=9, fontName=_bf, alignment=1)),
         ])
 
-    it = Table(data, colWidths=CW)
+    # Distribute available vertical space across item rows so the packing
+    # table fills the A4 page proportionally:
+    #   1 item  → ~60mm row     (matches reference single-product look)
+    #   2 items → ~30mm each
+    #   3 items → ~22mm each
+    #   N items → max(MIN_ROW, TARGET / N), so big invoices don't overflow
+    n_items = max(1, len(data) - 1)  # exclude header row
+    TARGET_BODY_H = 65 * mm
+    MIN_ROW_H     = 14 * mm
+    if n_items == 1:
+        # Single-product invoices left way too much empty space at the old
+        # 65mm row height. Cap it tighter so the layout looks balanced.
+        body_row_h = 22 * mm
+    else:
+        body_row_h = max(MIN_ROW_H, TARGET_BODY_H / n_items)
+    row_heights   = [None] + [body_row_h] * n_items   # header auto, body fixed
+
+    it = Table(data, colWidths=CW, rowHeights=row_heights)
     it.setStyle(TableStyle([
         # Header styling
         ('BACKGROUND', (0,0), (-1,0), G),
         ('TEXTCOLOR', (0,0), (-1,0), W),
-        # Body styling — handled by Paragraph styles, not table-level overrides
         # Alignment: left for text cols, center for Qty, right for numbers
         ('ALIGN', (0,1), (2,-1), 'LEFT'),
-        ('ALIGN', (3,1), (3,-1), 'CENTER'),
-        ('ALIGN', (4,1), (-1,-1), 'RIGHT'),
+        # Quantity, Price/Ltr, Amount — all center-aligned per spec.
+        ('ALIGN', (3,1), (-1,-1), 'CENTER'),
+        # Center body content vertically inside the taller rows so empty
+        # space distributes evenly above & below — matches reference.
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        # Compact padding with extra gap between columns
+        # Header padding
         ('TOPPADDING', (0,0), (-1,0), 4),
         ('BOTTOMPADDING', (0,0), (-1,0), 4),
-        ('TOPPADDING', (0,1), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,1), (-1,-1), 2),
-        ('LEFTPADDING', (0,1), (-1,-1), 2),
-        ('RIGHTPADDING', (0,1), (-1,-1), 2),
+        # Body padding (kept tight; the row HEIGHT does the breathing room)
+        ('TOPPADDING', (0,1), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,1), (-1,-1), 4),
+        ('LEFTPADDING', (0,1), (-1,-1), 4),
+        ('RIGHTPADDING', (0,1), (-1,-1), 4),
     ]))
     el.append(it)
 
     # ═══ FINANCIAL BREAKDOWN — aligned with packing table columns ═══
-    ts_g = ParagraphStyle('tsg', fontSize=8, textColor=G, fontName=_bf, alignment=2)
+    ts_g = ParagraphStyle('tsg', fontSize=11, textColor=colors.HexColor('#548b2e'), fontName=_bf, alignment=2, leading=14)
     TW = sum(CW)
     total_usd = sum(float(i.total_price) for i in ci.items.all())
     total_inr = total_usd * xrate
@@ -494,63 +737,65 @@ def generate_ci_pdf(ci):
     tot.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
         ('FONT', (0,0), (-1,-1), _bf),
-        ('FONTSIZE', (0,0), (-1,-1), 7),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-        ('RIGHTPADDING', (0,0), (-1,-1), 5),
-        ('LINEBELOW', (1,-1), (-1,-1), 0.5, G),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('RIGHTPADDING', (0,0), (-1,-1), 8),
     ]))
     el.append(tot)
-    el.append(Spacer(1, 2*mm))
+    el.append(Spacer(1, 3*mm))
 
-    # ═══ ADDITIONAL DETAILS ═══
-    ad_style = ParagraphStyle('ad', fontSize=7, leading=9, fontName=_br)
-    ad_bold = ParagraphStyle('adb', fontSize=7, leading=9, fontName=_bf)
-    el.append(Paragraph('<b><u>Additional Details</u></b>', ad_bold))
-    el.append(Paragraph(f'<b>FOB</b> : ${total_usd:,.2f}', ad_style))
-    el.append(Paragraph(f'<b>Shipping &amp; Forwarding</b> : ${frt:,.2f}', ad_style))
-    el.append(Paragraph(f'<b>Insurance</b> : ${ins:,.2f}', ad_style))
+    # NOTE: "Additional Details" block intentionally omitted — not part of
+    # the Client Invoice Sample reference and dropping it keeps spacing clean.
 
     # ═══ Amount Chargeable strip ═══
     TW = sum(CW)
-    ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1)
+    ac_style = ParagraphStyle('ac', fontSize=9, fontName=_bf, alignment=1, leading=12)
     # Auto-generate amount in words if not manually set
-    _aiw = ci.amount_in_words
-    if not _aiw and grand_usd > 0:
-        _aiw = f'USD {_number_to_words(round(grand_usd), "").strip()} Dollars Only'
-    ac = Table([[Paragraph(f'Amount Chargeable : {_aiw or ""}', ac_style)]], colWidths=[TW])
+    # Always derive amount-in-words from the live total so the format is
+    # consistent across CIs (older saved values used the legacy "USD ..."
+    # prefix; this enforces the new "<words> Dollars Only (USD)" suffix).
+    _aiw = ''
+    if grand_usd > 0:
+        _aiw = f'{_number_to_words(round(grand_usd), "").strip()} Dollars Only (USD)'
+    ac = Table([[Paragraph(f'<b>Amount Chargeable : {_aiw or ""}</b>', ac_style)]], colWidths=[TW])
     ac.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#dce9d0')),
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#d9ead3')),
         ('TOPPADDING', (0,0), (-1,-1), 4),
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
     el.append(Spacer(1, 1*mm))
     el.append(ac)
-    el.append(Spacer(1, 3*mm))
+    # No spacer — gray Declaration strip should touch the Amount Chargeable
+    # strip directly above it (no white seam).
 
     # ═══ DECLARATION + SEAL/SIGN ═══
     seal = Image(seal_path, width=20*mm, height=20*mm) if os.path.exists(seal_path) else ''
     sign = Image(sign_path, width=22*mm, height=11*mm) if os.path.exists(sign_path) else ''
 
-    decl_style = ParagraphStyle('decl', fontSize=7, leading=9, fontName=_br)
+    decl_style = ParagraphStyle('decl',  fontSize=7, leading=9, fontName=_br, alignment=0)  # left
+    decl_bold  = ParagraphStyle('declb', fontSize=7, leading=9, fontName=_bf, alignment=0)  # left
     decl_block = Table([
-        [Paragraph('<b>Declaration :</b>', decl_style)],
+        [Paragraph('<b>Declaration :</b>', decl_bold)],
         [Paragraph('We Declare that this Invoice shows the Actual Price of the Goods described and that all particulars are true and correct', decl_style)],
-        [Paragraph('<b>E. &amp; O.E</b>', decl_style)],
-    ], colWidths=[100*mm])
+        [Paragraph('<b>E. &amp; O.E</b>', decl_bold)],
+    ], colWidths=[110*mm])
     decl_block.setStyle(TableStyle([
+        # No background — Declaration sits on plain white. Generous vertical
+        # padding gives blank-line breathing room between rows.
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
     ]))
 
     auth_top = Paragraph('<b>For Kriya Biosys Private Limited</b>',
-                         ParagraphStyle('fk', fontSize=9, alignment=1, fontName=_bf))
+                         ParagraphStyle('fk', fontSize=7, alignment=1, fontName=_bf, leading=9))
     seal_sign = Table([[seal, sign]], colWidths=[22*mm, 25*mm])
     seal_sign.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'BOTTOM'), ('ALIGN', (0,0), (-1,-1), 'CENTER')]))
-    auth_bottom = Paragraph('Authorised Signature',
-                            ParagraphStyle('as3', fontSize=9, alignment=1, fontName=_br))
+    auth_bottom = Paragraph('<b>Authorised Signature</b>',
+                            ParagraphStyle('as3', fontSize=7, alignment=1, fontName=_bf, leading=9))
 
     right_block = Table([
         [auth_top],
@@ -566,18 +811,34 @@ def generate_ci_pdf(ci):
 
     decl_row = Table([[decl_block, right_block]], colWidths=[TW - 72*mm, 72*mm])
     decl_row.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('LEFTPADDING', (0,0), (0,0), 0),
+        # Gray strip fills the full row height; signature stays white.
+        ('BACKGROUND', (0,0), (0,0), colors.HexColor('#f3f3f3')),
+        # Left cell content vertically centered → text sits middle of strip.
+        ('VALIGN', (0,0), (0,0), 'MIDDLE'),
+        # Right cell pushed down slightly via top padding so seal sits a bit
+        # below the top edge of the row (matches reference layout).
+        ('VALIGN', (1,0), (1,0), 'TOP'),
+        ('TOPPADDING', (1,0), (1,0), 8),
+        ('LEFTPADDING', (0,0), (0,0), 6),
         ('RIGHTPADDING', (0,0), (0,0), 0),
+        ('TOPPADDING', (0,0), (0,0), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
     ]))
     el.append(decl_row)
     el.append(Spacer(1, 2*mm))
 
     # ═══ FOOTER ═══
     el.append(Paragraph('" Go Organic ! Save Planet ! "',
-                        ParagraphStyle('m', fontSize=8, alignment=1, fontName=_bf)))
+                        ParagraphStyle('m', fontSize=8.5, alignment=1, fontName=_br, textColor=colors.HexColor('#444444'), leading=11)))
 
-    doc.build(el)
+    # Force the entire invoice onto one A4 page even with many line items.
+    # mode='shrink' only kicks in when content overflows; under-full pages
+    # render at 100% so single-line invoices stay crisp.
+    from reportlab.platypus import KeepInFrame
+    avail_w = A4[0] - 20*mm
+    avail_h = A4[1] - 16*mm
+    one_page = KeepInFrame(avail_w, avail_h, el, mode='shrink', hAlign='LEFT', vAlign='TOP')
+    doc.build([one_page])
     buffer.seek(0)
     return buffer
 

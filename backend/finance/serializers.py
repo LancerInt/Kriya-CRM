@@ -334,7 +334,7 @@ class PackingInstructionFormSerializer(serializers.ModelSerializer):
     class Meta:
         model = PackingInstructionForm
         fields = '__all__'
-        read_only_fields = ['id', 'pif_number', 'created_by', 'pdf_file']
+        read_only_fields = ['id', 'created_by', 'pdf_file']
 
     def get_pdf_url(self, obj):
         return obj.pdf_file.url if obj.pdf_file else None

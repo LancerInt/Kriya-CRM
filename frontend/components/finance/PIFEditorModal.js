@@ -69,6 +69,14 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
   const [siblings, setSiblings] = useState([]);
   const [activeItem, setActiveItem] = useState(orderItem || null);
   const loadedFor = useRef(null);
+  // Fetch-from-existing popup state. The button under the header opens it;
+  // selecting a candidate asks for confirmation, then clones the PIF
+  // payload into the current order_item.
+  const [fetchOpen, setFetchOpen] = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const [fetchMatches, setFetchMatches] = useState([]);
+  const [confirmCandidate, setConfirmCandidate] = useState(null);
+  const [cloning, setCloning] = useState(false);
 
   // Reset the "active item" whenever the modal is opened with a different
   // entry point so the parent's chosen product still shows first.
@@ -155,6 +163,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
     setSaving(true);
     try {
       const res = await api.patch(`/finance/pif/${pif.id}/`, {
+        pif_number: pif.pif_number,
         po_no: pif.po_no,
         pif_date: pif.pif_date,
         product_name: pif.product_name,
@@ -220,6 +229,36 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
     finally { setGenerating(false); }
   };
 
+  const openFetchPopup = async () => {
+    if (!activeItem?.order_item_id) { toast.error("No product context yet"); return; }
+    setFetchOpen(true);
+    setFetchLoading(true);
+    setFetchMatches([]);
+    try {
+      const r = await api.get("/finance/pif/find-matching/", {
+        params: { order_item_id: activeItem.order_item_id },
+      });
+      setFetchMatches(r.data?.matches || []);
+    } catch { toast.error("Failed to find existing PIFs"); }
+    finally { setFetchLoading(false); }
+  };
+
+  const confirmFetch = async () => {
+    if (!confirmCandidate || !activeItem?.order_item_id) return;
+    setCloning(true);
+    try {
+      const r = await api.post(`/finance/pif/${confirmCandidate.pif_id}/clone-into-order-item/`, {
+        target_order_item_id: activeItem.order_item_id,
+      });
+      setPif(r.data);
+      loadedFor.current = activeItem.order_item_id;
+      toast.success(`PIF data copied from ${confirmCandidate.pif_number}`);
+      setConfirmCandidate(null);
+      setFetchOpen(false);
+    } catch { toast.error("Failed to fetch PIF"); }
+    finally { setCloning(false); }
+  };
+
   if (!open) return null;
 
   return (
@@ -237,6 +276,15 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
             </p>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={openFetchPopup}
+              disabled={!activeItem}
+              title="Fetch an existing PIF for the same client & product from another order"
+              className="px-3 py-1.5 text-sm border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 disabled:opacity-40 flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+              Fetch existing
+            </button>
             <button onClick={save} disabled={saving || !pif} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">{saving ? "Saving..." : "Save"}</button>
             <button onClick={preview} disabled={previewing || !pif} className="px-3 py-1.5 text-sm border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-40">{previewing ? "Rendering..." : "👁 Preview"}</button>
             <button onClick={generatePdf} disabled={generating || !pif} className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">{generating ? "Generating..." : "Save & Generate PDF"}</button>
@@ -289,7 +337,9 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
                   <div className="flex gap-1"><span className="font-semibold w-20 shrink-0">PO No</span>:
                     <input value={pif.po_no || ""} onChange={(e) => patch({ po_no: e.target.value })} className="flex-1 bg-transparent outline-none border-b border-transparent focus:border-indigo-400" />
                   </div>
-                  <div className="flex gap-1"><span className="font-semibold w-20 shrink-0">PI Form No</span>: <span className="flex-1 text-gray-600">{pif.pif_number}</span></div>
+                  <div className="flex gap-1"><span className="font-semibold w-20 shrink-0">PI Form No</span>:
+                    <input value={pif.pif_number || ""} onChange={(e) => patch({ pif_number: e.target.value })} className="flex-1 bg-transparent outline-none border-b border-transparent focus:border-indigo-400" />
+                  </div>
                   <div className="flex gap-1"><span className="font-semibold w-20 shrink-0">Date</span>:
                     <input type="date" value={pif.pif_date || ""} onChange={(e) => patch({ pif_date: e.target.value })} className="flex-1 bg-transparent outline-none border-b border-transparent focus:border-indigo-400" />
                   </div>
@@ -397,6 +447,78 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
             </div>
           </div>
           <iframe src={previewUrl} title="PIF Preview" className="flex-1 bg-white" />
+        </div>
+      )}
+
+      {/* Fetch-from-existing popup */}
+      {fetchOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => !cloning && setFetchOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 bg-gradient-to-br from-emerald-600 to-emerald-700">
+              <h3 className="font-bold text-white text-base">Fetch existing PIF</h3>
+              <p className="text-[11px] text-emerald-100 mt-0.5">
+                Same client, same product — pick a previous order to copy from
+              </p>
+            </div>
+            <div className="p-4 max-h-[60vh] overflow-y-auto">
+              {fetchLoading ? (
+                <div className="py-8 text-center text-sm text-gray-500">Searching…</div>
+              ) : fetchMatches.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-500">
+                  No existing PIF found for this client &amp; product on any other order.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {fetchMatches.map((m) => (
+                    <button
+                      key={m.pif_id}
+                      onClick={() => setConfirmCandidate(m)}
+                      disabled={cloning}
+                      className="w-full text-left p-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors disabled:opacity-50"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-bold text-sm text-gray-800 truncate">{m.order_number || "—"}</p>
+                          <p className="text-[11px] text-gray-500 mt-0.5 truncate">
+                            {m.pif_number}{m.pif_date ? ` · ${m.pif_date}` : ""}{m.product_name ? ` · ${m.product_name}` : ""}
+                          </p>
+                        </div>
+                        {m.has_pdf && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">PDF ready</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setFetchOpen(false)} disabled={cloning} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm-copy dialog */}
+      {confirmCandidate && (
+        <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={() => !cloning && setConfirmCandidate(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5">
+              <h3 className="font-bold text-slate-800 text-base">Copy PIF from {confirmCandidate.order_number}?</h3>
+              <p className="text-xs text-gray-600 mt-2">
+                This will replace the current PIF's product/packing details
+                with the data from <span className="font-semibold">{confirmCandidate.pif_number}</span>.
+                Every field stays editable afterwards — and the PDF won't be
+                regenerated until you click Save &amp; Generate.
+              </p>
+            </div>
+            <div className="px-5 pb-4 flex justify-end gap-2">
+              <button onClick={() => setConfirmCandidate(null)} disabled={cloning} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+              <button onClick={confirmFetch} disabled={cloning} className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50">
+                {cloning ? "Copying…" : "Yes, copy"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

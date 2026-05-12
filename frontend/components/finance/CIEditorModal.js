@@ -13,7 +13,11 @@ const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] ||
  * Packing table (USD+INR) + Discount/SubTotal/GST/Grand Total + Additional Details.
  * ALL existing calculation logic is PRESERVED.
  */
-export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ciItems, setCiItems, onSave, onGeneratePdf, generating }) {
+export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ciItems, setCiItems, onSave, onGeneratePdf, generating, template = "normal", setTemplate }) {
+  const tpl = template || "normal";
+  const setTpl = setTemplate || (() => {});
+  const showNotify = tpl === "notify" || tpl === "buyer";
+  const showBuyer = tpl === "buyer";
   const editorRef = useRef(null);
   const ciTableRef = useRef(null);
   const [scriptMode, setScriptMode] = useState(null);
@@ -230,6 +234,23 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
               {scriptMode === 'sup' ? 'Superscript' : 'Subscript'} mode ON — click again to turn off
             </span>
           )}
+          <div className="ml-auto flex items-center gap-1">
+            <span className="text-xs text-gray-500 mr-1">Template:</span>
+            {[
+              { k: "normal", l: "Normal" },
+              { k: "notify", l: "With Notify" },
+              { k: "buyer", l: "With Buyer" },
+            ].map((opt) => (
+              <button
+                key={opt.k}
+                type="button"
+                onClick={() => setTpl(opt.k)}
+                className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors ${tpl === opt.k ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-600 border-gray-300 hover:bg-indigo-50 hover:border-indigo-300"}`}
+              >
+                {opt.l}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ── HEADER ── */}
@@ -240,65 +261,219 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
           </div>
         </div>
 
-        {/* ── EXPORTER / NOTIFY / INVOICE # ── */}
+        {/* ── EXPORTER + (CONSIGNEE | NOTIFY | BUYER) + INVOICE # ──
+            normal: Exporter | Consignee (multi-line) | Invoice#
+            notify: Exporter | Notify  (multi-line) | Invoice#   → Consignee below (multi-field)
+            buyer:  Exporter | Buyer   (multi-line) | Invoice#   → Notify | Consignee below */}
         <table className="w-full border-collapse border border-gray-400 text-[10px] mb-1">
           <tbody>
             <tr>
               <td className="border border-gray-400 p-1 font-bold w-[35%] bg-gray-100">Exporter</td>
-              <td className="border border-gray-400 p-1 font-bold w-[40%] bg-gray-100">Notify</td>
+              <td className="border border-gray-400 p-1 font-bold w-[40%] bg-gray-100">
+                {showBuyer ? "Buyer" : showNotify ? "Notify" : "Consignee"}
+              </td>
               <td className="border border-gray-400 p-1 font-bold w-[25%] bg-gray-200">Invoice Number</td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1 font-bold">KRIYA BIOSYS PRIVATE LIMITED</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.notify_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, notify_company_name: e.target.value })} className={ic + " font-bold"} placeholder="Notify party name" /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_company_name: e.target.value })} className={ic + " font-bold"} placeholder="Buyer company name" />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, notify_company_name: e.target.value })} className={ic + " font-bold"} placeholder="Notify party name" />
+                ) : (
+                  <input value={ciForm.client_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, client_company_name: e.target.value })} className={ic + " font-bold"} placeholder="Consignee company name" />
+                )}
+              </td>
               <td className="border border-gray-400 p-1"><input value={ciForm.invoice_number || ""} onChange={(e) => setCiForm({ ...ciForm, invoice_number: e.target.value })} className={ic + " font-bold"} /></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">D.no : 233, Aarthi Nagar,</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.notify_address || ""} onChange={(e) => setCiForm({ ...ciForm, notify_address: e.target.value })} placeholder="Address" className={ic} /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_address || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_address: e.target.value })} placeholder="Buyer address" className={ic} />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_address || ""} onChange={(e) => setCiForm({ ...ciForm, notify_address: e.target.value })} placeholder="Address" className={ic} />
+                ) : (
+                  <input value={ciForm.client_address || ""} onChange={(e) => setCiForm({ ...ciForm, client_address: e.target.value })} placeholder="Address line 1" className={ic} />
+                )}
+              </td>
               <td className="border border-gray-400 p-1" rowSpan="2"></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Mohan Nagar, Narasothipatti,</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.client_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, client_city_state_country: e.target.value })} placeholder="City, State" className={ic} /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_city_state_country: e.target.value })} placeholder="City, State" className={ic} />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, notify_city_state_country: e.target.value })} placeholder="City, State" className={ic} />
+                ) : (
+                  <input value={ciForm.client_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, client_city_state_country: e.target.value })} placeholder="City, State" className={ic} />
+                )}
+              </td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Salem - 636004, Tamilnadu</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.client_pincode || ""} onChange={(e) => setCiForm({ ...ciForm, client_pincode: e.target.value })} placeholder="Pincode, Country" className={ic} /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_pincode || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_pincode: e.target.value })} placeholder="Pincode, Country" className={ic} />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_pincode || ""} onChange={(e) => setCiForm({ ...ciForm, notify_pincode: e.target.value })} placeholder="Pincode, Country" className={ic} />
+                ) : (
+                  <input value={ciForm.client_pincode || ""} onChange={(e) => setCiForm({ ...ciForm, client_pincode: e.target.value })} placeholder="Pincode, Country" className={ic} />
+                )}
+              </td>
               <td className="border border-gray-400 p-1 font-bold bg-gray-200">Date</td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Contact : +91 6385848466</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.client_tax_number || ""} onChange={(e) => setCiForm({ ...ciForm, client_tax_number: e.target.value })} placeholder="TaxID" className={ic} /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_reference || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_reference: e.target.value })} placeholder="REF: S26-10052 / PO 00135" className={ic} />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_tax_number || ""} onChange={(e) => setCiForm({ ...ciForm, notify_tax_number: e.target.value })} placeholder="PIN / VAT / Tax No." className={ic} />
+                ) : (
+                  <input value={ciForm.client_phone || ""} onChange={(e) => setCiForm({ ...ciForm, client_phone: e.target.value })} placeholder="Phone" className={ic} />
+                )}
+              </td>
               <td className="border border-gray-400 p-1"><input type="date" value={ciForm.invoice_date || ""} onChange={(e) => setCiForm({ ...ciForm, invoice_date: e.target.value })} className={ic} /></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">Email : info@kriya.ltd</td>
-              <td className="border border-gray-400 p-1"><input value={ciForm.notify_phone || ""} onChange={(e) => setCiForm({ ...ciForm, notify_phone: e.target.value })} placeholder="Phone" className={ic} /></td>
+              <td className="border border-gray-400 p-1">
+                {showBuyer ? (
+                  <input value={ciForm.buyer_phone || ""} onChange={(e) => setCiForm({ ...ciForm, buyer_phone: e.target.value })} placeholder="Buyer phone" className={ic} />
+                ) : showNotify ? (
+                  <input value={ciForm.notify_email || ""} onChange={(e) => setCiForm({ ...ciForm, notify_email: e.target.value })} placeholder="Email" className={ic} />
+                ) : (
+                  <input value={ciForm.client_tax_number || ""} onChange={(e) => setCiForm({ ...ciForm, client_tax_number: e.target.value })} placeholder="PIN / VAT / Tax No." className={ic} />
+                )}
+              </td>
               <td className="border border-gray-400 p-1"></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">GSTIN : 33AAHCK9695F1Z3</td>
-              <td className="border border-gray-400 p-1" colSpan="2"></td>
+              <td className="border border-gray-400 p-1">
+                {showNotify && !showBuyer && (
+                  <input value={ciForm.notify_phone || ""} onChange={(e) => setCiForm({ ...ciForm, notify_phone: e.target.value })} placeholder="Phone" className={ic} />
+                )}
+                {!showBuyer && !showNotify && (
+                  <input value={ciForm.client_email || ""} onChange={(e) => setCiForm({ ...ciForm, client_email: e.target.value })} placeholder="Email" className={ic} />
+                )}
+              </td>
+              <td className="border border-gray-400 p-1"></td>
             </tr>
             <tr>
               <td className="border border-gray-400 p-1">IEC : AAHCK9695F</td>
-              <td className="border border-gray-400 p-1" colSpan="2"></td>
+              <td className="border border-gray-400 p-1"></td>
+              <td className="border border-gray-400 p-1"></td>
             </tr>
           </tbody>
         </table>
 
-        {/* ── CONSIGNEE ── */}
-        <table className="w-full border-collapse border border-gray-400 text-[10px] mb-2">
-          <tbody>
-            <tr>
-              <td className="border border-gray-400 p-1 font-bold bg-gray-100">Consignee</td>
-            </tr>
-            <tr>
-              <td className="border border-gray-400 p-1"><input value={ciForm.client_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, client_company_name: e.target.value })} placeholder="To the Order" className={ic} /></td>
-            </tr>
-          </tbody>
-        </table>
+        {/* ── CONSIGNEE / NOTIFY-row ──
+            normal: Consignee already lives in the top table — skip.
+            notify: Consignee block below with multiple editable fields.
+            buyer:  split row — Notify (left) | Consignee (right). */}
+        {showBuyer ? (() => {
+          // X-to-remove for optional rows. Persisted in display_overrides so
+          // the PDF can honour the same hides.
+          const ov = ciForm.display_overrides || {};
+          const isHidden = (k) => !!ov[`_hide_${k}`];
+          const setHidden = (k, val, alsoClearKey = null) => {
+            const next = { ...(ciForm.display_overrides || {}), [`_hide_${k}`]: val };
+            const updates = { display_overrides: next };
+            if (val && alsoClearKey) updates[alsoClearKey] = "";
+            setCiForm({ ...ciForm, ...updates });
+          };
+          const RowInput = ({ valueKey, placeholder, bold, optional, hideKey }) => {
+            if (optional && isHidden(hideKey)) return null;
+            return (
+              <div className="flex items-center gap-1 mb-1">
+                <input
+                  value={ciForm[valueKey] || ""}
+                  onChange={(e) => setCiForm({ ...ciForm, [valueKey]: e.target.value })}
+                  placeholder={placeholder}
+                  className={ic + (bold ? " font-bold" : "")}
+                />
+                {optional && (
+                  <button
+                    type="button"
+                    onClick={() => setHidden(hideKey, true, valueKey)}
+                    title="Remove this field"
+                    className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+              </div>
+            );
+          };
+          // Helper to re-show a previously hidden row (chip)
+          const HiddenChip = ({ hideKey, label }) => {
+            if (!isHidden(hideKey)) return null;
+            return (
+              <button
+                type="button"
+                onClick={() => setHidden(hideKey, false)}
+                className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-gray-300 text-gray-500 hover:border-indigo-300 hover:text-indigo-600 mb-1 mr-1"
+              >
+                + {label}
+              </button>
+            );
+          };
+          return (
+            <table className="w-full border-collapse border border-gray-400 text-[10px] mb-2">
+              <tbody>
+                <tr>
+                  <td className="border border-gray-400 p-1 font-bold bg-gray-100 w-1/2">Notify</td>
+                  <td className="border border-gray-400 p-1 font-bold bg-gray-100 w-1/2">Consignee</td>
+                </tr>
+                <tr>
+                  <td className="border border-gray-400 p-1 align-top">
+                    <RowInput valueKey="notify_company_name" placeholder="Company name" bold />
+                    <RowInput valueKey="notify_address" placeholder="Company address" />
+                    <RowInput valueKey="notify_city_state_country" placeholder="City, State, Country" />
+                    <RowInput valueKey="notify_pincode" placeholder="CEP" optional hideKey="notify_cep" />
+                    <RowInput valueKey="notify_tax_number" placeholder="Tax / CNPJ" />
+                    <RowInput valueKey="notify_phone" placeholder="Phone" />
+                    <RowInput valueKey="notify_mobile" placeholder="Mobile" optional hideKey="notify_mobile" />
+                    <RowInput valueKey="notify_email" placeholder="Email" />
+                    <div className="flex flex-wrap mt-1">
+                      <HiddenChip hideKey="notify_cep" label="CEP" />
+                      <HiddenChip hideKey="notify_mobile" label="Mobile" />
+                    </div>
+                  </td>
+                  <td className="border border-gray-400 p-1 align-top">
+                    <RowInput valueKey="client_company_name" placeholder="Company name" bold />
+                    <RowInput valueKey="client_address" placeholder="Company address" />
+                    <RowInput valueKey="client_city_state_country" placeholder="City, State, Country" />
+                    <RowInput valueKey="client_pincode" placeholder="CEP" optional hideKey="client_cep" />
+                    <RowInput valueKey="client_tax_number" placeholder="CNPJ / Tax" />
+                    <div className="flex flex-wrap mt-1">
+                      <HiddenChip hideKey="client_cep" label="CEP" />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          );
+        })() : showNotify ? (
+          <table className="w-full border-collapse border border-gray-400 text-[10px] mb-2">
+            <tbody>
+              <tr>
+                <td className="border border-gray-400 p-1 font-bold bg-gray-100">Consignee</td>
+              </tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_company_name || ""} onChange={(e) => setCiForm({ ...ciForm, client_company_name: e.target.value })} placeholder="Consignee company name" className={ic + " font-bold"} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_address || ""} onChange={(e) => setCiForm({ ...ciForm, client_address: e.target.value })} placeholder="Address line 1" className={ic} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_city_state_country || ""} onChange={(e) => setCiForm({ ...ciForm, client_city_state_country: e.target.value })} placeholder="City, State" className={ic} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_pincode || ""} onChange={(e) => setCiForm({ ...ciForm, client_pincode: e.target.value })} placeholder="Pincode, Country" className={ic} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_tax_number || ""} onChange={(e) => setCiForm({ ...ciForm, client_tax_number: e.target.value })} placeholder="PIN / VAT / Tax No." className={ic} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_email || ""} onChange={(e) => setCiForm({ ...ciForm, client_email: e.target.value })} placeholder="Email" className={ic} /></td></tr>
+              <tr><td className="border border-gray-400 p-1"><input value={ciForm.client_phone || ""} onChange={(e) => setCiForm({ ...ciForm, client_phone: e.target.value })} placeholder="Phone" className={ic} /></td></tr>
+            </tbody>
+          </table>
+        ) : null}
 
         {/* ── SHIPMENT DETAILS + BANK DETAILS (side by side) ── */}
         <div className="flex gap-2 mb-2">
@@ -352,8 +527,8 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
             <div className="flex items-center gap-1 mb-1">
               <span className="font-bold text-[10px]">Bank Details</span>
               {[
-                { label: "ICICI INR", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611905057914", type: "CA Account" },
-                { label: "ICICI USD", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611906000027", type: "CA Account" },
+                { label: "ICICI INR", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "Kriya Biosys Private Limited", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611905057914", type: "CA Account" },
+                { label: "ICICI USD", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "Kriya Biosys Private Limited", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611906000027", type: "CA Account" },
                 { label: "DBS INR", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832210073820", type: "CA Account" },
                 { label: "DBS USD", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832250073848", type: "CA Account" },
               ].map(b => (
@@ -441,14 +616,6 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
           </table>
         </div>
 
-        {/* ── ADDITIONAL DETAILS ── */}
-        <div className="mb-2 text-[10px]">
-          <p className="font-bold underline mb-1">Additional Details</p>
-          <p><b>FOB :</b> <input value={ciForm._ci_fob || ""} onChange={(e) => setCiForm({ ...ciForm, _ci_fob: e.target.value })} placeholder="$0" className="border-0 outline-none bg-transparent text-xs w-20 focus:bg-yellow-50" /></p>
-          <p><b>Shipping & Forwarding :</b> <input value={ciForm._ci_shipping || ""} onChange={(e) => setCiForm({ ...ciForm, _ci_shipping: e.target.value })} placeholder="$0" className="border-0 outline-none bg-transparent text-xs w-20 focus:bg-yellow-50" /></p>
-          <p><b>Insurance :</b> <input value={ciForm.insurance || ""} onChange={(e) => setCiForm({ ...ciForm, insurance: e.target.value })} placeholder="$0" className="border-0 outline-none bg-transparent text-xs w-20 focus:bg-yellow-50" /></p>
-        </div>
-
         {/* ── Amount in Words ── */}
         <div className="p-2 border border-gray-400 mb-3 text-[10px]" style={{ backgroundColor: "#dce9d0" }}>
           <input
@@ -484,8 +651,15 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
         {/* ── ACTION BUTTONS ── */}
         <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
           <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
-          <button onClick={async () => { await handleSaveWithTotals(); await onGeneratePdf?.(); }} disabled={generating} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
-            {generating ? "Generating..." : "Save & Generate PDF"}
+          <button
+            onClick={async () => {
+              await handleSaveWithTotals();
+              await onGeneratePdf?.(tpl);
+            }}
+            disabled={generating}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {generating ? "Generating..." : `Save & Generate PDF (${tpl === "normal" ? "Normal" : tpl === "notify" ? "With Notify" : "With Buyer"})`}
           </button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>

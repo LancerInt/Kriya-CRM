@@ -788,8 +788,13 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
             'invoice_date', 'status', 'exporter_ref',
             'client_company_name', 'client_tax_number', 'client_address',
             'client_pincode', 'client_city_state_country', 'client_phone',
+            'client_email',
             'notify_company_name', 'notify_address', 'notify_phone',
+            'notify_city_state_country', 'notify_pincode', 'notify_tax_number',
+            'notify_email', 'notify_mobile',
             'buyer_order_no', 'buyer_order_date',
+            'buyer_company_name', 'buyer_address', 'buyer_pincode',
+            'buyer_city_state_country', 'buyer_phone', 'buyer_reference',
             'country_of_origin', 'country_of_final_destination',
             'port_of_loading', 'port_of_discharge', 'vessel_flight_no',
             'final_destination', 'pre_carriage_by', 'place_of_receipt',
@@ -889,12 +894,22 @@ class CommercialInvoiceViewSet(SoftDeleteViewMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='generate-pdf')
     def generate_pdf(self, request, pk=None):
-        """Generate CI PDF, save it to the order's documents, and return inline."""
+        """Generate CI PDF, save it to the order's documents, and return inline.
+
+        Query params:
+          template — 'normal' (default) | 'notify' | 'buyer'
+            normal : Exporter + Consignee only (top row)
+            notify : Exporter + Consignee top, Notify full-width below
+            buyer  : Exporter | Buyer top row, Notify | Consignee bottom row
+        """
         from django.core.files.base import ContentFile
         from orders.models import OrderDocument
         ci = self.get_object()
+        template = request.query_params.get('template', 'normal')
+        if template not in ('normal', 'notify', 'buyer'):
+            template = 'normal'
         from .ci_service import generate_ci_pdf
-        pdf_buffer = generate_ci_pdf(ci)
+        pdf_buffer = generate_ci_pdf(ci, template=template)
         filename = f'CI_{ci.invoice_number.replace("/", "-")}.pdf'
         if ci.order_id:
             OrderDocument.objects.filter(order_id=ci.order_id, doc_type='client_invoice', is_deleted=False).delete()
@@ -1046,6 +1061,199 @@ class PackingInstructionFormViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='find-matching')
+    def find_matching(self, request):
+        """Return PIFs from *other* orders that match the given order_item's
+        Client + Product. Used by the editor's "Fetch from existing" popup so
+        executives can reuse a prior PIF instead of typing everything again.
+
+        Query params:
+            order_item_id — current line item; we match against its
+                            order.client + product_name (case-insensitive,
+                            client_product_name is also accepted as a fallback).
+
+        Returns: { matches: [ {pif_id, pif_number, order_id, order_number,
+                               pif_date, product_name, has_pdf} ] }
+        """
+        from orders.models import OrderItem
+        order_item_id = request.query_params.get('order_item_id')
+        if not order_item_id:
+            return Response({'error': 'order_item_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            oi = OrderItem.objects.select_related('order', 'order__client').get(id=order_item_id)
+        except OrderItem.DoesNotExist:
+            return Response({'error': 'Order item not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        client_id = oi.order.client_id
+        product = (oi.product_name or '').strip()
+        client_product = (oi.client_product_name or '').strip()
+        if not product and not client_product:
+            return Response({'matches': []})
+        qs = (PackingInstructionForm.objects
+              .filter(client_id=client_id)
+              .exclude(order_item_id=oi.id)
+              .select_related('order', 'order_item'))
+        from django.db.models import Q
+        name_q = Q()
+        if product:
+            name_q |= Q(product_name__iexact=product)
+            name_q |= Q(order_item__product_name__iexact=product)
+            name_q |= Q(order_item__client_product_name__iexact=product)
+        if client_product:
+            name_q |= Q(product_name__iexact=client_product)
+            name_q |= Q(order_item__product_name__iexact=client_product)
+            name_q |= Q(order_item__client_product_name__iexact=client_product)
+        qs = qs.filter(name_q).order_by('-pif_date', '-created_at')
+        matches = [{
+            'pif_id': str(p.id),
+            'pif_number': p.pif_number,
+            'order_id': str(p.order_id) if p.order_id else None,
+            'order_number': p.order.order_number if p.order_id else '',
+            'pif_date': p.pif_date.isoformat() if p.pif_date else '',
+            'product_name': p.product_name or (p.order_item.product_name if p.order_item_id else ''),
+            'has_pdf': bool(p.pdf_file),
+        } for p in qs[:50]]
+        return Response({'matches': matches})
+
+    @action(detail=False, methods=['get'], url_path='find-matching-for-order')
+    def find_matching_for_order(self, request):
+        """Aggregate version of find-matching: for an entire order, walk every
+        order item and look up PIFs from other orders that share the same
+        Client + Product. Returns sources grouped by source-order so the UI
+        can offer "Pick which order to copy the whole PIF set from".
+
+        Query params:
+            order_id — the current order
+
+        Returns: { source_orders: [
+            { order_id, order_number, pif_date_latest, matches: [
+                { source_pif_id, source_pif_number, target_order_item_id,
+                  product_name, has_pdf }
+            ]}
+        ]}
+
+        Each "match" pairs a source PIF with the target order_item it would
+        clone into (matched on product name, case-insensitive).
+        """
+        from orders.models import Order
+        from django.db.models import Q
+        order_id = request.query_params.get('order_id')
+        if not order_id:
+            return Response({'error': 'order_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            order = Order.objects.select_related('client').get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        client_id = order.client_id
+
+        # Collect target items keyed by lowercased product name (both names).
+        targets_by_name = {}
+        for it in order.items.all():
+            for name in [(it.product_name or '').strip(),
+                         (it.client_product_name or '').strip()]:
+                key = name.lower()
+                if key and key not in targets_by_name:
+                    targets_by_name[key] = it
+
+        if not targets_by_name:
+            return Response({'source_orders': []})
+
+        # All same-client PIFs on OTHER orders.
+        qs = (PackingInstructionForm.objects
+              .filter(client_id=client_id)
+              .exclude(order_id=order.id)
+              .select_related('order', 'order_item')
+              .order_by('-pif_date', '-created_at'))
+
+        # Group by source order.
+        groups = {}  # order_id → {order_number, pif_date_latest, matches: []}
+        for p in qs:
+            pname = (p.product_name or '').strip().lower()
+            oi_pname = ''
+            oi_cname = ''
+            if p.order_item_id:
+                oi_pname = (p.order_item.product_name or '').strip().lower()
+                oi_cname = (p.order_item.client_product_name or '').strip().lower()
+            target_it = (targets_by_name.get(pname)
+                         or targets_by_name.get(oi_pname)
+                         or targets_by_name.get(oi_cname))
+            if not target_it:
+                continue
+            src_oid = str(p.order_id) if p.order_id else 'none'
+            if src_oid not in groups:
+                groups[src_oid] = {
+                    'order_id': src_oid,
+                    'order_number': p.order.order_number if p.order_id else '',
+                    'pif_date_latest': p.pif_date.isoformat() if p.pif_date else '',
+                    'matches': [],
+                    '_seen_targets': set(),
+                }
+            g = groups[src_oid]
+            # One match per target item (use the most recent PIF only).
+            if str(target_it.id) in g['_seen_targets']:
+                continue
+            g['_seen_targets'].add(str(target_it.id))
+            g['matches'].append({
+                'source_pif_id': str(p.id),
+                'source_pif_number': p.pif_number,
+                'target_order_item_id': str(target_it.id),
+                'product_name': p.product_name or target_it.product_name,
+                'has_pdf': bool(p.pdf_file),
+            })
+
+        result = []
+        for g in groups.values():
+            g.pop('_seen_targets', None)
+            result.append(g)
+        # Sort by latest PIF date desc (newest source orders first).
+        result.sort(key=lambda x: x['pif_date_latest'] or '', reverse=True)
+        return Response({'source_orders': result[:50]})
+
+    @action(detail=True, methods=['post'], url_path='clone-into-order-item')
+    def clone_into_order_item(self, request, pk=None):
+        """Copy this PIF's editable fields onto the PIF of a target order_item
+        (creating one if it doesn't exist). Returns the resulting PIF. The
+        target's order/client/order_item linkage is preserved; only the
+        product/packing payload is copied.
+        """
+        from orders.models import OrderItem
+        source = self.get_object()
+        target_order_item_id = request.data.get('target_order_item_id')
+        if not target_order_item_id:
+            return Response({'error': 'target_order_item_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target_oi = OrderItem.objects.select_related('order', 'order__client').get(id=target_order_item_id)
+        except OrderItem.DoesNotExist:
+            return Response({'error': 'Target order item not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        # Find-or-create the target PIF row (one PIF per order_item).
+        target = PackingInstructionForm.objects.filter(order_item=target_oi).first()
+        if not target:
+            from .pif_service import create_pif_from_order_item
+            target = create_pif_from_order_item(target_oi, request.user)
+        # Copy the editable payload from the source — but keep the target's
+        # identity (pif_number, order, order_item, client) and any existing
+        # pdf_file untouched until the user re-generates.
+        target.po_no = source.po_no
+        target.product_name = source.product_name
+        target.product_description = source.product_description
+        target.packing_description = source.packing_description
+        target.quantity = source.quantity
+        target.notes = source.notes
+        target.container_left = source.container_left
+        target.container_right = source.container_right
+        target.packing_sections = source.packing_sections
+        target.footer_note = source.footer_note
+        # Refresh the date to today so it reflects this fetch.
+        from django.utils import timezone
+        target.pif_date = timezone.now().date()
+        target.save()
+        return Response(PackingInstructionFormSerializer(target).data)
 
     @action(detail=False, methods=['post'], url_path='create-from-order-item')
     def create_from_order_item(self, request):

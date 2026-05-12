@@ -3,6 +3,28 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 
+// Preset bank accounts — same set used in CIEditorModal so toggling between
+// the two invoice types fills the bank block consistently. Each preset is
+// rendered into the multi-line ``bank_details`` text blob the LI form parses
+// per-row (see the Bank Details column below).
+const BANK_PRESETS = [
+  { label: "ICICI INR", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611905057914", type: "CA Account" },
+  { label: "ICICI USD", name: "ICICI Bank Ltd", branch: "Salem Main Branch", beneficiary: "KRIYA BIOSYS PRIVATE LIMITED", ifsc: "ICIC0006119", swift: "ICICINBBCTS", ac: "611906000027", type: "CA Account" },
+  { label: "DBS INR", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832210073820", type: "CA Account" },
+  { label: "DBS USD", name: "DBS Bank India Limited", branch: "Salem - India", beneficiary: "Kriya Biosys Private Limited", ifsc: "DBSS0IN0832", swift: "DBSSINBB", ac: "832250073848", type: "CA Account" },
+];
+
+const buildBankDetailsText = (b) =>
+  [
+    `Bank name: ${b.name}`,
+    `Branch name: ${b.branch}`,
+    `Beneficiary: ${b.beneficiary}`,
+    `IFSC Code: ${b.ifsc}`,
+    `Swift Code: ${b.swift}`,
+    `A/C No: ${b.ac}`,
+    `A/C Type: ${b.type}`,
+  ].join("\n");
+
 const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ' };
 const SUB_MAP = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','a':'ₐ','e':'ₑ','h':'ₕ','i':'ᵢ','j':'ⱼ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','o':'ₒ','p':'ₚ','r':'ᵣ','s':'ₛ','t':'ₜ','u':'ᵤ','v':'ᵥ','x':'ₓ' };
 const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] || c).join('');
@@ -254,7 +276,22 @@ export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, li
                     <>
                       <td className="border border-gray-300 px-2 py-1 font-bold text-blue-900 w-1/4">{bLabel}</td>
                       <td className="border border-gray-300 px-2 py-1 w-1/4">
-                        {bKey ? `: ${(liForm.bank_details || "").split("\n").find(l => l.toLowerCase().includes(bKey.toLowerCase()))?.split(":").slice(1).join(":").trim() || ""}` : ""}
+                        {bKey
+                          ? `: ${(liForm.bank_details || "").split("\n").find(l => l.toLowerCase().includes(bKey.toLowerCase()))?.split(":").slice(1).join(":").trim() || ""}`
+                          : (
+                            <div className="flex flex-wrap gap-1">
+                              {BANK_PRESETS.map((b) => (
+                                <button
+                                  key={b.label}
+                                  type="button"
+                                  onClick={() => setLiForm({ ...liForm, bank_details: buildBankDetailsText(b) })}
+                                  className="px-1.5 py-0.5 text-[9px] font-semibold rounded border border-gray-300 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                                >
+                                  {b.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                       </td>
                     </>
                   ) : (

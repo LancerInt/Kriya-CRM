@@ -208,6 +208,16 @@ export default function OrderDetailPage() {
   const [piSending, setPiSending] = useState(false);
   const [piItems, setPiItems] = useState([]);
   const [showCiModal, setShowCiModal] = useState(false);
+  // Template chooser shown directly when "Generate" is clicked on the
+  // Client Invoice row in the Documents Checklist. Three options:
+  //   normal — Exporter + Consignee only
+  //   notify — adds a Notify row below
+  //   buyer  — top: Exporter | Buyer ; bottom: Notify | Consignee
+  const [ciTemplateChooserOpen, setCiTemplateChooserOpen] = useState(false);
+  const [ciGenerating, setCiGenerating] = useState(false);
+  // Template the user picked in the chooser — drives which sections the
+  // editor shows (Buyer/Notify) and which layout the PDF endpoint renders.
+  const [ciTemplate, setCiTemplate] = useState("normal");
   const [ci, setCi] = useState(null);
   const [ciForm, setCiForm] = useState({});
   const [ciLoading, setCiLoading] = useState(false);
@@ -222,6 +232,15 @@ export default function OrderDetailPage() {
   const [showPifListModal, setShowPifListModal] = useState(false);
   const [pifReady, setPifReady] = useState(false);
   const [pifCounts, setPifCounts] = useState({ done: 0, total: 0 });
+  // "Fetch PIFs from prior order" popup, opened when the user clicks
+  // → PIF Sent. Lists source orders (same client + same product on at least
+  // one line). Picking one batch-clones each matched source PIF into the
+  // matching target order_item, then advances the stage.
+  const [pifFetchOrders, setPifFetchOrders] = useState([]);    // list of source orders
+  const [pifFetchChecking, setPifFetchChecking] = useState(false);
+  const [pifFetchOpen, setPifFetchOpen] = useState(false);
+  const [pifFetchConfirm, setPifFetchConfirm] = useState(null); // chosen source order
+  const [pifFetchCloning, setPifFetchCloning] = useState(false);
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [savingChecklist, setSavingChecklist] = useState(false);
   const [uploadChecklistFor, setUploadChecklistFor] = useState(null); // { doc_type, label }
@@ -471,7 +490,7 @@ export default function OrderDetailPage() {
 
   const openEditorForDocType = (docType, opts = {}) => {
     switch (docType) {
-      case "client_invoice": handleGenerateCI(); return;
+      case "client_invoice": setCiTemplateChooserOpen(true); return;
       case "logistic_invoice": handleGenerateLI(); return;
       case "client_packing_list": setPackingListType("client"); return;
       case "logistic_packing_list": setPackingListType("logistic"); return;
@@ -686,6 +705,59 @@ export default function OrderDetailPage() {
       loadOrder();
     } catch (err) { toast.error(getErrorMessage(err, "Transition failed")); }
     finally { setTransitioning(false); }
+  };
+
+  // Called when the user clicks "→ PIF Sent". Probes the backend for PIFs
+  // from prior orders that share the same Client + same Product as any line
+  // item on this order. If any source orders exist, open the chooser popup.
+  // If not, fall through to a normal stage transition.
+  const handleAdvanceToPifSent = async () => {
+    setPifFetchChecking(true);
+    try {
+      const r = await api.get("/finance/pif/find-matching-for-order/", { params: { order_id: id } });
+      const sources = r.data?.source_orders || [];
+      if (sources.length === 0) {
+        await handleTransition("pif_sent");
+        return;
+      }
+      setPifFetchOrders(sources);
+      setPifFetchOpen(true);
+    } catch (err) {
+      // Network error → don't block the user; just advance.
+      toast.error(getErrorMessage(err, "Could not check for existing PIFs — advancing anyway"));
+      await handleTransition("pif_sent");
+    } finally {
+      setPifFetchChecking(false);
+    }
+  };
+
+  // Confirmed pick from the chooser: clone every matched source PIF into the
+  // corresponding target order_item on THIS order, then advance to PIF Sent.
+  const handleConfirmPifFetch = async () => {
+    if (!pifFetchConfirm) return;
+    setPifFetchCloning(true);
+    try {
+      for (const m of pifFetchConfirm.matches) {
+        await api.post(`/finance/pif/${m.source_pif_id}/clone-into-order-item/`, {
+          target_order_item_id: m.target_order_item_id,
+        });
+      }
+      toast.success(`Copied ${pifFetchConfirm.matches.length} PIF(s) from ${pifFetchConfirm.order_number}`);
+      setPifFetchConfirm(null);
+      setPifFetchOpen(false);
+      await handleTransition("pif_sent");
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to copy PIFs"));
+    } finally {
+      setPifFetchCloning(false);
+    }
+  };
+
+  // User skipped the chooser — just advance without cloning.
+  const handleSkipPifFetch = async () => {
+    setPifFetchOpen(false);
+    setPifFetchOrders([]);
+    await handleTransition("pif_sent");
   };
 
   const handleRevert = async () => {
@@ -1087,6 +1159,18 @@ export default function OrderDetailPage() {
       }
     } catch (err) { toast.error(getErrorMessage(err, "Failed to generate CI")); setShowCiModal(false); }
     finally { setCiLoading(false); }
+  };
+
+  // Triggered when the user picks a template card in the chooser. Stores
+  // the choice, closes the chooser, then opens the CI editor pre-populated
+  // for that template — so the user can fill in Buyer/Notify details
+  // manually before generating the PDF. The actual PDF call happens from
+  // the editor's "Save & Generate PDF" button, which forwards the stored
+  // template to the backend.
+  const handleGenerateCIWithTemplate = async (template) => {
+    setCiTemplate(template);
+    setCiTemplateChooserOpen(false);
+    await handleGenerateCI();
   };
 
   const handleSaveCI = async () => {
@@ -1511,7 +1595,7 @@ export default function OrderDetailPage() {
                         </button>
                       )}
                       {row.action === "generate-ci" && (
-                        <button onClick={handleGenerateCI} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
+                        <button onClick={() => setCiTemplateChooserOpen(true)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
                       )}
                       {row.action === "generate-li" && (
                         <button onClick={handleGenerateLI} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"><ActionLabel present={present} /></button>
@@ -1753,6 +1837,12 @@ export default function OrderDetailPage() {
                     <button onClick={() => {
                       if (needsPO) { toast.error("Upload PO first"); setShowPoModal(true); return; }
                       if (needsPIFGen) { toast.error(pifHint); setShowPifListModal(true); return; }
+                      // When advancing from PO Received → PIF Sent, offer to
+                      // copy PIFs from a prior order before the transition.
+                      if (order.status === "po_received" && t.status === "pif_sent") {
+                        handleAdvanceToPifSent();
+                        return;
+                      }
                       if (needsChecklist) { toast.error(checklistHint); return; }
                       if (order.status === "inspection" && t.status === "inspection_passed") {
                         setShowInspectionModal(true);
@@ -3022,6 +3112,77 @@ export default function OrderDetailPage() {
         onClose={() => { setShowPifListModal(false); loadOrder(); }}
       />
 
+      {/* "Fetch PIFs from a prior order" chooser — opens when the user
+          clicks → PIF Sent and at least one source order exists with the
+          same Client + Product. */}
+      {pifFetchOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => !pifFetchCloning && setPifFetchOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 bg-gradient-to-br from-emerald-600 to-emerald-700">
+              <h3 className="font-bold text-white text-base">Copy PIFs from a prior order?</h3>
+              <p className="text-[11px] text-emerald-100 mt-0.5">
+                {pifFetchOrders.length} order(s) with the same client &amp; matching products. Pick one to copy, or skip.
+              </p>
+            </div>
+            <div className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
+              {pifFetchOrders.map((src) => (
+                <button
+                  key={src.order_id}
+                  onClick={() => setPifFetchConfirm(src)}
+                  disabled={pifFetchCloning}
+                  className="w-full text-left p-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm text-gray-800 truncate">{src.order_number || "—"}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5 truncate">
+                        {src.matches.length} matching product{src.matches.length !== 1 ? "s" : ""}
+                        {src.pif_date_latest ? ` · latest ${src.pif_date_latest}` : ""}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                        {src.matches.map((m) => m.product_name).filter(Boolean).slice(0, 4).join(" · ")}
+                        {src.matches.length > 4 ? ` · +${src.matches.length - 4} more` : ""}
+                      </p>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+              <button onClick={handleSkipPifFetch} disabled={pifFetchCloning} className="text-xs text-indigo-600 hover:text-indigo-700 font-bold">
+                Skip — advance without copying
+              </button>
+              <button onClick={() => setPifFetchOpen(false)} disabled={pifFetchCloning} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-lg">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm: copy from this specific source order, then advance. */}
+      {pifFetchConfirm && (
+        <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={() => !pifFetchCloning && setPifFetchConfirm(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5">
+              <h3 className="font-bold text-slate-800 text-base">Copy PIFs from {pifFetchConfirm.order_number}?</h3>
+              <p className="text-xs text-gray-600 mt-2">
+                This will copy the product/packing details for{" "}
+                <span className="font-semibold">{pifFetchConfirm.matches.length} product(s)</span>
+                {" "}from <span className="font-semibold">{pifFetchConfirm.order_number}</span> onto this order's PIFs, then advance to PIF Sent. Every field stays editable; PDFs are only generated when you save & generate each PIF.
+              </p>
+            </div>
+            <div className="px-5 pb-4 flex justify-end gap-2">
+              <button onClick={() => setPifFetchConfirm(null)} disabled={pifFetchCloning} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-lg">Cancel</button>
+              <button onClick={handleConfirmPifFetch} disabled={pifFetchCloning} className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50">
+                {pifFetchCloning ? "Copying…" : "Yes, copy & advance"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PackingListEditorModal
         open={!!packingListType}
         orderId={id}
@@ -3533,6 +3694,65 @@ export default function OrderDetailPage() {
         </form>
       </Modal>
 
+      {/* CI Template Chooser — shown when "Generate" is clicked in the
+          Documents Checklist for the Client Invoice row. Each option
+          opens the CI editor with the chosen template pre-selected; the
+          editor lets the user fill in Buyer/Notify details before
+          generating the PDF. */}
+      {ciTemplateChooserOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setCiTemplateChooserOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 bg-gradient-to-br from-indigo-600 to-violet-600">
+              <h3 className="font-bold text-white text-base">Choose Invoice Template</h3>
+              <p className="text-[11px] text-indigo-100 mt-0.5">Pick a layout — the editor will open so you can fill in details</p>
+            </div>
+            <div className="p-4 space-y-2">
+              {[
+                {
+                  key: "normal",
+                  title: "Normal",
+                  desc: "Exporter + Consignee only. No Notify, no Buyer.",
+                  iconBg: "from-slate-500 to-slate-600",
+                },
+                {
+                  key: "notify",
+                  title: "With Notify",
+                  desc: "Exporter + Consignee, plus a Notify section below.",
+                  iconBg: "from-blue-500 to-indigo-500",
+                },
+                {
+                  key: "buyer",
+                  title: "With Buyer",
+                  desc: "Top: Exporter | Buyer. Bottom: Notify | Consignee.",
+                  iconBg: "from-emerald-500 to-emerald-600",
+                },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  disabled={ciGenerating}
+                  onClick={() => handleGenerateCIWithTemplate(opt.key)}
+                  className="w-full text-left flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-sm transition-all group disabled:opacity-50"
+                >
+                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${opt.iconBg} flex items-center justify-center shadow-sm shrink-0`}>
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm text-slate-800 group-hover:text-indigo-700">{opt.title}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{opt.desc}</p>
+                  </div>
+                  <svg className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              ))}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end">
+              <button onClick={() => setCiTemplateChooserOpen(false)} disabled={ciGenerating} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-lg">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CI Editor — Commercial Invoice template */}
       {ciLoading && showCiModal && (
         <Modal open={true} onClose={() => setShowCiModal(false)} title="Loading CI..." size="sm">
@@ -3546,10 +3766,16 @@ export default function OrderDetailPage() {
         ciItems={ciItems} setCiItems={setCiItems}
         onSave={handleSaveCI}
         generating={ciSending}
-        onGeneratePdf={async () => {
+        template={ciTemplate}
+        setTemplate={setCiTemplate}
+        onGeneratePdf={async (templateOverride) => {
           if (!ci?.id) return;
+          const template = templateOverride || ciTemplate || "normal";
           try {
-            const res = await api.get(`/finance/ci/${ci.id}/generate-pdf/`, { responseType: "blob" });
+            const res = await api.get(`/finance/ci/${ci.id}/generate-pdf/`, {
+              responseType: "blob",
+              params: { template },
+            });
             const blob = new Blob([res.data], { type: "application/pdf" });
             window.open(URL.createObjectURL(blob), "_blank");
             toast.success("Client Invoice generated & saved to Documents");

@@ -255,15 +255,27 @@ class CommercialInvoice(TimeStampedModel):
     client_pincode = models.CharField(max_length=30, blank=True)
     client_city_state_country = models.CharField(max_length=255, blank=True)
     client_phone = models.CharField(max_length=50, blank=True)
+    client_email = models.CharField(max_length=255, blank=True)
 
     # ── Notify Party Section ──
     notify_company_name = models.CharField(max_length=255, blank=True)
     notify_address = models.TextField(blank=True)
     notify_phone = models.CharField(max_length=50, blank=True)
+    notify_city_state_country = models.CharField(max_length=255, blank=True)
+    notify_pincode = models.CharField(max_length=30, blank=True)
+    notify_tax_number = models.CharField(max_length=100, blank=True)
+    notify_email = models.CharField(max_length=255, blank=True)
+    notify_mobile = models.CharField(max_length=50, blank=True)
 
     # ── Buyer (if other than consignee) ──
     buyer_order_no = models.CharField(max_length=100, blank=True)
     buyer_order_date = models.DateField(null=True, blank=True)
+    buyer_company_name = models.CharField(max_length=255, blank=True)
+    buyer_address = models.TextField(blank=True)
+    buyer_pincode = models.CharField(max_length=30, blank=True)
+    buyer_city_state_country = models.CharField(max_length=255, blank=True)
+    buyer_phone = models.CharField(max_length=50, blank=True)
+    buyer_reference = models.CharField(max_length=255, blank=True, help_text='e.g. REF: S26-10052 / PO 00135')
 
     # ── Shipment / Loading Details ──
     country_of_origin = models.CharField(max_length=100, default='India')
