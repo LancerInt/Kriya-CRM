@@ -91,8 +91,8 @@ export default function Sidebar({ open, onClose }) {
           <div className="absolute -top-8 -right-8 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
           <div className="absolute -bottom-6 -left-6 w-20 h-20 bg-violet-300/20 rounded-full blur-xl" />
           <Link href="/dashboard" className="relative flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center ring-1 ring-white/30 shadow-md">
-              <span className="text-lg font-extrabold text-white">K</span>
+            <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center ring-1 ring-white/30 shadow-md overflow-hidden">
+              <img src="/logo.png" alt="Kriya" className="w-full h-full object-contain p-0.5" />
             </div>
             <div>
               <p className="text-base font-extrabold text-white tracking-tight leading-none">Kriya CRM</p>
