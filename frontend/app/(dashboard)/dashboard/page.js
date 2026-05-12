@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import StatsCard from "@/components/ui/StatsCard";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
+import AISummaryButton from "@/components/ai/AISummaryButton";
 import {
   HiOutlineUsers,
   HiOutlineClipboardDocumentList,
@@ -565,9 +566,12 @@ export default function DashboardPage() {
               <p className="text-sm text-white/80 mt-1">{shadowView ? "Viewing shared accounts" : "Here's what's happening across your CRM"}</p>
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-white/15 backdrop-blur rounded-xl ring-1 ring-white/30">
-            <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-            <span className="text-[11px] font-bold uppercase tracking-wider text-white">Live · auto-updates every 15s</span>
+          <div className="hidden sm:flex">
+            <AISummaryButton
+              variant="hero"
+              title="Dashboard Summary"
+              prompt={`Write a tight Dashboard summary using the pre-loaded CRM data. Structure with these sections (## headings):\n\n## Overview\nOne short line: active accounts, open tasks, pending orders, pending samples, active shipments, and unread emails.\n\n## Needs Attention\nUp to 5 items requiring action right now: overdue tasks, overdue payments, pending approvals, stuck orders. Format each as: type · what · why it's urgent.\n\n## Pipeline\nWhere business is concentrated today: top clients by activity, most active product line, and the biggest in-progress deal.\n\n## Notable Highlights\n2-3 wins or interesting signals from the last few days (recently dispatched orders, replies received, etc.).\n\n### Next Steps\n2-3 concrete actions the team should take today.\n\nKeep under 250 words. Don't enumerate every record — pick the most important.`}
+            />
           </div>
         </div>
       </div>

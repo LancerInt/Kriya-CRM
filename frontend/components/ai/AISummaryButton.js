@@ -273,6 +273,55 @@ export default function AISummaryButton({ prompt, title = "AI Summary", size = "
     );
   }
 
+  // "gradient" variant — designed for list/index pages with white or light
+  // backgrounds. A polished indigo→violet→fuchsia gradient pill with a
+  // sparkle icon, soft shadow, and a subtle scale-up on hover.
+  if (variant === "gradient") {
+    return (
+      <>
+        <button
+          onClick={handleClick}
+          className="group relative inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-700 hover:via-violet-700 hover:to-fuchsia-700 text-white text-sm font-bold shadow-md hover:shadow-xl ring-1 ring-white/20 transition-all hover:scale-[1.02]"
+        >
+          {/* Soft glow on hover */}
+          <span className="absolute -inset-1 rounded-xl bg-gradient-to-r from-indigo-400/40 via-violet-400/40 to-fuchsia-400/40 blur-md opacity-0 group-hover:opacity-100 transition-opacity -z-10" />
+          <span className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-white/20 backdrop-blur ring-1 ring-white/40">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+          </span>
+          <span className="tracking-tight">AI Summary</span>
+        </button>
+        <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">{modalContent}</Modal>
+      </>
+    );
+  }
+
+  // "hero" variant — designed to sit on a coloured gradient banner. A
+  // glassy white pill with a sparkle icon, subtle border + shadow, and a
+  // soft glow on hover. Reads cleanly on purple/indigo/violet backdrops.
+  if (variant === "hero") {
+    return (
+      <>
+        <button
+          onClick={handleClick}
+          className="group relative inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/95 hover:bg-white text-indigo-700 hover:text-violet-700 text-sm font-bold shadow-lg ring-1 ring-white/40 backdrop-blur transition-all hover:shadow-xl hover:scale-[1.02]"
+        >
+          {/* Soft outer glow */}
+          <span className="absolute -inset-0.5 rounded-xl bg-gradient-to-r from-fuchsia-300/40 via-violet-300/40 to-indigo-300/40 blur opacity-0 group-hover:opacity-100 transition-opacity -z-10" />
+          {/* Sparkle icon */}
+          <span className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-gradient-to-br from-fuchsia-500 to-indigo-600 text-white shadow-sm">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+          </span>
+          <span className="tracking-tight">AI Summary</span>
+        </button>
+        <Modal open={open} onClose={() => setOpen(false)} title={title} size="lg">{modalContent}</Modal>
+      </>
+    );
+  }
+
   return (
     <>
       <button onClick={handleClick} className="p-1.5 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors" title="AI Summary">
