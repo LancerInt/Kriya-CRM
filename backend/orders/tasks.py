@@ -333,7 +333,7 @@ def check_delivery_reminders():
 # How many days before / after the due date the reminders fire.
 # Pre-due  : day = due - PAYMENT_PRE_DUE_DAYS
 # Post-due : day = due + PAYMENT_OVERDUE_DAYS  (one-shot per row)
-PAYMENT_PRE_DUE_DAYS = 3
+PAYMENT_PRE_DUE_DAYS = 7
 PAYMENT_OVERDUE_DAYS = 3
 
 
