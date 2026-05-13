@@ -18,6 +18,15 @@ class Product(SoftDeleteModel):
     )
     is_active = models.BooleanField(default=True)
 
+    # Quality / COA specification — list of component dicts:
+    #   [{"name": "Neem oil", "standard": 70.0, "acceptable_max": 71.0, "unit": "%"},
+    #    {"name": "Spinosad", "standard": 1.2,  "acceptable_max": 1.25, "unit": "%"}]
+    # Used by the COA editor to (a) inject per-product rows in the test
+    # results table and (b) validate the entered value against acceptable_max.
+    # A value > acceptable_max is rejected; a value ≤ acceptable_max is OK
+    # regardless of how it compares to the standard.
+    quality_spec = models.JSONField(blank=True, default=dict, help_text='COA spec (components + acceptable max)')
+
     class Meta:
         db_table = 'products'
         ordering = ['name']

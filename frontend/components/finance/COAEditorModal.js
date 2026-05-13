@@ -27,18 +27,23 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
     { label: "Date of Start of Analysis", value: "" },
     { label: "Date of Completion of Analysis", value: "" },
   ];
-  const defaultTestRows = [
+  // The first 5 are constant. Per-product component rows are appended
+  // below them from the selected Company Product's quality_spec — each one
+  // is validated against its acceptable_max.
+  const STANDARD_TEST_ROWS = [
     { label: "Appearance", value: "" },
     { label: "Odour", value: "" },
     { label: "pH", value: "" },
     { label: "Specific Gravity", value: "" },
     { label: "Solubility", value: "" },
-    { label: "Neem Oil", value: "" },
   ];
 
   const [form, setForm] = useState(defaultForm);
   const [detailRows, setDetailRows] = useState(defaultDetailRows);
-  const [testRows, setTestRows] = useState(defaultTestRows);
+  const [testRows, setTestRows] = useState(STANDARD_TEST_ROWS);
+  // The product's quality spec (components + acceptable_max), fetched
+  // from /products/ once productName is known.
+  const [productSpec, setProductSpec] = useState(null);
 
   // Restore saved editor state when modal opens
   useEffect(() => {
@@ -50,7 +55,7 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
       // Reset to defaults when no saved state
       setForm(defaultForm);
       setDetailRows(defaultDetailRows);
-      setTestRows(defaultTestRows);
+      setTestRows(STANDARD_TEST_ROWS);
     }
   }, [open]);
 
@@ -81,6 +86,76 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
       });
     }
   }, [open, productName]);
+
+  // Look up the selected Company Product to pull its quality_spec.
+  // The spec drives the per-component validation rows at the bottom of the
+  // Test Result table (one row per component, each with an acceptable_max).
+  useEffect(() => {
+    if (!open || !productName?.trim()) { setProductSpec(null); return; }
+    let cancelled = false;
+    api.get("/products/", { params: { page_size: 5000 } })
+      .then((r) => {
+        if (cancelled) return;
+        const all = r.data.results || r.data || [];
+        // Match by exact name (case-insensitive). If product was concentration-
+        // suffixed like "Neem Oil 0.3%", strip the suffix for the lookup.
+        const wanted = productName.trim().toLowerCase();
+        const match = all.find((p) => (p.name || "").toLowerCase() === wanted)
+                   || all.find((p) => wanted.startsWith((p.name || "").toLowerCase()));
+        setProductSpec(match?.quality_spec?.components?.length ? match.quality_spec : null);
+      })
+      .catch(() => setProductSpec(null));
+    return () => { cancelled = true; };
+  }, [open, productName]);
+
+  // When a fresh spec arrives (and the user hasn't already edited the test
+  // table beyond the standard 5 rows), append the component rows.
+  useEffect(() => {
+    if (!open || !productSpec) return;
+    setTestRows((prev) => {
+      // Strip any old component rows so swapping products doesn't pile them up.
+      const baseRows = prev.filter((r) => !r._isComponent);
+      const componentRows = productSpec.components.map((c) => ({
+        label: c.name + (c.unit ? ` (${c.unit})` : ""),
+        value: "",
+        _isComponent: true,
+        _standard: c.standard,
+        _acceptableMax: c.acceptable_max,
+        _unit: c.unit || "",
+      }));
+      // Only inject if not already present (avoid double-injection on re-renders).
+      const alreadyInjected = componentRows.every((cr) =>
+        baseRows.some((br) => br.label === cr.label && br._isComponent)
+      );
+      if (alreadyInjected) return prev;
+      return [...baseRows, ...componentRows];
+    });
+  }, [open, productSpec]);
+
+  // Validation helper — extracts a number from the entered value and checks
+  // against the row's acceptable_max.
+  //
+  // Rule (from the user): value ≤ acceptable_max is ACCEPTED (= boundary
+  // included). Anything strictly greater than the max is REJECTED, even
+  // by 0.001. We add a tiny EPSILON tolerance so floating-point noise
+  // (e.g. 1.25 stored as 1.249999999) can't reject an equal-to value.
+  const EPSILON = 1e-6;
+  const validateComponentValue = (row, value) => {
+    const m = String(value || "").trim().match(/[-+]?\d*\.?\d+/);
+    if (!m) return { state: "empty" };
+    const num = parseFloat(m[0]);
+    if (Number.isNaN(num)) return { state: "empty" };
+    const max = parseFloat(row._acceptableMax);
+    if (Number.isNaN(max)) return { state: "ok" };
+    // Strictly greater than max (with epsilon tolerance) → invalid.
+    if (num - max > EPSILON) {
+      return {
+        state: "invalid",
+        message: `${num}${row._unit} exceeds the acceptable max of ${max}${row._unit}. Standard: ${row._standard}${row._unit}.`,
+      };
+    }
+    return { state: "ok" };
+  };
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
@@ -158,6 +233,12 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
   const handleGenerate = async () => {
     const productName = detailRows[0]?.value || "";
     if (!productName.trim()) { alert("Please enter the Product Name"); return; }
+    // Block generation when any component is above its acceptable max.
+    const offending = testRows.find((r) => r._isComponent && validateComponentValue(r, r.value).state === "invalid");
+    if (offending) {
+      toast.error(`${offending.label} is above the acceptable range. Max: ${offending._acceptableMax}${offending._unit}.`, { duration: 6000 });
+      return;
+    }
     // Consume the report number sequence (only now it becomes "used")
     try {
       const res = await api.post("/quality/coa-consume-report-number/", { report_no: form.report_no });
@@ -182,30 +263,66 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, i) => (
+        {rows.map((row, i) => {
+          // Validate per-product component rows against acceptable_max.
+          const v = row._isComponent ? validateComponentValue(row, row.value) : { state: "ok" };
+          const isInvalid = v.state === "invalid";
+          return (
           <tr key={i}>
             <td className={lc} style={fs}>
-              <input value={row.label} onChange={(e) => updateRow(setter, i, "label", e.target.value)} className={ic} style={fs} placeholder="Field name" />
+              <input
+                value={row.label}
+                onChange={(e) => updateRow(setter, i, "label", e.target.value)}
+                className={ic}
+                style={fs}
+                placeholder="Field name"
+                readOnly={row._isComponent}
+                title={row._isComponent ? "From product spec — not editable" : ""}
+              />
+              {row._isComponent && (
+                <div className="text-[9px] text-gray-500 mt-0.5">
+                  Standard: <span className="font-semibold">{row._standard}{row._unit}</span> · Max: <span className="font-semibold">{row._acceptableMax}{row._unit}</span>
+                </div>
+              )}
             </td>
-            <td className={vc} style={fs}>
+            <td className={`${vc} ${isInvalid ? "bg-rose-50" : ""}`} style={fs}>
               <textarea
                 value={row.value}
-                onChange={(e) => updateRow(setter, i, "value", e.target.value)}
-                className={`${ic} resize-none overflow-hidden`}
+                onChange={(e) => {
+                  const newVal = e.target.value;
+                  updateRow(setter, i, "value", newVal);
+                  // Surface a toast on transition into invalid state so the user
+                  // sees the rule even if they miss the inline red border.
+                  if (row._isComponent) {
+                    const prev = validateComponentValue(row, row.value);
+                    const next = validateComponentValue(row, newVal);
+                    if (next.state === "invalid" && prev.state !== "invalid") {
+                      toast.error(next.message, { duration: 5000 });
+                    }
+                  }
+                }}
+                className={`${ic} resize-none overflow-hidden ${isInvalid ? "text-rose-700 font-semibold" : ""}`}
                 style={fs}
                 rows={1}
                 onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-                placeholder="Value"
+                placeholder={row._isComponent ? `Enter measured value (max ${row._acceptableMax}${row._unit})` : "Value"}
               />
+              {isInvalid && (
+                <div className="text-[10px] text-rose-700 mt-1 flex items-start gap-1">
+                  <svg className="w-3 h-3 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                  <span>Above acceptable range — enter ≤ {row._acceptableMax}{row._unit}</span>
+                </div>
+              )}
             </td>
             <td className="border border-gray-300 text-center align-middle" style={{ width: 30 }}>
               <div className="flex flex-col items-center gap-0.5">
                 <span onClick={() => addRowAt(setter, i)} className={btnAdd} title="Add row below">+</span>
-                {rows.length > 1 && <span onClick={() => removeRow(setter, i)} className={btnDel} title="Remove row">×</span>}
+                {rows.length > 1 && !row._isComponent && <span onClick={() => removeRow(setter, i)} className={btnDel} title="Remove row">×</span>}
               </div>
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -268,6 +385,35 @@ export default function COAEditorModal({ open, onClose, onGenerate, productName,
             </tbody>
           </table>
           {renderTable(testRows, setTestRows, "TESTING PARAMETERS", "RESULTS")}
+          {/* Quality-spec source banner — makes it obvious WHICH product's
+              spec is being applied to the validation rows. If the user
+              expected a different product, they need to change the Company
+              Product on the order line item. */}
+          {productSpec && (
+            <div className="mt-2 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-[11px] text-amber-900 print:hidden">
+              <div className="font-semibold mb-1">
+                Quality spec source: <span className="text-amber-700">{productName}</span>
+              </div>
+              <div className="text-amber-800">
+                Component rows below the standard tests are validated against
+                <strong> {productName}</strong>'s spec. To use a different product's
+                tolerances, change the Company Product on the order line item.
+              </div>
+              <ul className="mt-1 list-disc list-inside text-amber-800">
+                {productSpec.components.map((c, ci) => (
+                  <li key={ci}>
+                    <span className="font-medium">{c.name}</span>: standard {c.standard}{c.unit} · acceptable max {c.acceptable_max}{c.unit}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {!productSpec && productName && (
+            <div className="mt-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-[11px] text-gray-700 print:hidden">
+              No quality spec found for <strong>{productName}</strong> in the product catalog —
+              component validation is skipped. Add a spec via the Products page or pick a different Company Product on the line item.
+            </div>
+          )}
 
           {/* Signature */}
           <div className="mt-8 pt-4">

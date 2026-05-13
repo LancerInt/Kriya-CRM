@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
@@ -18,6 +19,15 @@ export default function LineItemsCard({ order, reload }) {
   // Product catalog — fetched once when the user opens edit mode so the
   // dropdown is instant after that.
   const [catalog, setCatalog] = useState([]);
+  // Which row's product picker is open. null = all closed.
+  const [pickerOpenIdx, setPickerOpenIdx] = useState(null);
+  // Per-row search filter for the picker.
+  const [pickerQuery, setPickerQuery] = useState("");
+  // Screen-space coordinates for the floating dropdown (portal-rendered).
+  const [pickerRect, setPickerRect] = useState(null);
+  // Refs to each row's combobox container so we can measure its position
+  // and anchor the portal dropdown precisely beneath it.
+  const triggerRefs = useRef({});
 
   useEffect(() => {
     if (!editing || catalog.length) return;
@@ -25,6 +35,52 @@ export default function LineItemsCard({ order, reload }) {
       .then((r) => setCatalog(r.data.results || r.data || []))
       .catch(() => {/* non-fatal — user can still type names */});
   }, [editing, catalog.length]);
+
+  // Close the picker when clicking outside any picker UI.
+  useEffect(() => {
+    if (pickerOpenIdx === null) return;
+    const handler = (e) => {
+      if (!e.target.closest?.("[data-product-picker]") && !e.target.closest?.("[data-product-picker-portal]")) {
+        setPickerOpenIdx(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pickerOpenIdx]);
+
+  // Track the trigger's bounding rect so the portal dropdown floats right
+  // under the input, regardless of any clipping ancestor (overflow-x-auto).
+  useEffect(() => {
+    if (pickerOpenIdx === null) { setPickerRect(null); return; }
+    const update = () => {
+      const el = triggerRefs.current[pickerOpenIdx];
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPickerRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [pickerOpenIdx]);
+
+  // Apply a catalog product to a draft row — autofills name + unit + price.
+  const pickProduct = (i, product) => {
+    setDraft((prev) => prev.map((r, idx) => {
+      if (idx !== i) return r;
+      const next = { ...r, product_name: product.name };
+      if (!r.unit || r.unit === "KG") next.unit = product.unit || r.unit;
+      if ((!r.unit_price || Number(r.unit_price) === 0) && product.base_price) {
+        next.unit_price = product.base_price;
+      }
+      return next;
+    }));
+    setPickerOpenIdx(null);
+    setPickerQuery("");
+  };
 
   const startEdit = () => {
     setDraft((order.items || []).map((it) => ({
@@ -146,11 +202,19 @@ export default function LineItemsCard({ order, reload }) {
           ) : (
             <div className="space-y-2">
               {items.map((item, i) => (
-                <div key={item.id} className="flex items-center gap-4 p-3 bg-gray-50 hover:bg-indigo-50/40 rounded-xl border border-gray-100 transition-colors">
+                <div key={item.id} className="flex items-center gap-3 sm:gap-4 p-3 bg-gray-50 hover:bg-indigo-50/40 rounded-xl border border-gray-100 transition-colors">
                   <span className="w-7 h-7 rounded-full bg-white border border-gray-200 text-xs font-bold text-gray-600 flex items-center justify-center shrink-0">
                     {i + 1}
                   </span>
-                  <p className="text-sm font-semibold text-gray-900 flex-1 min-w-0 truncate">{item.product_name}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Client Product Name</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{item.product_name || <span className="italic text-amber-600">— not set —</span>}</p>
+                    {item.client_product_name && (
+                      <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                        <span className="font-semibold uppercase tracking-wide text-gray-400">Company Product:</span> {item.client_product_name}
+                      </p>
+                    )}
+                  </div>
                   <span className="text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-full px-2.5 py-0.5 tabular-nums shrink-0">
                     {Number(item.quantity).toLocaleString()} {item.unit}
                   </span>
@@ -178,11 +242,12 @@ export default function LineItemsCard({ order, reload }) {
       {editing && (
         <>
           <div className="rounded-lg border border-gray-200 overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: order.can_view_total ? 720 : 520 }}>
+            <table className="w-full text-sm" style={{ minWidth: order.can_view_total ? 920 : 720 }}>
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="text-left py-2 px-3 w-10">#</th>
-                  <th className="text-left py-2 px-3 min-w-[260px]">Product *</th>
+                  <th className="text-left py-2 px-3 min-w-[260px]">Client Product Name <span className="text-rose-500">*</span></th>
+                  <th className="text-left py-2 px-3 min-w-[180px]">Company Product</th>
                   <th className="text-left py-2 px-3 w-28">Qty</th>
                   <th className="text-left py-2 px-3 w-24">Unit</th>
                   {order.can_view_total && <th className="text-right py-2 px-3 w-32">Unit Price</th>}
@@ -196,42 +261,51 @@ export default function LineItemsCard({ order, reload }) {
                   return (
                     <tr key={row.id || `new-${i}`} className="border-t border-gray-100">
                       <td className="py-2 px-3 text-gray-500">{i + 1}</td>
+                      {/* FIRST CELL = Client Product Name column = FREE TEXT
+                          (what the client calls the product on their PO). */}
                       <td className="py-2 px-3">
                         <input
-                          list={`product-catalog-${i}`}
-                          value={row.product_name}
-                          onChange={(e) => {
-                            const typed = e.target.value;
-                            // If the typed value matches a catalog entry, autofill
-                            // unit + unit_price from the product (only when those
-                            // fields haven't been touched yet on this row).
-                            const match = catalog.find(
-                              (p) => (p.name || "").toLowerCase() === typed.toLowerCase()
-                            );
-                            setDraft((prev) => prev.map((r, idx) => {
-                              if (idx !== i) return r;
-                              const next = { ...r, product_name: typed };
-                              if (match) {
-                                if (!r.unit || r.unit === "KG") next.unit = match.unit || r.unit;
-                                if ((!r.unit_price || Number(r.unit_price) === 0) && match.base_price) {
-                                  next.unit_price = match.base_price;
-                                }
-                              }
-                              return next;
-                            }));
-                          }}
-                          placeholder="Type or pick from catalog…"
+                          value={row.client_product_name}
+                          onChange={(e) => updateRow(i, "client_product_name", e.target.value)}
+                          placeholder="What client calls it on their PO"
                           className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         />
-                        <datalist id={`product-catalog-${i}`}>
-                          {catalog.map((p) => (
-                            <option
-                              key={p.id}
-                              value={p.name}
-                              label={[p.category, p.concentration].filter(Boolean).join(" · ")}
+                      </td>
+                      {/* SECOND CELL = Company Product column = CATALOG DROPDOWN
+                          (the official product from our catalog — drives
+                          COA / MSDS / PIF and the rest of document generation).
+                          Dropdown is rendered to document.body via a portal so
+                          it floats above the table without being clipped. */}
+                      <td className="py-2 px-3">
+                        <div
+                          ref={(el) => { triggerRefs.current[i] = el; }}
+                          data-product-picker
+                        >
+                          <div className="flex items-stretch border border-gray-300 rounded focus-within:ring-2 focus-within:ring-indigo-500 bg-white">
+                            <input
+                              value={row.product_name}
+                              onChange={(e) => {
+                                const typed = e.target.value;
+                                setDraft((prev) => prev.map((r, idx) => idx === i ? { ...r, product_name: typed } : r));
+                                setPickerQuery(typed);
+                                setPickerOpenIdx(i);
+                              }}
+                              onFocus={() => { setPickerOpenIdx(i); setPickerQuery(row.product_name || ""); }}
+                              placeholder="Pick from catalog…"
+                              className="flex-1 min-w-0 px-2 py-1 text-sm bg-transparent outline-none"
                             />
-                          ))}
-                        </datalist>
+                            <button
+                              type="button"
+                              onClick={() => { setPickerOpenIdx(pickerOpenIdx === i ? null : i); setPickerQuery(""); }}
+                              title="Open product catalog"
+                              className="px-2 border-l border-gray-200 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50"
+                            >
+                              <svg className={`w-4 h-4 transition-transform ${pickerOpenIdx === i ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
                       </td>
                       <td className="py-2 px-3">
                         <input
@@ -282,7 +356,7 @@ export default function LineItemsCard({ order, reload }) {
                   );
                 })}
                 {draft.length === 0 && (
-                  <tr><td colSpan={order.can_view_total ? 7 : 5} className="py-4 px-2 text-center text-sm text-gray-400 italic">No line items — click Add Product.</td></tr>
+                  <tr><td colSpan={order.can_view_total ? 8 : 6} className="py-4 px-2 text-center text-sm text-gray-400 italic">No line items — click Add Product.</td></tr>
                 )}
               </tbody>
             </table>
@@ -311,6 +385,59 @@ export default function LineItemsCard({ order, reload }) {
             Adding or removing products automatically updates the per-product COA, MSDS, and PIF rows in the Documents Checklist on the next save.
           </p>
         </>
+      )}
+
+      {/* Portal-rendered catalog dropdown — floats above the table, anchored
+          to the active trigger's screen position. Lives on document.body so
+          no ancestor's overflow can clip it. */}
+      {editing && pickerOpenIdx !== null && pickerRect && typeof document !== "undefined" && createPortal(
+        <div
+          data-product-picker-portal
+          style={{
+            position: "fixed",
+            top: pickerRect.top,
+            left: pickerRect.left,
+            width: pickerRect.width,
+            zIndex: 9999,
+          }}
+          className="max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-2xl"
+        >
+          {(() => {
+            const q = (pickerQuery || "").toLowerCase().trim();
+            const filtered = catalog.filter((p) =>
+              !q || (p.name || "").toLowerCase().includes(q) ||
+              (p.category || "").toLowerCase().includes(q) ||
+              (p.client_brand_names || "").toLowerCase().includes(q)
+            );
+            if (filtered.length === 0) {
+              return <div className="px-3 py-3 text-xs text-gray-500 italic">
+                No catalog matches. Press <span className="font-semibold">Save</span> to keep the typed value as a custom product name.
+              </div>;
+            }
+            return filtered.slice(0, 100).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); pickProduct(pickerOpenIdx, p); }}
+                className="w-full text-left px-3 py-2 hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-gray-900 truncate">{p.name}</span>
+                  {p.concentration && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100 shrink-0">{p.concentration}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-500 flex-wrap">
+                  {p.category && <span className="uppercase tracking-wide font-semibold text-gray-600">{p.category}</span>}
+                  {p.base_price ? (
+                    <span className="tabular-nums">{p.currency || "USD"} {Number(p.base_price).toLocaleString()}/{p.unit || "MT"}</span>
+                  ) : null}
+                </div>
+              </button>
+            ));
+          })()}
+        </div>,
+        document.body
       )}
     </div>
   );
