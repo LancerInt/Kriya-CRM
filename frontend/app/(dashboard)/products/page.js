@@ -103,7 +103,7 @@ export default function ProductsPage() {
 
   const loadProducts = () => {
     setLoading(true);
-    api.get("/products/")
+    api.get("/products/", { params: { page_size: 5000 } })
       .then((r) => setProducts(r.data.results || r.data))
       .finally(() => setLoading(false));
   };

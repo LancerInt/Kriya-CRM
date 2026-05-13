@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
@@ -15,6 +15,16 @@ export default function LineItemsCard({ order, reload }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState([]);
   const [saving, setSaving] = useState(false);
+  // Product catalog — fetched once when the user opens edit mode so the
+  // dropdown is instant after that.
+  const [catalog, setCatalog] = useState([]);
+
+  useEffect(() => {
+    if (!editing || catalog.length) return;
+    api.get("/products/", { params: { page_size: 5000 } })
+      .then((r) => setCatalog(r.data.results || r.data || []))
+      .catch(() => {/* non-fatal — user can still type names */});
+  }, [editing, catalog.length]);
 
   const startEdit = () => {
     setDraft((order.items || []).map((it) => ({
@@ -188,11 +198,40 @@ export default function LineItemsCard({ order, reload }) {
                       <td className="py-2 px-3 text-gray-500">{i + 1}</td>
                       <td className="py-2 px-3">
                         <input
+                          list={`product-catalog-${i}`}
                           value={row.product_name}
-                          onChange={(e) => updateRow(i, "product_name", e.target.value)}
-                          placeholder="e.g. Neem Oil 0.3%"
+                          onChange={(e) => {
+                            const typed = e.target.value;
+                            // If the typed value matches a catalog entry, autofill
+                            // unit + unit_price from the product (only when those
+                            // fields haven't been touched yet on this row).
+                            const match = catalog.find(
+                              (p) => (p.name || "").toLowerCase() === typed.toLowerCase()
+                            );
+                            setDraft((prev) => prev.map((r, idx) => {
+                              if (idx !== i) return r;
+                              const next = { ...r, product_name: typed };
+                              if (match) {
+                                if (!r.unit || r.unit === "KG") next.unit = match.unit || r.unit;
+                                if ((!r.unit_price || Number(r.unit_price) === 0) && match.base_price) {
+                                  next.unit_price = match.base_price;
+                                }
+                              }
+                              return next;
+                            }));
+                          }}
+                          placeholder="Type or pick from catalog…"
                           className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         />
+                        <datalist id={`product-catalog-${i}`}>
+                          {catalog.map((p) => (
+                            <option
+                              key={p.id}
+                              value={p.name}
+                              label={[p.category, p.concentration].filter(Boolean).join(" · ")}
+                            />
+                          ))}
+                        </datalist>
                       </td>
                       <td className="py-2 px-3">
                         <input

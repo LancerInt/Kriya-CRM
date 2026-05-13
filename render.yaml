@@ -1,0 +1,179 @@
+# ════════════════════════════════════════════════════════════════════════
+# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $77/mo)
+#
+# Provisioned services (all paid):
+#   • PostgreSQL  (Standard, 10 GB, daily backups, PITR)         $20/mo
+#   • Redis       (Starter, 250 MB)                              $10/mo
+#   • Django API  (Standard, 2 GB RAM, 1 CPU, no sleep)          $25/mo
+#   • Next.js web (Starter, 512 MB, no sleep)                    $ 7/mo
+#   • Celery worker (Background Worker, Starter)                 $ 7/mo
+#   • Celery beat   (Background Worker, Starter)                 $ 7/mo
+#   • Persistent Disk for media (5 GB on the API service)        $ 1.25/mo
+#                                                          ───────────
+#                                                          Total ≈ $77/mo
+#
+# To downgrade to Starter Production ≈ $45/mo:
+#   • Django API plan: standard → starter
+#   • PostgreSQL plan: standard → starter
+#   • Disk size:       5         → 1
+#   • WEB_CONCURRENCY: 4         → 2
+#
+# Deploy: push, then Render → New + → Blueprint → connect repo → confirm.
+# Fill the secrets marked `sync: false` in each service's Environment tab.
+# ════════════════════════════════════════════════════════════════════════
+
+databases:
+  - name: kriya-crm-db
+    plan: standard        # 10 GB storage, daily backups, point-in-time recovery
+    databaseName: kriya_crm
+    user: kriya_crm
+
+services:
+  # ─── Redis (cache + Celery broker) ──────────────────────────────────
+  - type: redis
+    name: kriya-crm-redis
+    plan: starter         # 250 MB, persistent, no IP-allowlist needed
+    ipAllowList: []       # private — only Render services can reach it
+    maxmemoryPolicy: allkeys-lru
+
+  # ─── Django backend (gunicorn) ──────────────────────────────────────
+  - type: web
+    name: kriya-crm-api
+    runtime: python
+    plan: standard        # 2 GB RAM, 1 CPU
+    rootDir: backend
+    healthCheckPath: /healthz/
+    buildCommand: |
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+      python manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --workers 4 --timeout 120 --max-requests 1000 --max-requests-jitter 100
+    # 5 GB persistent volume mounted at the Django media root. Survives
+    # deploys, restarts and instance restarts. Upgrade to S3 when you
+    # outgrow this (see DEPLOY.md §9).
+    disk:
+      name: kriya-crm-media
+      mountPath: /opt/render/project/src/backend/media
+      sizeGB: 5
+    envVars:
+      - key: DJANGO_ENV
+        value: production
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.13.0"
+      - key: WEB_CONCURRENCY
+        value: "4"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kriya-crm-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: kriya-crm-redis
+          property: connectionString
+      # ── Set in the Render dashboard after first deploy ──
+      - key: ALLOWED_HOSTS
+        sync: false                # e.g. kriya-crm-api.onrender.com,api.kriya.com
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false                # e.g. https://kriya-crm.onrender.com
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false                # same as CORS_ALLOWED_ORIGINS
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: EMAIL_USE_TLS
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SIGNATURE_LOGO_URL
+        sync: false
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      # Flip to "31536000" (1 year) after a week of healthy uptime.
+      - key: SECURE_HSTS_SECONDS
+        value: "0"
+
+  # ─── Celery worker (async tasks: emails, AI runs, PDF jobs etc.) ────
+  - type: worker
+    name: kriya-crm-worker
+    runtime: python
+    plan: starter         # 512 MB, plenty for the task workload
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config worker --loglevel=info --concurrency=4 --max-tasks-per-child=200
+    envVars: &workerEnv
+      - key: DJANGO_ENV
+        value: production
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: web
+          name: kriya-crm-api
+          envVarKey: DJANGO_SECRET_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kriya-crm-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: kriya-crm-redis
+          property: connectionString
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: EMAIL_USE_TLS
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+  # ─── Celery beat scheduler (replaces the cron jobs) ─────────────────
+  - type: worker
+    name: kriya-crm-beat
+    runtime: python
+    plan: starter
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A config beat --loglevel=info
+    envVars: *workerEnv
+
+  # ─── Next.js frontend ───────────────────────────────────────────────
+  - type: web
+    name: kriya-crm
+    runtime: node
+    plan: starter
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: NEXT_PUBLIC_API_URL
+        sync: false       # set to https://kriya-crm-api.onrender.com/api after first deploy
