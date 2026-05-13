@@ -4,6 +4,7 @@ import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import api from "@/lib/axios";
 import { getErrorMessage } from "@/lib/errorHandler";
+import useResponsiveZoom from "@/lib/useResponsiveZoom";
 
 // Unicode subscript / superscript character maps
 const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ' };
@@ -20,6 +21,8 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
   const piTableRef = useRef(null);
   const editorRef = useRef(null);
   const [products, setProducts] = useState([]);
+  // Mobile: zoom the desktop A4 layout to fit the viewport.
+  const zoomStyle = useResponsiveZoom();
   const [scriptMode, setScriptMode] = useState(null); // null | 'sub' | 'sup'
 
   // Auto-resize all textareas in the packing details table whenever items
@@ -199,10 +202,12 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
-      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif", fontSize: "11px", lineHeight: "1.4" }}>
+      {/* Mobile: CSS `zoom` scales the desktop A4 layout to fit the viewport. */}
+      <div className="overflow-x-auto -mx-2 sm:mx-0">
+      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif", fontSize: "11px", lineHeight: "1.4", ...zoomStyle }}>
 
         {/* ── SUBSCRIPT / SUPERSCRIPT TOOLBAR ── */}
-        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-gray-200">
           <span className="text-xs text-gray-500 mr-1">Format:</span>
           <button
             type="button"
@@ -438,9 +443,9 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
         </div>
 
         {/* ── ACTION BUTTONS ── */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={onSave} className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50">Save Draft</button>
             <button onClick={onPreview} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Preview PDF</button>
             <button onClick={onSend} disabled={sending} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
@@ -448,6 +453,7 @@ export default function PIEditorModal({ open, onClose, pi, piForm, setPiForm, pi
             </button>
           </div>
         </div>
+      </div>
       </div>
     </Modal>
   );

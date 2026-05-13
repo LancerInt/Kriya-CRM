@@ -269,74 +269,82 @@ export default function ProductsPage() {
               >
                 <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
 
-                <div className="flex items-start gap-4 pl-2 flex-wrap md:flex-nowrap">
-                  <div className={`w-11 h-11 rounded-xl ${tone.iconBg} flex items-center justify-center text-lg shrink-0`}>
-                    {tone.icon}
+                {/* Mobile-first layout:
+                    - Top row: icon + name/details
+                    - Bottom row (mobile only): price (left) + edit/delete (right)
+                    - On md+: icon + content + price + buttons all on one row. */}
+                <div className="flex flex-col md:flex-row md:items-start gap-3 pl-2">
+                  <div className="flex items-start gap-3 md:flex-1 min-w-0">
+                    <div className={`w-11 h-11 rounded-xl ${tone.iconBg} flex items-center justify-center text-lg shrink-0`}>
+                      {tone.icon}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {row.name?.trim() ? (
+                          <span className="font-bold text-gray-900 tracking-tight">{row.name}</span>
+                        ) : (
+                          <span className="italic text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md text-xs font-medium border border-amber-200">Needs review — set product name</span>
+                        )}
+                        {row.concentration && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">{row.concentration}</span>
+                        )}
+                        {needsReview && row.name?.trim() && (
+                          <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-1.5 py-0.5">Review</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
+                        {row.category && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-1.5 py-0.5">{row.category}</span>
+                        )}
+                        {row.hsn_code && (
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-700 border border-gray-200">HSN {row.hsn_code}</span>
+                        )}
+                        {row.active_ingredient && (
+                          <span className="truncate">· {row.active_ingredient}</span>
+                        )}
+                      </div>
+                      <AliasChips aliases={aliases} />
+                    </div>
                   </div>
 
-                  <div className="min-w-0 flex-1 basis-full md:basis-auto">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {row.name?.trim() ? (
-                        <span className="font-bold text-gray-900 tracking-tight">{row.name}</span>
+                  {/* Price + actions — sits on its own row on mobile (space-between),
+                      hugs the right on md+ (justify-end). */}
+                  <div className="flex items-center justify-between md:justify-end gap-3 md:shrink-0 pt-2 md:pt-0 border-t md:border-0 border-dashed border-gray-100">
+                    <div className="text-left md:text-right md:min-w-[120px]">
+                      {row.base_price ? (
+                        <>
+                          <p className="text-sm font-bold text-gray-900 tabular-nums">
+                            {row.currency || "USD"} {Number(row.base_price).toLocaleString()}
+                          </p>
+                          <p className="text-[11px] text-gray-400">per {row.unit || "MT"}</p>
+                        </>
                       ) : (
-                        <span className="italic text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md text-xs font-medium border border-amber-200">Needs review — set product name</span>
-                      )}
-                      {row.concentration && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">{row.concentration}</span>
-                      )}
-                      {needsReview && row.name?.trim() && (
-                        <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-1.5 py-0.5">Review</span>
+                        <p className="text-xs text-gray-400">No price set</p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
-                      {row.category && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-700 bg-gray-100 rounded px-1.5 py-0.5">{row.category}</span>
-                      )}
-                      {row.hsn_code && (
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-700 border border-gray-200">HSN {row.hsn_code}</span>
-                      )}
-                      {row.active_ingredient && (
-                        <span className="truncate">· {row.active_ingredient}</span>
-                      )}
-                    </div>
-                    <AliasChips aliases={aliases} />
-                  </div>
-
-                  <div className="text-right shrink-0 min-w-[120px]">
-                    {row.base_price ? (
-                      <>
-                        <p className="text-sm font-bold text-gray-900 tabular-nums">
-                          {row.currency || "USD"} {Number(row.base_price).toLocaleString()}
-                        </p>
-                        <p className="text-[11px] text-gray-400">per {row.unit || "MT"}</p>
-                      </>
-                    ) : (
-                      <p className="text-xs text-gray-400">No price set</p>
+                    {canEdit && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => openEdit(row)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Edit
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(row.id, e)}
+                          title="Delete product"
+                          className="p-1.5 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-60 group-hover:opacity-100"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                          </svg>
+                        </button>
+                      </div>
                     )}
                   </div>
-
-                  {canEdit && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => openEdit(row)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-md hover:bg-indigo-100"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        Edit
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(row.id, e)}
-                        title="Delete product"
-                        className="p-1.5 text-gray-300 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors opacity-60 group-hover:opacity-100"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
             );

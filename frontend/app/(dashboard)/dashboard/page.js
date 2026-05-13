@@ -327,7 +327,7 @@ function DashboardContent({ s, router, label, isPrivileged }) {
             </button>
           </div>
           <div className="p-4">
-            <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
               {[
                 { label: "Requested", count: s.samples_summary?.requested || 0, gradient: "from-amber-500 to-orange-500", filter: "requested" },
                 { label: "Replied", count: s.samples_summary?.replied || 0, gradient: "from-blue-500 to-indigo-500", filter: "replied" },
@@ -395,7 +395,7 @@ function DashboardContent({ s, router, label, isPrivileged }) {
             </button>
           </div>
           <div className="p-4">
-            <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
               {[
                 { label: "Draft", count: s.quotations_summary?.draft || 0, gradient: "from-slate-500 to-slate-600", filter: "draft" },
                 { label: "Pending", count: s.quotations_summary?.pending_approval || 0, gradient: "from-orange-500 to-orange-600", filter: "pending_approval" },

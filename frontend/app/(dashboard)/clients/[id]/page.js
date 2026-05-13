@@ -3252,19 +3252,19 @@ export default function ClientDetailPage() {
   return (
     <div className="space-y-5">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-6 shadow-xl">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-4 sm:p-6 shadow-xl">
         <div className="absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-violet-300/20 rounded-full blur-2xl" />
-        <div className="relative flex items-start justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
+        <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <div className="relative shrink-0">
               <div className="absolute inset-0 bg-white/20 rounded-2xl blur-md" />
-              <div className={`relative w-16 h-16 rounded-2xl bg-gradient-to-br ${tierTone} text-white flex items-center justify-center text-xl font-extrabold ring-4 ring-white/20 shadow-xl`}>
+              <div className={`relative w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br ${tierTone} text-white flex items-center justify-center text-base sm:text-xl font-extrabold ring-4 ring-white/20 shadow-xl`}>
                 {initials || "K"}
               </div>
             </div>
             <div className="min-w-0">
-              <h1 className="text-2xl font-extrabold text-white tracking-tight truncate">{client.company_name}</h1>
+              <h1 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight truncate">{client.company_name}</h1>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 {client.business_type && (
                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/15 backdrop-blur text-white ring-1 ring-white/30">
@@ -3285,14 +3285,14 @@ export default function ClientDetailPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             <AISummaryButton
               variant="button"
               title={`${client.company_name} — AI Summary`}
               prompt={`Give me a comprehensive summary of this client. Include: contact details, recent communications, order history, pending tasks, shipment status, price list, purchase history, and any action items.`}
               clientId={id}
             />
-            <Link href={`/clients/${id}/edit`} className="flex items-center gap-1.5 px-4 py-2 bg-white text-indigo-700 text-sm font-bold rounded-xl ring-1 ring-white/30 hover:shadow-lg hover:scale-[1.02] transition-all shadow-md">
+            <Link href={`/clients/${id}/edit`} className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-white text-indigo-700 text-xs sm:text-sm font-bold rounded-xl ring-1 ring-white/30 hover:shadow-lg hover:scale-[1.02] transition-all shadow-md">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
               Edit Client
             </Link>

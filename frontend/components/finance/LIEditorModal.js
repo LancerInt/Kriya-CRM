@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
+import useResponsiveZoom from "@/lib/useResponsiveZoom";
 
 // Preset bank accounts — same set used in CIEditorModal so toggling between
 // the two invoice types fills the bank block consistently. Each preset is
@@ -32,6 +33,8 @@ const toUnicode = (text, map) => text.split('').map(c => map[c.toLowerCase()] ||
 export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, liItems, setLiItems, onSave, onGeneratePdf, generating }) {
   const editorRef = useRef(null);
   const [scriptMode, setScriptMode] = useState(null);
+  // Mobile: zoom the desktop A4 layout to fit the viewport.
+  const zoomStyle = useResponsiveZoom();
 
   const handleScriptClick = useCallback((mode) => {
     const active = document.activeElement;
@@ -137,10 +140,12 @@ export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, li
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
-      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif" }}>
+      {/* Mobile: CSS `zoom` scales the desktop A4 layout to fit the viewport. */}
+      <div className="overflow-x-auto -mx-2 sm:mx-0">
+      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif", ...zoomStyle }}>
 
         {/* ── SUBSCRIPT / SUPERSCRIPT TOOLBAR ── */}
-        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-gray-200">
           <span className="text-xs text-gray-500 mr-1">Format:</span>
           <button
             type="button"
@@ -406,13 +411,14 @@ export default function LIEditorModal({ open, onClose, li, liForm, setLiForm, li
         <p className="text-center text-xs font-bold text-gray-600 border-t border-gray-300 pt-2">" Go Organic ! Save Planet ! "</p>
 
         {/* ACTION BUTTONS */}
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+        <div className="flex flex-wrap justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
           <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
           <button onClick={async () => { await handleSaveWithTotals(); await onGeneratePdf?.(); }} disabled={generating} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
             {generating ? "Generating..." : "Save & Generate PDF"}
           </button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>
+      </div>
       </div>
     </Modal>
   );

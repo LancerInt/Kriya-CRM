@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
+import useResponsiveZoom from "@/lib/useResponsiveZoom";
 
 const CONTAINER_LEFT_FIELDS = [
   ["type", "Type"],
@@ -50,7 +51,7 @@ function KVRow({ label, value, onChange, readOnly }) {
 
 function SectionHeading({ left, right }) {
   return (
-    <div className="grid grid-cols-2 gap-6 mt-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
       <div className="text-[12px] font-semibold text-[#1f4e79] border-b border-[#1f4e79] pb-1">{left}</div>
       <div className="text-[12px] font-semibold text-[#1f4e79] border-b border-[#1f4e79] pb-1">{right || ""}</div>
     </div>
@@ -64,6 +65,9 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
   const [generating, setGenerating] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
+  // Mobile: zoom the desktop A4 layout to fit the viewport.
+  // PIF document canvas is 780px wide (narrower than other editors).
+  const zoomStyle = useResponsiveZoom({ targetWidth: 780 });
   // All sibling PIFs for the parent order — one per product line. Lets the
   // user jump between products without leaving the editor.
   const [siblings, setSiblings] = useState([]);
@@ -262,9 +266,9 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-3 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full my-4">
-        <div className="sticky top-0 bg-white z-10 px-5 py-3 border-b border-gray-200 flex items-center justify-between rounded-t-xl">
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-1 sm:p-3 overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full my-2 sm:my-4">
+        <div className="sticky top-0 bg-white z-10 px-3 sm:px-5 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2 rounded-t-xl">
           <div>
             <h2 className="font-semibold">Packing Instructions Form</h2>
             <p className="text-xs text-gray-500">
@@ -275,7 +279,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
               })()}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={openFetchPopup}
               disabled={!activeItem}
@@ -322,11 +326,11 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
         {loading || !pif ? (
           <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>
         ) : (
-          <div className="p-8 bg-white" style={{ minHeight: "70vh" }}>
-            {/* Document-style canvas */}
-            <div className="mx-auto" style={{ maxWidth: "780px" }}>
+          <div className="p-3 sm:p-8 bg-white overflow-x-auto" style={{ minHeight: "70vh" }}>
+            {/* Document-style canvas — mobile zooms the 780px layout to fit. */}
+            <div className="mx-auto" style={{ maxWidth: "780px", ...zoomStyle }}>
               {/* Header */}
-              <div className="grid grid-cols-[1fr_2fr_1fr] items-start gap-4 pb-3 border-b border-gray-300">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_1fr] items-start gap-4 pb-3 border-b border-gray-300">
                 <div>
                   <div className="font-bold text-[#4e8a2d] text-lg leading-tight">Kriya</div>
                 </div>
@@ -348,7 +352,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
 
               {/* Product Details / Notes */}
               <SectionHeading left="Product Details" right="Notes" />
-              <div className="grid grid-cols-2 gap-6 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-2">
                 <div>
                   <KVRow label="Product Name" value={pif.product_name} onChange={(v) => patch({ product_name: v })} />
                   <KVRow label="Product Description" value={pif.product_description} onChange={(v) => patch({ product_description: v })} />
@@ -367,7 +371,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
 
               {/* Container / Carton Box */}
               <SectionHeading left="Container" right="Carton Box" />
-              <div className="grid grid-cols-2 gap-6 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-2">
                 <div>
                   {CONTAINER_LEFT_FIELDS.map(([k, label]) => (
                     <KVRow key={k} label={label} value={pif.container_left?.[k]} onChange={(v) => updateContainerLeft(k, v)} />
@@ -383,7 +387,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
               {/* Packing Sections */}
               {(pif.packing_sections || []).map((sec, idx) => (
                 <div key={idx}>
-                  <div className="grid grid-cols-2 gap-6 mt-4 items-center">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4 items-center">
                     <div className="flex items-center gap-2 border-b border-[#1f4e79] pb-1">
                       <span className="text-[12px] font-semibold text-[#1f4e79] shrink-0">Quantity –</span>
                       <input value={sec.label || ""} onChange={(e) => updateSectionLabel(idx, e.target.value)} className="text-[12px] font-semibold text-[#1f4e79] bg-transparent outline-none flex-1 border-b border-transparent focus:border-indigo-400" />
@@ -394,7 +398,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
                       <button onClick={() => removeSection(idx)} title="Remove section" className="ml-auto text-xs text-red-500 hover:text-red-700">✕</button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-6 mt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-2">
                     <div>
                       {QTY_LEFT_FIELDS.map(([k, label]) => (
                         <KVRow key={k} label={label} value={sec.quantity_left?.[k]} onChange={(v) => updateSectionField(idx, "quantity_left", k, v)} />
@@ -421,7 +425,7 @@ export function PIFEditorModal({ open, onClose, orderItem, orderId, onGenerated 
                   className="w-full text-[10px] text-gray-600 bg-transparent outline-none resize-none border border-transparent focus:border-indigo-300 rounded p-1"
                   rows={2}
                 />
-                <div className="grid grid-cols-3 gap-4 mt-12 text-[11px] text-gray-500">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12 text-[11px] text-gray-500">
                   <div className="text-center border-t border-gray-400 pt-1">Seal &amp; Signature</div>
                   <div className="text-center border-t border-gray-400 pt-1">Seal &amp; Signature</div>
                   <div className="text-center border-t border-gray-400 pt-1">Seal &amp; Signature</div>

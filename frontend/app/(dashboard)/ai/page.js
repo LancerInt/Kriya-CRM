@@ -201,6 +201,9 @@ export default function AIPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loadingConvs, setLoadingConvs] = useState(true);
+  // Mobile: sidebar is a slide-out drawer. Hidden by default, opens via
+  // the hamburger button in the chat header.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const { user } = useSelector((state) => state.auth);
@@ -223,6 +226,9 @@ export default function AIPage() {
       const r = await api.get(`/agents/conversations/${id}/`);
       setActiveConv(r.data);
       setMessages(r.data.messages || []);
+      // On mobile, dismiss the drawer once a chat is picked so the
+      // conversation takes the full screen.
+      setSidebarOpen(false);
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to load conversation"));
     }
@@ -234,6 +240,7 @@ export default function AIPage() {
       setActiveConv(r.data);
       setMessages([]);
       loadConversations();
+      setSidebarOpen(false); // dismiss drawer on mobile
       inputRef.current?.focus();
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to create chat"));
@@ -312,9 +319,17 @@ export default function AIPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
-      {/* Sidebar */}
-      <div className="w-72 bg-white/80 backdrop-blur border-r border-slate-200/70 flex flex-col shrink-0 shadow-[1px_0_3px_rgba(0,0,0,0.02)]">
+    <div className="relative flex h-[calc(100vh-4rem)] -mt-4 -mx-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
+      {/* Mobile backdrop — tap to close the sidebar */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="md:hidden fixed inset-0 z-30 bg-black/40 backdrop-blur-sm"
+        />
+      )}
+
+      {/* Sidebar — slide-out drawer on mobile (fixed), permanent column on md+ */}
+      <div className={`fixed md:static inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-white/95 md:bg-white/80 backdrop-blur border-r border-slate-200/70 flex flex-col shrink-0 shadow-[1px_0_3px_rgba(0,0,0,0.02)] transform transition-transform md:transform-none ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="px-4 py-4 border-b border-slate-200/70 bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 relative overflow-hidden">
           <div className="absolute -top-6 -right-6 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
           <div className="absolute -bottom-4 -left-4 w-20 h-20 bg-violet-300/20 rounded-full blur-xl" />
@@ -405,8 +420,27 @@ export default function AIPage() {
 
       {/* Chat area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile-only header with hamburger to open the sidebar drawer */}
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-slate-200/70 bg-white/80 backdrop-blur sticky top-0 z-20">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
+            aria-label="Open chats"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 via-violet-500 to-purple-600 flex items-center justify-center ring-1 ring-white shrink-0">
+              <span className="text-xs text-white font-bold">✦</span>
+            </div>
+            <span className="font-bold text-sm text-slate-800 truncate">{activeConv?.title || "Kriya AI"}</span>
+          </div>
+        </div>
+
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5 bg-gradient-to-b from-slate-50/40 to-white">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 space-y-5 bg-gradient-to-b from-slate-50/40 to-white">
           {messages.length === 0 && !sending && (
             <WelcomeScreen user={user} onSelect={handleSuggestion} />
           )}

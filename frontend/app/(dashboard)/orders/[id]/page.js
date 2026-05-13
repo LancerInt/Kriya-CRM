@@ -1561,13 +1561,15 @@ export default function OrderDetailPage() {
                 const t = TONE[tone];
                 const rowKey = `${row.doc_type}-${row.order_item_id || rIdx}-${tone}`;
                 return (
-                  <div key={rowKey} className={`flex items-center justify-between p-2.5 border rounded-lg ${present ? `${t.bgPresent} ${t.borderPresent}` : "bg-white border-gray-200"}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${present ? `${t.dotPresent} text-white` : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
-                      <span className={`text-sm ${present ? `${t.textPresent} font-medium` : "text-gray-800"}`}>{row.label}</span>
-                      {row.optional && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>}
+                  <div key={rowKey} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 border rounded-lg ${present ? `${t.bgPresent} ${t.borderPresent}` : "bg-white border-gray-200"}`}>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${present ? `${t.dotPresent} text-white` : "bg-gray-300 text-white"}`}>{present ? "✓" : "○"}</span>
+                      <span className={`text-sm ${present ? `${t.textPresent} font-medium` : "text-gray-800"}`}>
+                        {row.label}
+                        {row.optional && <span className="ml-2 align-middle text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap">Optional</span>}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:ml-2">
                       {present && (
                         <button onClick={() => viewOrderDoc(row.doc_type, row.order_item_id || null)} title="View PDF" className="px-2.5 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">👁 View</button>
                       )}
@@ -1700,19 +1702,21 @@ export default function OrderDetailPage() {
                       {clientRows.map((r, i) => renderRow(r, i, "emerald", "client"))}
                       {/* Inspection pictures pseudo-row */}
                       <div
-                        className={`flex items-center justify-between p-2.5 border rounded-lg cursor-pointer transition-colors ${hasInspectionPics ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100/60" : "bg-white border-gray-200 hover:bg-gray-50"}`}
+                        className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 border rounded-lg cursor-pointer transition-colors ${hasInspectionPics ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100/60" : "bg-white border-gray-200 hover:bg-gray-50"}`}
                         onClick={() => setActiveTab("documents")}
                         title="Open Documents tab"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${hasInspectionPics ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{hasInspectionPics ? "✓" : "○"}</span>
-                          <span className={`text-sm ${hasInspectionPics ? "text-emerald-800 font-medium" : "text-gray-800"}`}>Inspection Pictures</span>
-                          <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">Optional</span>
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${hasInspectionPics ? "bg-emerald-500 text-white" : "bg-gray-300 text-white"}`}>{hasInspectionPics ? "✓" : "○"}</span>
+                          <span className={`text-sm ${hasInspectionPics ? "text-emerald-800 font-medium" : "text-gray-800"}`}>
+                            Inspection Pictures
+                            <span className="ml-2 align-middle text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap">Optional</span>
+                          </span>
                         </div>
-                        <div className="flex items-center gap-1 text-[10px]">
-                          {passedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Passed: {passedCount}</span>}
-                          {failedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">Failed: {failedCount}</span>}
-                          {!hasInspectionPics && <span className="text-gray-400">No photos yet</span>}
+                        <div className="flex flex-wrap items-center gap-1 text-[10px] sm:shrink-0">
+                          {passedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 whitespace-nowrap">Passed: {passedCount}</span>}
+                          {failedCount > 0 && <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200 whitespace-nowrap">Failed: {failedCount}</span>}
+                          {!hasInspectionPics && <span className="text-gray-400 whitespace-nowrap">No photos yet</span>}
                         </div>
                       </div>
                     </div>

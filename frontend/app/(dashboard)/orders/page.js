@@ -247,28 +247,41 @@ export default function OrdersPage() {
                 {/* Left status stripe */}
                 <span className={`absolute left-0 top-3 bottom-3 w-1 rounded-r ${tone.bar}`} />
 
-                <div className="flex items-center gap-4 pl-2">
-                  {/* Order # + client */}
+                <div className="flex items-start sm:items-center gap-3 sm:gap-4 pl-2">
+                  {/* Order # + client + (mobile) inline status + progress */}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-900 tracking-tight">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span>
-                      {row.firc_received_at && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">FIRC ✓</span>
-                      )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-gray-900 tracking-tight">{row.order_number || `ORD-${row.id?.slice(0, 8)}`}</span>
+                        {row.firc_received_at && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">FIRC ✓</span>
+                        )}
+                      </div>
+                      {/* Mobile-only: status badge next to ORD# */}
+                      <div className="sm:hidden shrink-0">
+                        <StatusBadge status={row.status} />
+                      </div>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 truncate">
                       <span className="font-medium text-gray-700">{row.client_name || "—"}</span>
                       <span className="mx-1.5 text-gray-300">·</span>
                       {fmtDate(row.created_at)}
                     </p>
+                    {/* Mobile-only: slim progress bar below client/date */}
+                    <div className="sm:hidden flex items-center gap-2 mt-1.5">
+                      <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full ${tone.bar} transition-all`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className={`text-[10px] font-bold tabular-nums ${tone.text}`}>{pct}%</span>
+                    </div>
                   </div>
 
-                  {/* Status */}
+                  {/* Status — desktop position */}
                   <div className="hidden sm:block w-32 text-center">
                     <StatusBadge status={row.status} />
                   </div>
 
-                  {/* Progress bar */}
+                  {/* Progress bar — desktop position */}
                   <div className="hidden md:flex items-center gap-2 w-56">
                     <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                       <div className={`h-full ${tone.bar} transition-all`} style={{ width: `${pct}%` }} />
@@ -281,7 +294,7 @@ export default function OrdersPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }}
                       title="Delete order"
-                      className="p-2 rounded-lg text-gray-300 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      className="p-2 rounded-lg text-gray-300 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />

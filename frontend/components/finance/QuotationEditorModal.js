@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import api from "@/lib/axios";
 import toast from "react-hot-toast";
+import useResponsiveZoom from "@/lib/useResponsiveZoom";
 
 // Unicode subscript / superscript character maps
 const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ' };
@@ -20,6 +21,8 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
   const [products, setProducts] = useState([]);
   const [clientPriceList, setClientPriceList] = useState([]);
   const [scriptMode, setScriptMode] = useState(null); // null | 'sub' | 'sup'
+  // Mobile: zoom the desktop A4 layout to fit the viewport.
+  const zoomStyle = useResponsiveZoom();
 
   // ── Subscript / Superscript toolbar handler ──
   const handleScriptClick = useCallback((mode) => {
@@ -241,12 +244,17 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
-      <div ref={editorRef} className="bg-white" style={{ fontFamily: bkFont, fontSize: "14px", lineHeight: "1.4" }}>
+      {/* Mobile: CSS `zoom` on the editor scales the entire desktop-tuned A4
+          layout down to fit the viewport — same proportions as the printed
+          PDF, just smaller. Horizontal-scroll wrapper is the fallback for
+          browsers that don't honor zoom (older Firefox). */}
+      <div className="overflow-x-auto -mx-2 sm:mx-0">
+      <div ref={editorRef} className="bg-white" style={{ fontFamily: bkFont, fontSize: "14px", lineHeight: "1.4", ...zoomStyle }}>
 
         <style>{`@font-face { font-family: 'Montserrat'; src: url('/fonts/Montserrat-Bold.ttf') format('truetype'); font-weight: bold; } @font-face { font-family: 'Montserrat'; src: url('/fonts/Montserrat-Regular.ttf') format('truetype'); font-weight: normal; }`}</style>
 
         {/* ── SUBSCRIPT / SUPERSCRIPT TOOLBAR ── */}
-        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-gray-200">
           <span className="text-xs text-gray-500 mr-1">Format:</span>
           <button
             type="button"
@@ -519,9 +527,9 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
         </div>
 
         {/* ── ACTION BUTTONS ── */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => {
               // Persist image visibility/custom sources into display_overrides before saving
               setQtForm(prev => ({
@@ -539,6 +547,7 @@ export default function QuotationEditorModal({ open, onClose, qt, qtForm, setQtF
             </button>
           </div>
         </div>
+      </div>
       </div>
     </Modal>
   );

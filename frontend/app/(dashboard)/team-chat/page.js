@@ -39,6 +39,9 @@ export default function TeamChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loadingRooms, setLoadingRooms] = useState(true);
+  // Mobile: rooms/DM sidebar is a slide-out drawer. Hidden by default,
+  // opens via the hamburger button in the chat header.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   // DM user picker
@@ -446,9 +449,17 @@ export default function TeamChatPage() {
   const dmOtherUser = activeRoom?.other_user;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] -mt-4 -mx-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
-      {/* Sidebar */}
-      <div className="w-72 bg-white/80 backdrop-blur border-r border-slate-200/70 flex flex-col shrink-0 shadow-[1px_0_3px_rgba(0,0,0,0.02)]">
+    <div className="relative flex h-[calc(100vh-4rem)] -mt-4 -mx-4 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
+      {/* Mobile backdrop — tap to close the sidebar drawer */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="md:hidden fixed inset-0 z-30 bg-black/40 backdrop-blur-sm"
+        />
+      )}
+
+      {/* Sidebar — slide-out drawer on mobile, permanent column on md+ */}
+      <div className={`fixed md:static inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-white/95 md:bg-white/80 backdrop-blur border-r border-slate-200/70 flex flex-col shrink-0 shadow-[1px_0_3px_rgba(0,0,0,0.02)] transform transition-transform md:transform-none ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="px-4 py-4 border-b border-slate-200/70 bg-gradient-to-br from-indigo-600 to-violet-600">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -485,7 +496,7 @@ export default function TeamChatPage() {
               return (
                 <div
                   key={room.id}
-                  onClick={() => setActiveRoom(room)}
+                  onClick={() => { setActiveRoom(room); setSidebarOpen(false); }}
                   className={`group relative px-3 py-2 rounded-lg transition-all cursor-pointer ${
                     isActive
                       ? "bg-gradient-to-r from-indigo-50 to-violet-50 shadow-sm ring-1 ring-indigo-200/60"
@@ -596,7 +607,7 @@ export default function TeamChatPage() {
               return (
                 <div
                   key={dm.id}
-                  onClick={() => setActiveRoom(dm)}
+                  onClick={() => { setActiveRoom(dm); setSidebarOpen(false); }}
                   className={`group relative px-3 py-2 rounded-lg transition-all cursor-pointer ${
                     isActive
                       ? "bg-gradient-to-r from-indigo-50 to-violet-50 shadow-sm ring-1 ring-indigo-200/60"
@@ -645,46 +656,56 @@ export default function TeamChatPage() {
         )}
         {/* Header */}
         {activeRoom && (
-          <div className="px-5 py-3.5 border-b border-slate-200/70 bg-white/95 backdrop-blur flex items-center justify-between shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+          <div className="px-3 sm:px-5 py-3 sm:py-3.5 border-b border-slate-200/70 bg-white/95 backdrop-blur flex items-center justify-between gap-2 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+            {/* Mobile-only hamburger to open the rooms/DM drawer */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 -ml-1 rounded-lg text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+              aria-label="Open channels"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             {isDMRoom ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                 <div className="relative shrink-0">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-white shadow ${avatarColors[dmOtherUser?.role] || "bg-slate-100 text-slate-700"}`}>
+                  <div className={`w-9 sm:w-10 h-9 sm:h-10 rounded-full flex items-center justify-center text-sm font-bold ring-2 ring-white shadow ${avatarColors[dmOtherUser?.role] || "bg-slate-100 text-slate-700"}`}>
                     {getInitials(dmOtherUser?.full_name)}
                   </div>
                   <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-white" />
                 </div>
-                <div>
-                  <h2 className="font-bold text-slate-900 text-base">{dmOtherUser?.full_name || "Direct Message"}</h2>
+                <div className="min-w-0">
+                  <h2 className="font-bold text-slate-900 text-sm sm:text-base truncate">{dmOtherUser?.full_name || "Direct Message"}</h2>
                   <p className={`text-[11px] font-semibold capitalize ${roleColors[dmOtherUser?.role]?.split(" ")[0] || "text-slate-400"}`}>{dmOtherUser?.role}</p>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center shadow-md">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                <div className="w-9 sm:w-10 h-9 sm:h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center shadow-md shrink-0">
                   <span className="text-lg font-bold">#</span>
                 </div>
-                <div>
-                  <h2 className="font-bold text-slate-900 text-base">{activeRoom.name}</h2>
-                  <p className="text-[11px] text-slate-500">{activeRoom.description || "Team-wide discussions"}</p>
+                <div className="min-w-0">
+                  <h2 className="font-bold text-slate-900 text-sm sm:text-base truncate">{activeRoom.name}</h2>
+                  <p className="text-[11px] text-slate-500 truncate hidden sm:block">{activeRoom.description || "Team-wide discussions"}</p>
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {inCall ? (
-                <button onClick={endGroupCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-rose-500 to-rose-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
+                <button onClick={endGroupCall} title="End Call" className="flex items-center gap-1.5 px-2 sm:px-3.5 py-2 bg-gradient-to-br from-rose-500 to-rose-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" /></svg>
-                  End Call
+                  <span className="hidden sm:inline">End Call</span>
                 </button>
               ) : (
-                <div className="flex gap-2">
-                  <button onClick={startGroupCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
+                <div className="flex gap-1.5 sm:gap-2">
+                  <button onClick={startGroupCall} title="Start Call" className="flex items-center gap-1.5 px-2 sm:px-3.5 py-2 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                    Start Call
+                    <span className="hidden sm:inline">Start Call</span>
                   </button>
-                  <button onClick={joinCall} className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
+                  <button onClick={joinCall} title="Join Call" className="flex items-center gap-1.5 px-2 sm:px-3.5 py-2 bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-semibold rounded-lg shadow-sm hover:shadow transition-all">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14" /></svg>
-                    Join Call
+                    <span className="hidden sm:inline">Join Call</span>
                   </button>
                 </div>
               )}

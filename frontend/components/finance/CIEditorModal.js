@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Modal from "@/components/ui/Modal";
 import toast from "react-hot-toast";
+import useResponsiveZoom from "@/lib/useResponsiveZoom";
 
 const SUP_MAP = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ' };
 const SUB_MAP = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','a':'ₐ','e':'ₑ','h':'ₕ','i':'ᵢ','j':'ⱼ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','o':'ₒ','p':'ₚ','r':'ᵣ','s':'ₛ','t':'ₜ','u':'ᵤ','v':'ᵥ','x':'ₓ' };
@@ -20,6 +21,8 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
   const showBuyer = tpl === "buyer";
   const editorRef = useRef(null);
   const ciTableRef = useRef(null);
+  // Mobile: zoom the desktop A4 layout to fit the viewport.
+  const zoomStyle = useResponsiveZoom();
   const [scriptMode, setScriptMode] = useState(null);
 
   // Auto-resize all textareas when items change (after save/preview re-render)
@@ -208,10 +211,12 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
 
   return (
     <Modal open={open} onClose={onClose} title="" size="xl">
-      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif", fontSize: "11px", lineHeight: "1.4" }}>
+      {/* Mobile: CSS `zoom` scales the desktop A4 layout to fit the viewport. */}
+      <div className="overflow-x-auto -mx-2 sm:mx-0">
+      <div ref={editorRef} className="bg-white" style={{ fontFamily: "'Bookman Old Style', Georgia, serif", fontSize: "11px", lineHeight: "1.4", ...zoomStyle }}>
 
         {/* ── SUBSCRIPT / SUPERSCRIPT TOOLBAR ── */}
-        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-gray-200">
           <span className="text-xs text-gray-500 mr-1">Format:</span>
           <button
             type="button"
@@ -649,7 +654,7 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
         </div>
 
         {/* ── ACTION BUTTONS ── */}
-        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
+        <div className="flex flex-wrap items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-200">
           <button onClick={handleSaveWithTotals} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Save</button>
           <button
             onClick={async () => {
@@ -663,6 +668,7 @@ export default function CIEditorModal({ open, onClose, ci, ciForm, setCiForm, ci
           </button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Close</button>
         </div>
+      </div>
       </div>
     </Modal>
   );

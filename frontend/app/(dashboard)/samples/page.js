@@ -267,7 +267,7 @@ export default function SamplesPage() {
       />
 
       {/* Stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         <div className="bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl p-4">
           <div className="flex items-center gap-2"><span className="text-lg">🧪</span><span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">Total</span></div>
           <p className="mt-2 text-2xl font-bold text-gray-900 leading-none">{stats.total}</p>
