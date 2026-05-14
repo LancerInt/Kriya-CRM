@@ -638,18 +638,14 @@ export default function OrderDetailPage() {
     finally { setTransitSubmitting(false); }
   };
 
-  const viewOrderDoc = async (docType, itemId = null) => {
+  const viewOrderDoc = (docType, itemId = null) => {
     const doc = itemId
       ? orderDocs.find((d) => d.doc_type === docType && (d.order_item === itemId || d.order_item === null))
       : orderDocs.find((d) => d.doc_type === docType);
     if (!doc || !doc.file) { toast.error("No file to preview yet"); return; }
-    try {
-      const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      window.open(blobUrl, "_blank");
-    } catch { toast.error("Failed to open document"); }
+    // Open the R2 / Django URL directly — fetch+blob trips CORS on R2 signed URLs.
+    const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
+    window.open(url, "_blank");
   };
 
   const handleChecklistUpload = async (e) => {
@@ -2549,22 +2545,16 @@ export default function OrderDetailPage() {
             <div
               key={doc.id}
               className="group flex items-center justify-between gap-3 p-3 bg-white border border-gray-100 rounded-xl hover:border-indigo-200 hover:shadow-sm cursor-pointer transition-all"
-              onClick={async () => {
+              onClick={() => {
                 if (!doc.file) return;
+                // Open R2/Django URL directly — fetch+blob breaks CORS on R2 signed URLs.
                 const url = doc.file.startsWith("http") ? doc.file : `http://localhost:8000${doc.file}`;
-                try {
-                  const res = await fetch(url);
-                  const blob = await res.blob();
-                  const blobUrl = URL.createObjectURL(blob);
-                  const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
-                  if (["jpg","jpeg","png","gif","webp","svg"].includes(ext)) {
-                    setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                  } else if (ext === "pdf") {
-                    setPreviewDoc(doc); setPreviewUrl(blobUrl);
-                  } else {
-                    const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document"; a.click();
-                  }
-                } catch { toast.error("Failed to open document"); }
+                const ext = (doc.name || doc.file).split(".").pop()?.toLowerCase();
+                if (["jpg","jpeg","png","gif","webp","svg","pdf"].includes(ext)) {
+                  setPreviewDoc(doc); setPreviewUrl(url);
+                } else {
+                  const a = document.createElement("a"); a.href = url; a.download = doc.name || "document"; a.target = "_blank"; a.click();
+                }
               }}
             >
               <div className="flex items-center gap-3 min-w-0 flex-1">

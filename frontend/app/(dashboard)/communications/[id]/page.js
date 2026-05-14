@@ -691,21 +691,14 @@ export default function CommunicationDetailPage() {
                     {savedAttachments.map((att) => (
                       <div key={att.id} className="flex items-center justify-between p-2 bg-green-50 rounded-lg text-xs hover:bg-green-100 transition-colors">
                         <div
-                          onClick={async () => {
+                          onClick={() => {
                             const raw = att.file || "";
                             const url = raw.startsWith("http") ? raw : `http://localhost:8000${raw}`;
                             const isPdf = (att.filename || "").toLowerCase().endsWith(".pdf");
-                            try {
-                              const res = await fetch(url, { credentials: "include" });
-                              const blob = await res.blob();
-                              const blobUrl = URL.createObjectURL(blob);
-                              if (isPdf) {
-                                setPdfView({ url: blobUrl, title: att.filename });
-                              } else {
-                                window.open(blobUrl, "_blank");
-                              }
-                            } catch {
-                              // fall back to a direct open if the fetch fails
+                            // Open directly — fetch+blob trips CORS on R2 signed URLs.
+                            if (isPdf) {
+                              setPdfView({ url, title: att.filename });
+                            } else {
                               window.open(url, "_blank");
                             }
                           }}

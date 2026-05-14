@@ -73,3 +73,5 @@ wcwidth==0.6.0
 websockets==16.0
 gunicorn==23.0.0
 whitenoise==6.10.0
+boto3==1.35.96
+django-storages==1.14.4

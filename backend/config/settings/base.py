@@ -96,6 +96,36 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# ── File storage backends ───────────────────────────────────────────────
+# Flip USE_R2_STORAGE=True in the env to route uploaded media (COA PDFs,
+# product docs, chat attachments, etc.) to Cloudflare R2. Static files use
+# the plain Django backend here; production.py swaps in WhiteNoise.
+USE_R2_STORAGE = os.getenv('USE_R2_STORAGE', 'False').lower() in ('true', '1', 'yes')
+
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
+
+if USE_R2_STORAGE:
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'access_key': os.getenv('R2_ACCESS_KEY_ID'),
+            'secret_key': os.getenv('R2_SECRET_ACCESS_KEY'),
+            'bucket_name': os.getenv('R2_BUCKET_NAME'),
+            'endpoint_url': os.getenv('R2_ENDPOINT_URL'),
+            'region_name': os.getenv('R2_REGION', 'auto'),
+            'signature_version': 's3v4',
+            'addressing_style': 'virtual',
+            # R2 rejects ACL headers; signed URLs gate access for private CRM files.
+            'default_acl': None,
+            'querystring_auth': True,
+            'querystring_expire': 3600,
+            'file_overwrite': False,
+        },
+    }
+
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

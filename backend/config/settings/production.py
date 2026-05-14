@@ -84,10 +84,11 @@ if 'whitenoise.middleware.WhiteNoiseMiddleware' not in _MW:
     _MW.insert(_idx, 'whitenoise.middleware.WhiteNoiseMiddleware')
 MIDDLEWARE = _MW
 
-# Django 5.0+: STORAGES replaces STATICFILES_STORAGE / DEFAULT_FILE_STORAGE.
-STORAGES = {
-    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
-    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+# Default media storage is inherited from base.py — local FileSystemStorage
+# unless USE_R2_STORAGE=True flips it to Cloudflare R2. Here we only swap
+# the staticfiles backend over to WhiteNoise for compressed + hashed assets.
+STORAGES['staticfiles'] = {  # noqa: F405
+    'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
 }
 
 # ── HTTPS / security headers (Render terminates TLS at its edge) ────────
@@ -164,13 +165,6 @@ LOGGING = {
     },
 }
 
-# ── S3 storage hook (uncomment + install boto3 + django-storages) ───────
-# Render's filesystem is ephemeral — uploads (PDFs, attachments) are wiped
-# on every deploy unless you mount a Disk (paid) or move them to object
-# storage. For real production, point DEFAULT_FILE_STORAGE at S3/Spaces:
-# STORAGES['default'] = {'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage'}
-# AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-# AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-# AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
-# AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'ap-south-1')
-# AWS_QUERYSTRING_AUTH = False
+# Object storage: handled in base.py via USE_R2_STORAGE=True (Cloudflare R2).
+# On Render, the local filesystem is ephemeral — wiped on every deploy — so
+# USE_R2_STORAGE MUST be set to True on the production environment.

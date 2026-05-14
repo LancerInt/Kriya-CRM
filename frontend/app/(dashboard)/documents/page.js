@@ -42,22 +42,16 @@ export default function DocumentsPage() {
   const currentUser = useSelector((s) => s.auth.user);
   const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
 
-  const openPreview = async (file) => {
+  // Use the file URL directly — <img>/<iframe> tags load cross-origin without
+  // triggering CORS checks, unlike fetch+blob (which fails on R2 signed URLs
+  // once the browser caches a no-CORS response and reuses it via 304s).
+  const openPreview = (file) => {
     setPreview(file);
-    setPreviewUrl(null);
-    if (!file.file) return;
-    setPreviewLoading(true);
-    try {
-      const fileUrl = file.file.startsWith("http") ? file.file : BACKEND + file.file;
-      const res = await fetch(fileUrl);
-      const blob = await res.blob();
-      setPreviewUrl(URL.createObjectURL(blob));
-    } catch { setPreviewUrl(null); }
-    finally { setPreviewLoading(false); }
+    if (!file.file) { setPreviewUrl(null); return; }
+    setPreviewUrl(file.file.startsWith("http") ? file.file : BACKEND + file.file);
   };
 
   const closePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreview(null); setPreviewUrl(null);
   };
   const dragCounter = useRef(0);

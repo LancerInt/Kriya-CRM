@@ -1,5 +1,5 @@
 # ════════════════════════════════════════════════════════════════════════
-# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $77/mo)
+# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $76/mo)
 #
 # Provisioned services (all paid):
 #   • PostgreSQL  (Standard, 10 GB, daily backups, PITR)         $20/mo
@@ -8,14 +8,15 @@
 #   • Next.js web (Starter, 512 MB, no sleep)                    $ 7/mo
 #   • Celery worker (Background Worker, Starter)                 $ 7/mo
 #   • Celery beat   (Background Worker, Starter)                 $ 7/mo
-#   • Persistent Disk for media (5 GB on the API service)        $ 1.25/mo
 #                                                          ───────────
-#                                                          Total ≈ $77/mo
+#                                                          Total ≈ $76/mo
 #
-# To downgrade to Starter Production ≈ $45/mo:
+# Media storage: Cloudflare R2 (free tier 10 GB) — no Render disk required.
+# Set USE_R2_STORAGE=True + the R2_* env vars in each service's dashboard.
+#
+# To downgrade to Starter Production ≈ $44/mo:
 #   • Django API plan: standard → starter
 #   • PostgreSQL plan: standard → starter
-#   • Disk size:       5         → 1
 #   • WEB_CONCURRENCY: 4         → 2
 #
 # Deploy: push, then Render → New + → Blueprint → connect repo → confirm.
@@ -48,13 +49,9 @@ services:
       python manage.py collectstatic --noinput
       python manage.py migrate --noinput
     startCommand: gunicorn config.wsgi:application --workers 4 --timeout 120 --max-requests 1000 --max-requests-jitter 100
-    # 5 GB persistent volume mounted at the Django media root. Survives
-    # deploys, restarts and instance restarts. Upgrade to S3 when you
-    # outgrow this (see DEPLOY.md §9).
-    disk:
-      name: kriya-crm-media
-      mountPath: /opt/render/project/src/backend/media
-      sizeGB: 5
+    # Media storage is offloaded to Cloudflare R2 (see USE_R2_STORAGE below).
+    # Render's filesystem is ephemeral — without R2, uploads would vanish on
+    # every redeploy. With R2 enabled, no persistent disk is needed.
     envVars:
       - key: DJANGO_ENV
         value: production
@@ -107,6 +104,22 @@ services:
       # Flip to "31536000" (1 year) after a week of healthy uptime.
       - key: SECURE_HSTS_SECONDS
         value: "0"
+      # ── Cloudflare R2 object storage ────────────────────────────────
+      # USE_R2_STORAGE flips Django's DEFAULT_FILE_STORAGE from local disk
+      # to R2. Keep all four R2_* secrets aligned with the API token issued
+      # for the kriya-crm-files bucket (Cloudflare dashboard → R2 → API).
+      - key: USE_R2_STORAGE
+        value: "True"
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false                # e.g. kriya-crm-files
+      - key: R2_ENDPOINT_URL
+        sync: false                # e.g. https://<account-id>.r2.cloudflarestorage.com
+      - key: R2_REGION
+        value: "auto"
 
   # ─── Celery worker (async tasks: emails, AI runs, PDF jobs etc.) ────
   - type: worker
@@ -153,6 +166,19 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # ── Cloudflare R2 object storage (PDF generators upload here) ──
+      - key: USE_R2_STORAGE
+        value: "True"
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_REGION
+        value: "auto"
 
   # ─── Celery beat scheduler (replaces the cron jobs) ─────────────────
   - type: worker

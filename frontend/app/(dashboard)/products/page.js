@@ -99,7 +99,9 @@ export default function ProductsPage() {
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const user = useSelector((state) => state.auth.user);
-  const canEdit = user?.role === "admin" || user?.role === "manager";
+  // Any signed-in user (incl. executives) can edit products so they can
+  // fill in missing details on the catalog directly from the list view.
+  const canEdit = !!user;
 
   const loadProducts = () => {
     setLoading(true);
