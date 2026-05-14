@@ -1,50 +1,49 @@
 # ════════════════════════════════════════════════════════════════════════
-# Kriya CRM — Render Blueprint  (OPTIMIZED PRODUCTION ≈ $55.50/mo)
+# Kriya CRM — Render Blueprint  (LEAN PRODUCTION ≈ $25/mo)
 #
-# Provisioned ON RENDER (3 services):
-#   • PostgreSQL    (basic-1gb, 1 GB RAM, 10 GB, daily backups)  $23.50/mo
-#   • Django API    (Standard, 2 GB RAM, 1 CPU, no sleep)        $25/mo
-#   • Celery worker (Starter; beat embedded via `-B`)            $ 7/mo
-#                                                          ────────────
-#                                                          Render subtotal ≈ $55.50/mo
+# Provisioned ON RENDER (2 services):
+#   • Django API    (Starter, 512 MB, 0.5 CPU, no sleep)        $ 7/mo
+#   • Celery worker (Starter; beat embedded via `-B`)           $ 7/mo
+#                                                          ───────────
+#                                                          Render subtotal ≈ $14/mo
 #
-# Provisioned ELSEWHERE (free):
+# Provisioned ELSEWHERE:
+#   • PostgreSQL      → AWS RDS db.t4g.micro (1 GB) + 10 GB    ≈ $11/mo (~₹950)
 #   • Redis           → Upstash free tier (10 K commands/day)    $ 0
 #   • Next.js web     → Cloudflare Pages (free, edge-cached)     $ 0
 #   • File storage    → Cloudflare R2    (10 GB free)            $ 0
-#                                                          ────────────
-#                                                          GRAND TOTAL ≈ $55.50/mo
+#                                                          ───────────
+#                                                          GRAND TOTAL ≈ $25/mo
 #
-# Set these env vars in each Render service's dashboard:
-#   • REDIS_URL — paste the Upstash connection string (sync: false)
-#   • R2_*      — Cloudflare R2 credentials (sync: false)
-#   • Email/AI keys — sync: false, leave blank if unused
+# Set these env vars in each Render service's dashboard (sync: false):
+#   • DATABASE_URL — AWS RDS connection string (postgres://...?sslmode=require)
+#   • REDIS_URL    — Upstash connection string (rediss://...)
+#   • R2_*         — Cloudflare R2 credentials
+#   • Email/AI keys — leave blank if unused
+#
+# Tradeoffs vs. larger plan:
+#   • Starter API has 512 MB RAM — PDF generation can OOM under load.
+#     Monitor Render logs; upgrade to Standard ($25) with one click if needed.
+#   • AWS RDS adds cross-cloud latency (~30-50ms per query) and requires
+#     manual setup; in exchange you pay ~$10/mo less than Render Postgres.
 #
 # Deploy: push, then Render → New + → Blueprint → connect repo → confirm.
-# Fill the secrets marked `sync: false` in each service's Environment tab.
 # Frontend is deployed separately via Cloudflare Pages (not in this file).
 # ════════════════════════════════════════════════════════════════════════
-
-databases:
-  - name: kriya-crm-db
-    plan: basic-1gb       # 1 GB RAM, 10 GB storage, daily backups ($19/mo).
-                          # Bump to a pro-* tier later if you need point-in-time recovery.
-    databaseName: kriya_crm
-    user: kriya_crm
 
 services:
   # ─── Django backend (gunicorn) ──────────────────────────────────────
   - type: web
     name: kriya-crm-api
     runtime: python
-    plan: standard        # 2 GB RAM, 1 CPU
+    plan: starter         # 512 MB RAM, 0.5 CPU — workers reduced to 2 to fit
     rootDir: backend
     healthCheckPath: /healthz/
     buildCommand: |
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
       python manage.py migrate --noinput
-    startCommand: gunicorn config.wsgi:application --workers 4 --timeout 120 --max-requests 1000 --max-requests-jitter 100
+    startCommand: gunicorn config.wsgi:application --workers 2 --timeout 120 --max-requests 500 --max-requests-jitter 50
     # Media storage is offloaded to Cloudflare R2 (see USE_R2_STORAGE below).
     # Render's filesystem is ephemeral — without R2, uploads would vanish on
     # every redeploy. With R2 enabled, no persistent disk is needed.
@@ -58,11 +57,11 @@ services:
       - key: PYTHON_VERSION
         value: "3.13.0"
       - key: WEB_CONCURRENCY
-        value: "4"
+        value: "2"
+      # DB is on AWS RDS (external). Paste the connection string in dashboard:
+      # postgres://<user>:<pass>@<endpoint>:5432/<db>?sslmode=require
       - key: DATABASE_URL
-        fromDatabase:
-          name: kriya-crm-db
-          property: connectionString
+        sync: false
       # Redis is on Upstash (free tier). Paste the connection string here:
       # rediss://default:<pass>@<host>:6379  (note: rediss:// for TLS).
       - key: REDIS_URL
@@ -137,10 +136,9 @@ services:
           type: web
           name: kriya-crm-api
           envVarKey: DJANGO_SECRET_KEY
+      # Same AWS RDS connection string as the API service.
       - key: DATABASE_URL
-        fromDatabase:
-          name: kriya-crm-db
-          property: connectionString
+        sync: false
       - key: REDIS_URL
         sync: false                # Upstash connection string (rediss://...)
       - key: ALLOWED_HOSTS
