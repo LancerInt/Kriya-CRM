@@ -1,15 +1,15 @@
 # ════════════════════════════════════════════════════════════════════════
-# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $76/mo)
+# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $75/mo)
 #
 # Provisioned services (all paid):
-#   • PostgreSQL  (Standard, 10 GB, daily backups, PITR)         $20/mo
+#   • PostgreSQL  (basic-1gb, 1 GB RAM, 10 GB, daily backups)    $19/mo
 #   • Redis       (Starter, 250 MB)                              $10/mo
 #   • Django API  (Standard, 2 GB RAM, 1 CPU, no sleep)          $25/mo
 #   • Next.js web (Starter, 512 MB, no sleep)                    $ 7/mo
 #   • Celery worker (Background Worker, Starter)                 $ 7/mo
 #   • Celery beat   (Background Worker, Starter)                 $ 7/mo
 #                                                          ───────────
-#                                                          Total ≈ $76/mo
+#                                                          Total ≈ $75/mo
 #
 # Media storage: Cloudflare R2 (free tier 10 GB) — no Render disk required.
 # Set USE_R2_STORAGE=True + the R2_* env vars in each service's dashboard.
@@ -25,7 +25,8 @@
 
 databases:
   - name: kriya-crm-db
-    plan: standard        # 10 GB storage, daily backups, point-in-time recovery
+    plan: basic-1gb       # 1 GB RAM, 10 GB storage, daily backups ($19/mo).
+                          # Bump to a pro-* tier later if you need point-in-time recovery.
     databaseName: kriya_crm
     user: kriya_crm
 
