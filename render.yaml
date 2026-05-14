@@ -1,26 +1,28 @@
 # ════════════════════════════════════════════════════════════════════════
-# Kriya CRM — Render Blueprint  (RECOMMENDED PRODUCTION ≈ $75/mo)
+# Kriya CRM — Render Blueprint  (OPTIMIZED PRODUCTION ≈ $55.50/mo)
 #
-# Provisioned services (all paid):
-#   • PostgreSQL  (basic-1gb, 1 GB RAM, 10 GB, daily backups)    $19/mo
-#   • Redis       (Starter, 250 MB)                              $10/mo
-#   • Django API  (Standard, 2 GB RAM, 1 CPU, no sleep)          $25/mo
-#   • Next.js web (Starter, 512 MB, no sleep)                    $ 7/mo
-#   • Celery worker (Background Worker, Starter)                 $ 7/mo
-#   • Celery beat   (Background Worker, Starter)                 $ 7/mo
-#                                                          ───────────
-#                                                          Total ≈ $75/mo
+# Provisioned ON RENDER (3 services):
+#   • PostgreSQL    (basic-1gb, 1 GB RAM, 10 GB, daily backups)  $23.50/mo
+#   • Django API    (Standard, 2 GB RAM, 1 CPU, no sleep)        $25/mo
+#   • Celery worker (Starter; beat embedded via `-B`)            $ 7/mo
+#                                                          ────────────
+#                                                          Render subtotal ≈ $55.50/mo
 #
-# Media storage: Cloudflare R2 (free tier 10 GB) — no Render disk required.
-# Set USE_R2_STORAGE=True + the R2_* env vars in each service's dashboard.
+# Provisioned ELSEWHERE (free):
+#   • Redis           → Upstash free tier (10 K commands/day)    $ 0
+#   • Next.js web     → Cloudflare Pages (free, edge-cached)     $ 0
+#   • File storage    → Cloudflare R2    (10 GB free)            $ 0
+#                                                          ────────────
+#                                                          GRAND TOTAL ≈ $55.50/mo
 #
-# To downgrade to Starter Production ≈ $44/mo:
-#   • Django API plan: standard → starter
-#   • PostgreSQL plan: standard → starter
-#   • WEB_CONCURRENCY: 4         → 2
+# Set these env vars in each Render service's dashboard:
+#   • REDIS_URL — paste the Upstash connection string (sync: false)
+#   • R2_*      — Cloudflare R2 credentials (sync: false)
+#   • Email/AI keys — sync: false, leave blank if unused
 #
 # Deploy: push, then Render → New + → Blueprint → connect repo → confirm.
 # Fill the secrets marked `sync: false` in each service's Environment tab.
+# Frontend is deployed separately via Cloudflare Pages (not in this file).
 # ════════════════════════════════════════════════════════════════════════
 
 databases:
@@ -31,13 +33,6 @@ databases:
     user: kriya_crm
 
 services:
-  # ─── Redis (cache + Celery broker) ──────────────────────────────────
-  - type: redis
-    name: kriya-crm-redis
-    plan: starter         # 250 MB, persistent, no IP-allowlist needed
-    ipAllowList: []       # private — only Render services can reach it
-    maxmemoryPolicy: allkeys-lru
-
   # ─── Django backend (gunicorn) ──────────────────────────────────────
   - type: web
     name: kriya-crm-api
@@ -68,11 +63,11 @@ services:
         fromDatabase:
           name: kriya-crm-db
           property: connectionString
+      # Redis is on Upstash (free tier). Paste the connection string here:
+      # rediss://default:<pass>@<host>:6379  (note: rediss:// for TLS).
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: kriya-crm-redis
-          property: connectionString
+        sync: false
+      # Celery broker + result backend reuse REDIS_URL (set in settings.base).
       # ── Set in the Render dashboard after first deploy ──
       - key: ALLOWED_HOSTS
         sync: false                # e.g. kriya-crm-api.onrender.com,api.kriya.com
@@ -122,15 +117,19 @@ services:
       - key: R2_REGION
         value: "auto"
 
-  # ─── Celery worker (async tasks: emails, AI runs, PDF jobs etc.) ────
+  # ─── Celery worker + beat (combined via `-B` flag) ──────────────────
+  # Single Starter container runs async tasks (emails, AI, PDFs) AND the
+  # scheduled-task clock. Saves one $7 service vs. running them separately.
+  # If you ever scale beyond one worker container, split beat back out
+  # (only ONE beat instance is allowed to run at a time globally).
   - type: worker
     name: kriya-crm-worker
     runtime: python
-    plan: starter         # 512 MB, plenty for the task workload
+    plan: starter         # 512 MB, fine for combined worker + beat
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A config worker --loglevel=info --concurrency=4 --max-tasks-per-child=200
-    envVars: &workerEnv
+    startCommand: celery -A config worker --beat --loglevel=info --concurrency=4 --max-tasks-per-child=200
+    envVars:
       - key: DJANGO_ENV
         value: production
       - key: DJANGO_SECRET_KEY
@@ -143,10 +142,7 @@ services:
           name: kriya-crm-db
           property: connectionString
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: kriya-crm-redis
-          property: connectionString
+        sync: false                # Upstash connection string (rediss://...)
       - key: ALLOWED_HOSTS
         sync: false
       - key: EMAIL_HOST
@@ -181,26 +177,8 @@ services:
       - key: R2_REGION
         value: "auto"
 
-  # ─── Celery beat scheduler (replaces the cron jobs) ─────────────────
-  - type: worker
-    name: kriya-crm-beat
-    runtime: python
-    plan: starter
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A config beat --loglevel=info
-    envVars: *workerEnv
-
-  # ─── Next.js frontend ───────────────────────────────────────────────
-  - type: web
-    name: kriya-crm
-    runtime: node
-    plan: starter
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start
-    envVars:
-      - key: NODE_VERSION
-        value: "20.18.0"
-      - key: NEXT_PUBLIC_API_URL
-        sync: false       # set to https://kriya-crm-api.onrender.com/api after first deploy
+# ── Frontend (Cloudflare Pages, free) ───────────────────────────────────
+# The Next.js app is deployed separately on Cloudflare Pages — see
+# DEPLOY.md or pages.cloudflare.com. Build command: `npm ci && npm run build`,
+# build output: `.next`. Set NEXT_PUBLIC_API_URL=https://<api>.onrender.com/api
+# in the Pages project's environment variables.
