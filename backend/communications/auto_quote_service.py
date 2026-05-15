@@ -61,6 +61,13 @@ def process_communication_for_quote(communication, force=False):
     Returns QuoteRequest if created, None otherwise.
     """
     from .models import QuoteRequest
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no automation. The manual
+    # "Save to Quotations" button passes force=True so the user can still pull
+    # an old email into Quotations explicitly when they need to.
+    if not force and is_historical_communication(communication):
+        return None
 
     # Skip if already processed
     if hasattr(communication, 'quote_request'):

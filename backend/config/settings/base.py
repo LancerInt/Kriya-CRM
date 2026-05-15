@@ -203,3 +203,26 @@ SIGNATURE_LOGO_URL = os.getenv(
 # Lead time the AI quotes when acknowledging a sample request. Override via
 # the SAMPLE_DISPATCH_DAYS env var if your operational lead time changes.
 SAMPLE_DISPATCH_DAYS = os.getenv('SAMPLE_DISPATCH_DAYS', '10-15 days')
+
+# ── Backfill / historical-email guard ──────────────────────────────────────
+# Communications dated on or before this day are treated as historical data:
+# the row is stored + searchable, but no automation fires (no auto-quote, no
+# auto-PI, no auto-PO, no AI draft, no sample request, no auto-revision, no
+# notifications). The cutoff matches the production go-live so any email
+# imported from a previous mail archive is preserved as read-only context.
+# Override via the BACKFILL_CUTOFF_DATE env var (format: YYYY-MM-DD) if you
+# need to re-import a different window later without re-firing automation.
+# Set to an empty string to disable the guard entirely.
+from datetime import date as _date  # noqa: E402
+
+def _parse_iso_date(raw):
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    try:
+        y, m, d = raw.split('-')
+        return _date(int(y), int(m), int(d))
+    except Exception:
+        return None
+
+BACKFILL_CUTOFF_DATE = _parse_iso_date(os.getenv('BACKFILL_CUTOFF_DATE', '2026-05-15'))

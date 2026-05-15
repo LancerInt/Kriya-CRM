@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 def _auto_create_contact(client, communication):
     """Auto-create a contact for the client if the sender's email/phone doesn't exist yet."""
     from clients.models import Contact
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — no auto-contact creation.
+    if is_historical_communication(communication):
+        return None
 
     email = communication.external_email or ''
     phone = communication.external_phone or ''

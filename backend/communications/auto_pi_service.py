@@ -95,6 +95,11 @@ def process_communication_for_pi(communication):
     Returns ProformaInvoice or None.
     """
     from finance.models import ProformaInvoice
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no automation.
+    if is_historical_communication(communication):
+        return None
 
     # Skip outbound or non-client emails
     if communication.direction != 'inbound':

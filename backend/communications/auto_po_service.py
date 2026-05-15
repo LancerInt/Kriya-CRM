@@ -191,6 +191,11 @@ def process_communication_for_po(communication):
     Returns Order or None.
     """
     from orders.models import Order
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no automation.
+    if is_historical_communication(communication):
+        return None
 
     # Skip outbound or non-client emails
     if communication.direction != 'inbound':

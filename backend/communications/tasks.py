@@ -135,9 +135,14 @@ def sync_emails(email_account_id=None, days_back=None):
                 is_read=(direction == 'outbound'),
             )
 
-            # Override created_at with the actual email date
+            # Override created_at with the actual email date so the timeline
+            # and the backfill-guard helper both see the real send/receive
+            # timestamp rather than the import time. Mirror the change onto
+            # the in-memory instance so downstream automation calls evaluate
+            # the historical check against the right date.
             if em.get('date'):
                 Communication.objects.filter(id=comm.id).update(created_at=em['date'])
+                comm.created_at = em['date']
 
             # Persist any file attachments that came with the email — these
             # are needed by the PO auto-attach flow (and the timeline / drafts).
@@ -177,8 +182,11 @@ def sync_emails(email_account_id=None, days_back=None):
 
             # Notify executive about new inbound email from client.
             # Tier 1 (VIP) clients get an urgent 'alert' type notification
-            # so they stand out in the notification bell.
-            if direction == 'inbound' and client:
+            # so they stand out in the notification bell. Historical/backfilled
+            # mail is silent — we don't want 500K "new email" pings filling
+            # everyone's bell when an archive is imported.
+            from .backfill_guard import is_historical_communication
+            if direction == 'inbound' and client and not is_historical_communication(comm):
                 try:
                     from notifications.helpers import notify
                     is_vip = getattr(client, 'tier', 'tier_3') == 'tier_1'
@@ -280,6 +288,11 @@ def _auto_revise_if_needed(communication):
     that the executive can click to enter new rates and attach to email.
     """
     import re as _re
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no automation.
+    if is_historical_communication(communication):
+        return
 
     if not communication.client_id:
         return
@@ -617,6 +630,11 @@ def _auto_create_sample_request(communication):
     import re as _re
     from samples.models import Sample, SampleItem
     from communications.auto_quote_service import resolve_line_items_from_email
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no automation.
+    if is_historical_communication(communication):
+        return None
 
     if not communication.client:
         return None
@@ -692,6 +710,11 @@ def _generate_draft_for_email(communication):
     """Generate an AI draft reply for an incoming email."""
     from communications.models import EmailDraft
     from communications.ai_email_service import generate_email_reply
+    from .backfill_guard import is_historical_communication
+
+    # Historical / backfilled email — storage only, no AI draft.
+    if is_historical_communication(communication):
+        return
 
     # Don't generate if draft already exists
     if EmailDraft.objects.filter(communication=communication).exists():
