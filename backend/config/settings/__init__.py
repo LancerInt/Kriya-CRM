@@ -5,6 +5,6 @@ import os
 
 _env = os.getenv('DJANGO_ENV', 'development').lower()
 if _env in ('production', 'prod'):
-    from .production import *  # noqa: F401,F403
+    from .production import *
 else:
-    from .development import *  # noqa: F401,F403
+    from .development import *  # ← This is being loaded!
