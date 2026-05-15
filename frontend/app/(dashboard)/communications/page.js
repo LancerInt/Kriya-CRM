@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { Suspense, useEffect, useState, useMemo, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchCommunications, createCommunication } from "@/store/slices/communicationSlice";
@@ -46,7 +46,17 @@ const FILTER_TABS = [
   { key: "unmatched", label: "Unmatched" },
 ];
 
+// Wrapper required for static export: useSearchParams() must sit inside a
+// Suspense boundary or Next refuses to prerender the page.
 export default function CommunicationsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading…</div>}>
+      <CommunicationsPageContent />
+    </Suspense>
+  );
+}
+
+function CommunicationsPageContent() {
   const dispatch = useDispatch();
   const router = useRouter();
   const searchParams = useSearchParams();

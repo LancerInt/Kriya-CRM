@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchTasks, createTask, completeTask } from "@/store/slices/taskSlice";
@@ -24,7 +24,17 @@ const PRIORITY_TONE = {
 };
 const priorityTone = (p) => PRIORITY_TONE[p] || PRIORITY_TONE.medium;
 
+// Wrapper required for static export: useSearchParams() must sit inside a
+// Suspense boundary or Next refuses to prerender the page.
 export default function TasksPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading…</div>}>
+      <TasksPageContent />
+    </Suspense>
+  );
+}
+
+function TasksPageContent() {
   const dispatch = useDispatch();
   const { list, loading } = useSelector((state) => state.tasks);
   const { user } = useSelector((state) => state.auth);

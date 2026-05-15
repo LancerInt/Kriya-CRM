@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/axios";
 import PageHeader from "@/components/ui/PageHeader";
@@ -17,7 +17,17 @@ import { confirmDialog } from "@/lib/confirm";
  * with full version history visible inline. Mirrors the Proforma Invoices
  * page so the UX is consistent across both document types.
  */
+// Wrapper required for static export: useSearchParams() must sit inside a
+// Suspense boundary or Next refuses to prerender the page.
 export default function QuotationsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading…</div>}>
+      <QuotationsPageContent />
+    </Suspense>
+  );
+}
+
+function QuotationsPageContent() {
   const router = useRouter();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
