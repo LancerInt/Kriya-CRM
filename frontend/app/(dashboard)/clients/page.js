@@ -10,6 +10,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import ModernSelect from "@/components/ui/ModernSelect";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { confirmDialog } from "@/lib/confirm";
 
 export default function ClientsPage() {
   const dispatch = useDispatch();
@@ -17,6 +18,8 @@ export default function ClientsPage() {
   const { list, loading, count } = useSelector((state) => state.clients);
   const user = useSelector((state) => state.auth.user);
   const isExecutive = user?.role === "executive";
+  // Only admins / managers can delete accounts. Executives see no trash icon.
+  const canDelete = user?.role === "admin" || user?.role === "manager";
   const [tab, setTab] = useState("all");
 
   const loadClients = useCallback(() => {
@@ -42,6 +45,27 @@ export default function ClientsPage() {
       toast.success(`Tier updated`);
       loadClients();
     } catch { toast.error("Failed to update tier"); }
+  };
+
+  const handleDelete = async (row, e) => {
+    e.stopPropagation();
+    const ok = await confirmDialog({
+      title: `Delete account "${row.company_name}"?`,
+      message:
+        "This will soft-delete the account along with its contacts. " +
+        "Communications and orders stay in place. You can restore the " +
+        "account later from the Archive page.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/clients/${row.id}/`);
+      toast.success(`"${row.company_name}" deleted`);
+      loadClients();
+    } catch {
+      toast.error("Failed to delete account");
+    }
   };
 
   // For executives: split into my clients and shadow clients
@@ -87,6 +111,22 @@ export default function ClientsPage() {
     )},
     { key: "contact_count", label: "Contacts", render: (row) => row.contact_count || 0 },
     { key: "primary_executive_name", label: "Account Owner", render: (row) => row.primary_executive_name || "-" },
+    ...(canDelete ? [{
+      key: "_actions",
+      label: "",
+      render: (row) => (
+        <button
+          type="button"
+          title={`Delete ${row.company_name}`}
+          onClick={(e) => handleDelete(row, e)}
+          className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+          </svg>
+        </button>
+      ),
+    }] : []),
   ];
 
   // Stats
