@@ -203,10 +203,6 @@ export default function NewClientPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
-              <input name="business_type" value={form.business_type} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Account Owner *</label>
               <select name="primary_executive" value={form.primary_executive} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
                 <option value="">Select account owner</option>
@@ -229,15 +225,6 @@ export default function NewClientPage() {
               <input name="website" value={form.website} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Terms</label>
-              <select name="delivery_terms" value={form.delivery_terms} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
-                <option value="FOB">FOB</option>
-                <option value="CIF">CIF</option>
-                <option value="CFR">CFR</option>
-                <option value="EXW">EXW</option>
-              </select>
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
               <select name="preferred_currency" value={form.preferred_currency} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
                 <option value="USD">USD</option>
@@ -245,10 +232,6 @@ export default function NewClientPage() {
                 <option value="GBP">GBP</option>
                 <option value="INR">INR</option>
               </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Credit Days</label>
-              <input type="number" name="credit_days" value={form.credit_days} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
@@ -261,10 +244,6 @@ export default function NewClientPage() {
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
               <textarea name="address" value={form.address} onChange={handleChange} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea name="notes" value={form.notes} onChange={handleChange} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
             </div>
           </div>
 
