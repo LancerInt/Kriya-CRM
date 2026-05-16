@@ -707,6 +707,14 @@ function CommunicationsTab({ clientId, activeTab, client }) {
   const [draftAttachments, setDraftAttachments] = useState([]);
   const [form, setForm] = useState({ comm_type: "email", direction: "outbound", subject: "", body: "" });
   const [submitting, setSubmitting] = useState(false);
+  // Client-side pagination for this client's email/WhatsApp history. After
+  // a 5-year backfill an active client can easily have 2000+ rows; rendering
+  // all of them at once locks the browser tab.
+  const COMM_PAGE_SIZE = 50;
+  const [commPage, setCommPage] = useState(1);
+  // Filter / search changes → jump back to page 1 so the user doesn't end
+  // up looking at an empty page that no longer exists in the filtered set.
+  useEffect(() => { setCommPage(1); }, [filterType, filterSearch]);
 
   // Extract primary contact info for pre-filling
   const primaryContact = client?.contacts?.find((c) => c.is_primary) || client?.contacts?.[0];
@@ -1339,16 +1347,44 @@ function CommunicationsTab({ clientId, activeTab, client }) {
           <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">+ Log Communication</button>
         </div>
       </div>
-      <DataTable columns={columns} data={data.filter(row => {
-        if (filterType === "drafts") return row.draft_id && row.draft_status === "draft";
-        if (filterType === "starred") return row.is_starred;
-        if (filterType !== "all" && row.comm_type !== filterType) return false;
-        if (filterSearch) {
-          const q = filterSearch.toLowerCase();
-          return (row.subject || "").toLowerCase().includes(q) || (row.external_email || "").toLowerCase().includes(q) || (row.external_phone || "").includes(q) || (row.body || "").toLowerCase().includes(q);
-        }
-        return true;
-      })} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
+      {(() => {
+        const filteredComms = (data || []).filter(row => {
+          if (filterType === "drafts") return row.draft_id && row.draft_status === "draft";
+          if (filterType === "starred") return row.is_starred;
+          if (filterType !== "all" && row.comm_type !== filterType) return false;
+          if (filterSearch) {
+            const q = filterSearch.toLowerCase();
+            return (row.subject || "").toLowerCase().includes(q) || (row.external_email || "").toLowerCase().includes(q) || (row.external_phone || "").includes(q) || (row.body || "").toLowerCase().includes(q);
+          }
+          return true;
+        });
+        const totalCommPages = Math.max(1, Math.ceil(filteredComms.length / COMM_PAGE_SIZE));
+        const safeCommPage = Math.min(commPage, totalCommPages);
+        const paginatedComms = filteredComms.slice((safeCommPage - 1) * COMM_PAGE_SIZE, safeCommPage * COMM_PAGE_SIZE);
+        return (
+          <>
+            <DataTable columns={columns} data={paginatedComms} loading={loading} emptyTitle="No communications" emptyDescription="Log your first communication with this client" />
+            {filteredComms.length > COMM_PAGE_SIZE && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200/70 bg-slate-50/40 mt-px">
+                <p className="text-xs text-slate-500">
+                  Showing <span className="font-semibold text-slate-700">{(safeCommPage - 1) * COMM_PAGE_SIZE + 1}</span>
+                  {" – "}
+                  <span className="font-semibold text-slate-700">{Math.min(safeCommPage * COMM_PAGE_SIZE, filteredComms.length)}</span>
+                  {" of "}
+                  <span className="font-semibold text-slate-700">{filteredComms.length}</span>
+                </p>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => setCommPage(1)} disabled={safeCommPage === 1} className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent">« First</button>
+                  <button type="button" onClick={() => setCommPage(p => Math.max(1, p - 1))} disabled={safeCommPage === 1} className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent">‹ Prev</button>
+                  <span className="px-3 py-1 text-xs font-bold bg-white border border-slate-200 rounded-lg text-slate-800">{safeCommPage} / {totalCommPages}</span>
+                  <button type="button" onClick={() => setCommPage(p => Math.min(totalCommPages, p + 1))} disabled={safeCommPage >= totalCommPages} className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent">Next ›</button>
+                  <button type="button" onClick={() => setCommPage(totalCommPages)} disabled={safeCommPage >= totalCommPages} className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent">Last »</button>
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
       <ComposeEmailModal open={showEmailModal} onClose={() => { setShowEmailModal(false); setLinkSampleId(null); }} clientId={clientId} contactEmail={composeToEmail} ccEmails={composeCcEmails} linkSampleId={linkSampleId} onSent={reload} />
       <SendWhatsAppModal open={showWhatsAppModal} onClose={() => setShowWhatsAppModal(false)} clientId={clientId} contactPhone={contactPhone} onSent={reload} />
 

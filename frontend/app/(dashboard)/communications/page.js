@@ -78,6 +78,10 @@ function CommunicationsPageContent() {
   const [unmatchedCategory, setUnmatchedCategory] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [archivePrompt, setArchivePrompt] = useState(null); // { commId, senderEmail }
+  // Client-side pagination: 50 activities per page. After backfill the list
+  // can hit thousands of rows — rendering them all at once locks the browser.
+  const PAGE_SIZE = 50;
+  const [currentPage, setCurrentPage] = useState(1);
   const [followUpTick, setFollowUpTick] = useState(0); // forces age re-eval
   // Conversation keys the user has explicitly dismissed (no follow-up needed).
   // Persisted in localStorage so it survives reloads, keyed by client+contact.
@@ -227,6 +231,22 @@ function CommunicationsPageContent() {
     }
     return filtered;
   }, [list, filterTab, filterClient, filterExec, unmatchedCategory, followUpTick, dismissedFollowUps]);
+
+  // Slice the filtered list into PAGE_SIZE chunks for the current page.
+  const totalPages = Math.max(1, Math.ceil(filteredList.length / PAGE_SIZE));
+  const paginatedList = useMemo(
+    () => filteredList.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filteredList, currentPage]
+  );
+
+  // Whenever the filter / search criteria change, jump back to page 1 so the
+  // user doesn't end up on a now-empty page. Also clamp when the list shrinks.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterTab, filterClient, filterExec, unmatchedCategory]);
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
 
   const unreadCount = useMemo(() => list.filter((item) => !item.is_read && item.is_client_mail).length, [list]);
   const unmatchedEmails = useMemo(() => list.filter((item) => !item.is_client_mail), [list]);
@@ -685,7 +705,7 @@ function CommunicationsPageContent() {
       <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
         <DataTable
           columns={isUnmatched ? unmatchedColumns : clientColumns}
-          data={filteredList}
+          data={paginatedList}
           loading={loading}
           emptyTitle={isUnmatched ? "No unmatched emails" : "No activities"}
           emptyDescription={isUnmatched ? "All emails are matched to clients" : "Log your first communication"}
@@ -699,6 +719,54 @@ function CommunicationsPageContent() {
             return "";
           }}
         />
+        {filteredList.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200/70 bg-slate-50/40">
+            <p className="text-xs text-slate-500">
+              Showing <span className="font-semibold text-slate-700">{(currentPage - 1) * PAGE_SIZE + 1}</span>
+              {" – "}
+              <span className="font-semibold text-slate-700">{Math.min(currentPage * PAGE_SIZE, filteredList.length)}</span>
+              {" of "}
+              <span className="font-semibold text-slate-700">{filteredList.length}</span>
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                « First
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                ‹ Prev
+              </button>
+              <span className="px-3 py-1 text-xs font-bold bg-white border border-slate-200 rounded-lg text-slate-800">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                Next ›
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage >= totalPages}
+                className="px-2.5 py-1 text-xs font-semibold text-slate-600 rounded-lg hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                Last »
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Log Activity" size="lg">
