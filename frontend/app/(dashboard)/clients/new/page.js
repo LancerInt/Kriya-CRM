@@ -1,10 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDispatch } from "react-redux";
 import { useRouter } from "next/navigation";
 import { createClient, fetchClients } from "@/store/slices/clientSlice";
 import api from "@/lib/axios";
 import { ALL_COUNTRIES } from "@/lib/countries";
+import { lookupPincode } from "@/lib/pincode";
 import PageHeader from "@/components/ui/PageHeader";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/lib/errorHandler";
@@ -34,6 +35,11 @@ export default function NewClientPage() {
     contacts: [{ name: "", email: "", phone: "", designation: "", is_primary: true }],
   });
   const [submitting, setSubmitting] = useState(false);
+  // Pincode → city autocomplete state. `pincodeOptions` holds the cities
+  // returned by the lookup; the user picks one to populate city + state.
+  const [pincodeOptions, setPincodeOptions] = useState([]);
+  const [pincodeLoading, setPincodeLoading] = useState(false);
+  const pincodeTimerRef = useRef(null);
 
   useEffect(() => {
     api.get("/auth/users/").then((r) => {
@@ -42,8 +48,38 @@ export default function NewClientPage() {
     }).catch(() => {});
   }, []);
 
+  // Debounced pincode lookup. Fires whenever country + postal_code are both
+  // set and the user stops typing for 500ms. Results land in pincodeOptions
+  // and surface as a dropdown under the City field.
+  useEffect(() => {
+    if (pincodeTimerRef.current) clearTimeout(pincodeTimerRef.current);
+    const pin = (form.postal_code || "").trim();
+    if (!pin || !form.country) {
+      setPincodeOptions([]);
+      setPincodeLoading(false);
+      return;
+    }
+    setPincodeLoading(true);
+    pincodeTimerRef.current = setTimeout(async () => {
+      const rows = await lookupPincode(pin, form.country);
+      setPincodeOptions(rows);
+      setPincodeLoading(false);
+    }, 500);
+    return () => {
+      if (pincodeTimerRef.current) clearTimeout(pincodeTimerRef.current);
+    };
+  }, [form.postal_code, form.country]);
+
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const applyPincodeMatch = (match) => {
+    setForm((prev) => ({
+      ...prev,
+      city: match.city || prev.city,
+      state: match.state || prev.state,
+    }));
   };
 
   const handleContactChange = (i, e) => {
@@ -111,8 +147,60 @@ export default function NewClientPage() {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Pincode / Postal Code
+                {pincodeLoading && (
+                  <span className="ml-2 text-xs text-indigo-500">looking up…</span>
+                )}
+              </label>
+              <input
+                name="postal_code"
+                value={form.postal_code}
+                onChange={handleChange}
+                placeholder={form.country ? "Type pincode to auto-fill city" : "Pick country first"}
+                disabled={!form.country}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none disabled:bg-gray-50 disabled:text-gray-400"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-              <input name="city" value={form.city} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" />
+              {pincodeOptions.length > 0 ? (
+                <select
+                  name="city"
+                  value={form.city}
+                  onChange={(e) => {
+                    const picked = pincodeOptions.find((o) => o.city === e.target.value);
+                    if (picked) applyPincodeMatch(picked);
+                    else setForm({ ...form, city: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                >
+                  <option value="">Select city</option>
+                  {pincodeOptions.map((o, idx) => (
+                    <option key={`${o.city}-${idx}`} value={o.city}>
+                      {o.city}{o.state ? ` — ${o.state}` : ""}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  name="city"
+                  value={form.city}
+                  onChange={handleChange}
+                  placeholder={form.postal_code && !pincodeLoading ? "Not found — type manually" : "City"}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                />
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">State / Region</label>
+              <input
+                name="state"
+                value={form.state}
+                onChange={handleChange}
+                placeholder="Auto-filled from pincode"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
